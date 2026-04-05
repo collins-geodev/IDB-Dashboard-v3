@@ -2989,6 +2989,126 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 0);
     }
 
+    // Map control: circular magnifier lens that follows the cursor.
+    // When toggled on, a small inset Leaflet map tracks the pointer and
+    // displays the area beneath it at a higher zoom level, so the user
+    // can inspect dense marker clusters without committing to a zoom.
+    function addMapZoomLensControl() {
+        const ZoomLensControl = L.Control.extend({
+            options: { position: 'topleft' },
+            onAdd: function () {
+                const container = L.DomUtil.create('div', 'map-zoom-lens-control leaflet-bar');
+                container.innerHTML = `<button type="button" id="mapZoomLensToggle" title="Toggle zoom lens (magnifier)">🔍+</button>`;
+                L.DomEvent.disableClickPropagation(container);
+                L.DomEvent.disableScrollPropagation(container);
+                return container;
+            }
+        });
+        new ZoomLensControl().addTo(map);
+
+        setTimeout(() => {
+            const btn = document.getElementById('mapZoomLensToggle');
+            const mapEl = document.getElementById('map');
+            if (!btn || !mapEl) return;
+
+            const LENS_SIZE = 190;
+            const LENS_ZOOM_DELTA = 3;
+
+            let active = false;
+            let lensEl = null;
+            let lensMap = null;
+            let lensTile = null;
+
+            // Mirror whichever base layer the main map is currently showing,
+            // so the lens content always matches (OSM / Satellite / Hybrid).
+            const currentBase = {
+                url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                opts: { maxZoom: 19 }
+            };
+            map.on('baselayerchange', (e) => {
+                if (e.layer && e.layer._url) {
+                    currentBase.url = e.layer._url;
+                    currentBase.opts = {
+                        subdomains: e.layer.options.subdomains,
+                        maxZoom: e.layer.options.maxZoom || 20
+                    };
+                    if (lensMap && lensTile) {
+                        lensMap.removeLayer(lensTile);
+                        lensTile = L.tileLayer(currentBase.url, currentBase.opts).addTo(lensMap);
+                    }
+                }
+            });
+
+            const createLens = () => {
+                lensEl = document.createElement('div');
+                lensEl.className = 'map-zoom-lens';
+                lensEl.style.width = LENS_SIZE + 'px';
+                lensEl.style.height = LENS_SIZE + 'px';
+                lensEl.style.display = 'none';
+                mapEl.appendChild(lensEl);
+
+                lensMap = L.map(lensEl, {
+                    zoomControl: false,
+                    attributionControl: false,
+                    dragging: false,
+                    scrollWheelZoom: false,
+                    doubleClickZoom: false,
+                    boxZoom: false,
+                    keyboard: false,
+                    touchZoom: false,
+                    fadeAnimation: false,
+                    zoomAnimation: false,
+                    markerZoomAnimation: false,
+                    inertia: false
+                }).setView(map.getCenter(), Math.min(map.getZoom() + LENS_ZOOM_DELTA, 20));
+                lensTile = L.tileLayer(currentBase.url, currentBase.opts).addTo(lensMap);
+            };
+
+            const destroyLens = () => {
+                if (lensMap) { try { lensMap.remove(); } catch (e) {} }
+                lensMap = null;
+                lensTile = null;
+                if (lensEl && lensEl.parentNode) lensEl.parentNode.removeChild(lensEl);
+                lensEl = null;
+            };
+
+            const onMove = (e) => {
+                if (!lensEl || !lensMap) return;
+                const rect = mapEl.getBoundingClientRect();
+                const x = e.originalEvent.clientX - rect.left;
+                const y = e.originalEvent.clientY - rect.top;
+                lensEl.style.left = (x - LENS_SIZE / 2) + 'px';
+                lensEl.style.top  = (y - LENS_SIZE / 2) + 'px';
+                lensEl.style.display = 'block';
+                const targetZoom = Math.min(map.getZoom() + LENS_ZOOM_DELTA, currentBase.opts.maxZoom || 20);
+                lensMap.setView(e.latlng, targetZoom, { animate: false });
+            };
+            const onOut = () => { if (lensEl) lensEl.style.display = 'none'; };
+            const onZoom = () => {
+                if (!lensMap) return;
+                const targetZoom = Math.min(map.getZoom() + LENS_ZOOM_DELTA, currentBase.opts.maxZoom || 20);
+                lensMap.setZoom(targetZoom, { animate: false });
+            };
+
+            btn.addEventListener('click', () => {
+                active = !active;
+                btn.classList.toggle('active', active);
+                mapEl.classList.toggle('zoom-lens-active', active);
+                if (active) {
+                    createLens();
+                    map.on('mousemove', onMove);
+                    map.on('mouseout', onOut);
+                    map.on('zoomend', onZoom);
+                } else {
+                    map.off('mousemove', onMove);
+                    map.off('mouseout', onOut);
+                    map.off('zoomend', onZoom);
+                    destroyLens();
+                }
+            });
+        }, 0);
+    }
+
     // 7. Render Map (Leaflet)
     function renderMap() {
         if (!map) {
@@ -3020,6 +3140,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Add search + filter controls (built once, data populated on every render)
             addMapSearchControl();
             addMapFilterControl();
+            addMapZoomLensControl();
 
             // Layer order: boundaries (bottom) → labels → data markers (top)
             // Layer order (bottom → top): polygons → HT lines → UT labels

@@ -2522,6 +2522,71 @@ header.exec-header img.exec-header-logo,
     color: #22d3ee;
 }
 
+/* Zoom lens (magnifier) control */
+.map-zoom-lens-control {
+    background: rgba(15, 20, 25, 0.92) !important;
+    border: 1px solid rgba(34, 211, 238, 0.3) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5) !important;
+    padding: 0 !important;
+    margin-bottom: 8px !important;
+    backdrop-filter: blur(8px);
+    overflow: hidden;
+}
+.map-zoom-lens-control button {
+    background: transparent;
+    border: none;
+    color: #e2e8f0;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 7px 10px;
+    line-height: 1;
+    font-family: inherit;
+}
+.map-zoom-lens-control button:hover {
+    color: #22d3ee;
+}
+.map-zoom-lens-control button.active {
+    color: #22d3ee;
+    background: rgba(34, 211, 238, 0.18);
+    text-shadow: 0 0 8px rgba(34, 211, 238, 0.6);
+}
+#map.zoom-lens-active {
+    cursor: crosshair;
+}
+.map-zoom-lens {
+    position: absolute;
+    pointer-events: none;
+    border-radius: 50%;
+    border: 3px solid rgba(34, 211, 238, 0.9);
+    box-shadow:
+        0 0 0 2px rgba(0, 0, 0, 0.55),
+        0 0 22px rgba(34, 211, 238, 0.45),
+        0 14px 36px rgba(0, 0, 0, 0.65);
+    overflow: hidden;
+    z-index: 650;
+    background: #0b1116;
+}
+.map-zoom-lens .leaflet-container {
+    background: #0b1116;
+    width: 100% !important;
+    height: 100% !important;
+}
+.map-zoom-lens::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 10px;
+    height: 10px;
+    transform: translate(-50%, -50%);
+    border: 1.5px solid rgba(34, 211, 238, 0.9);
+    border-radius: 50%;
+    box-shadow: 0 0 6px rgba(0, 0, 0, 0.8);
+    pointer-events: none;
+}
+
 /* Filter control */
 .map-filter-control {
     background: transparent !important;
