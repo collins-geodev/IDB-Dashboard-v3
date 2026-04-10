@@ -1736,6 +1736,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const actRecords = filteredData.length;
         updateModernCard('records', boqRecords, actRecords);
 
+        // --- D. New Poles (Install) --- (calculated early so Ex. New card can subtract it)
+        const boqNew = activeBoqData.reduce((sum, d) => sum + (parseInt(d["NEW POLE"]) || 0), 0);
+        const actNew = filteredData.filter(d =>
+            (d.Pole_Type && d.Pole_Type.toLowerCase().includes('new')) ||
+            (d.Issue_Type && d.Issue_Type.toLowerCase().includes('new'))
+        ).length;
+
+        // --- A2. Total Poles excluding New Poles ---
+        const boqRecordsExNew = Math.max(0, boqRecords - boqNew);
+        const actRecordsExNew = Math.max(0, actRecords - actNew);
+        updateModernCard('records-exnew', boqRecordsExNew, actRecordsExNew);
+
         // --- B. Good Poles (Concrete/Good) ---
         const boqGood = activeBoqData.reduce((sum, d) => sum + (parseInt(d["GOOD"]) || 0), 0);
         const actGood = filteredData.filter(d => (d.Issue_Type === 'Good Condition')).length;
@@ -1746,12 +1758,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const actBad = filteredData.filter(d => (d.Issue_Type !== 'Good Condition')).length;
         updateModernCard('wooden', boqBad, actBad);
 
-        // --- D. New Poles (Install) ---
-        const boqNew = activeBoqData.reduce((sum, d) => sum + (parseInt(d["NEW POLE"]) || 0), 0);
-        const actNew = filteredData.filter(d =>
-            (d.Pole_Type && d.Pole_Type.toLowerCase().includes('new')) ||
-            (d.Issue_Type && d.Issue_Type.toLowerCase().includes('new'))
-        ).length;
         updateModernCard('users', boqNew, actNew);
 
         // --- E. Feeders ---
