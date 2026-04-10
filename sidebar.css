@@ -5,10 +5,10 @@
 }
 
 .sidebar {
-    width: 250px;
+    width: 210px;
     background-color: var(--card-bg);
     border-right: 1px solid var(--border-color);
-    padding: 2rem 1.5rem;
+    padding: 2rem 1.2rem;
     position: sticky;
     top: 0;
     height: 100vh;

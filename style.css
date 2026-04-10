@@ -865,9 +865,9 @@ footer {
 /* --- Modern KPI Cards --- */
 .kpi-section {
     display: grid;
-    grid-template-columns: repeat(7, 1fr);
-    /* Force 7 columns on one line */
-    gap: 0.5rem;
+    grid-template-columns: repeat(8, 1fr);
+    /* Force 8 columns on one line */
+    gap: 0.4rem;
     /* Reduced margin */
     margin-bottom: 1.5rem;
 }
@@ -877,14 +877,16 @@ footer {
     /* Dark card bg */
     border-radius: 8px;
     /* Reduced radius */
-    padding: 0.75rem;
-    /* Reduced padding */
+    padding: 0.6rem;
+    /* Reduced padding (tightened for 8-col row) */
     position: relative;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
     display: flex;
     flex-direction: column;
     justify-content: space-between;
     overflow: hidden;
+    min-width: 0;
+    /* Allow grid cells to shrink below content size */
     min-height: 120px;
     /* Reduced min-height */
 }
