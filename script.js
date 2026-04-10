@@ -1719,10 +1719,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const topCompBarEl = document.getElementById('topCardCompletionBar');
         if (topCompRateEl && topCompBarEl) {
             let completionRate = 0;
-            const actRecords = filteredData.length;
-            const totalBoq = activeBoqData.reduce((sum, d) => sum + (parseInt(d["POLES Grand Total"]) || 0), 0);
-            if (totalBoq > 0) {
-                completionRate = (actRecords / totalBoq) * 100;
+            // Mirror the TOTAL POLES (EX. NEW) KPI: exclude new poles from both sides
+            const totalBoqAll = activeBoqData.reduce((sum, d) => sum + (parseInt(d["POLES Grand Total"]) || 0), 0);
+            const totalBoqNew = activeBoqData.reduce((sum, d) => sum + (parseInt(d["NEW POLE"]) || 0), 0);
+            const totalBoqExNew = Math.max(0, totalBoqAll - totalBoqNew);
+            const actNewCount = filteredData.filter(d =>
+                (d.Pole_Type && d.Pole_Type.toLowerCase().includes('new')) ||
+                (d.Issue_Type && d.Issue_Type.toLowerCase().includes('new'))
+            ).length;
+            const actRecordsExNew = Math.max(0, filteredData.length - actNewCount);
+            if (totalBoqExNew > 0) {
+                completionRate = (actRecordsExNew / totalBoqExNew) * 100;
             }
             if (completionRate > 100) completionRate = 100;
             topCompRateEl.textContent = completionRate.toFixed(1) + '%';
