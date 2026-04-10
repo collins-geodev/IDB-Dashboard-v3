@@ -1721,19 +1721,19 @@ document.addEventListener('DOMContentLoaded', () => {
         const topCompRateExNewEl = document.getElementById('topCardCompletionRateExNew');
         const topCompBarExNewEl = document.getElementById('topCardCompletionBarExNew');
 
-        const totalBoqAll = activeBoqData.reduce((sum, d) => sum + (parseInt(d["POLES Grand Total"]) || 0), 0);
+        const totalBoqAllTop = activeBoqData.reduce((sum, d) => sum + (parseInt(d["POLES Grand Total"]) || 0), 0);
         const totalBoqNewTop = activeBoqData.reduce((sum, d) => sum + (parseInt(d["NEW POLE"]) || 0), 0);
-        const totalBoqExNew = Math.max(0, totalBoqAll - totalBoqNewTop);
-        const actRecordsAll = filteredData.length;
-        const actNewCount = filteredData.filter(d =>
+        const totalBoqExNewTop = Math.max(0, totalBoqAllTop - totalBoqNewTop);
+        const actRecordsAllTop = filteredData.length;
+        const actNewCountTop = filteredData.filter(d =>
             (d.Pole_Type && d.Pole_Type.toLowerCase().includes('new')) ||
             (d.Issue_Type && d.Issue_Type.toLowerCase().includes('new'))
         ).length;
-        const actRecordsExNew = Math.max(0, actRecordsAll - actNewCount);
+        const actRecordsExNewTop = Math.max(0, actRecordsAllTop - actNewCountTop);
 
         // Incl. New Poles (Total Poles card base)
         if (topCompRateEl && topCompBarEl) {
-            let rateIncl = totalBoqAll > 0 ? (actRecordsAll / totalBoqAll) * 100 : 0;
+            let rateIncl = totalBoqAllTop > 0 ? (actRecordsAllTop / totalBoqAllTop) * 100 : 0;
             if (rateIncl > 100) rateIncl = 100;
             topCompRateEl.textContent = rateIncl.toFixed(1) + '%';
             topCompBarEl.style.width = rateIncl + '%';
@@ -1741,7 +1741,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Excl. New Poles (Total Poles Ex. New card base)
         if (topCompRateExNewEl && topCompBarExNewEl) {
-            let rateExcl = totalBoqExNew > 0 ? (actRecordsExNew / totalBoqExNew) * 100 : 0;
+            let rateExcl = totalBoqExNewTop > 0 ? (actRecordsExNewTop / totalBoqExNewTop) * 100 : 0;
             if (rateExcl > 100) rateExcl = 100;
             topCompRateExNewEl.textContent = rateExcl.toFixed(1) + '%';
             topCompBarExNewEl.style.width = rateExcl + '%';
