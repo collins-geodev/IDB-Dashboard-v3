@@ -27,8 +27,8 @@
     <!-- ApexCharts -->
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <!-- Custom CSS -->
-    <link rel="stylesheet" href="style.css?v=20260410e">
-    <link rel="stylesheet" href="sidebar.css?v=20260410e">
+    <link rel="stylesheet" href="style.css?v=20260410f">
+    <link rel="stylesheet" href="sidebar.css?v=20260410f">
     <link rel="stylesheet" href="insights.css?v=20260405w">
     <link rel="stylesheet" href="ai-styles.css?v=20260405w">
     <link rel="stylesheet" href="switch_styles.css?v=20260405w">
@@ -233,21 +233,35 @@
                         </div>
                     </div>
 
-                    <!-- Project Completion Rate Card -->
+                    <!-- Project Completion Rate Card (split: Incl. New / Excl. New) -->
                     <div class="top-insight-card top-insight-completion">
-                        <div class="completion-header">
-                            <div class="completion-label-group">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
-                                    fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round"
-                                    stroke-linejoin="round">
-                                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
-                                </svg>
-                                <span class="top-insight-label" style="font-weight:600;">Project Completion Rate</span>
-                            </div>
-                            <span id="topCardCompletionRate" class="completion-rate-value">0%</span>
+                        <div class="completion-label-group completion-title-row">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
+                                fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round">
+                                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                            </svg>
+                            <span class="top-insight-label" style="font-weight:600;">Project Completion Rate</span>
                         </div>
-                        <div class="completion-bar-track">
-                            <div id="topCardCompletionBar" class="completion-bar-fill" style="width: 0%;"></div>
+                        <div class="completion-split">
+                            <div class="completion-split-row">
+                                <div class="completion-header">
+                                    <span class="completion-sub-label">Incl. New Poles</span>
+                                    <span id="topCardCompletionRate" class="completion-rate-value blue">0%</span>
+                                </div>
+                                <div class="completion-bar-track">
+                                    <div id="topCardCompletionBar" class="completion-bar-fill blue" style="width: 0%;"></div>
+                                </div>
+                            </div>
+                            <div class="completion-split-row">
+                                <div class="completion-header">
+                                    <span class="completion-sub-label">Excl. New Poles</span>
+                                    <span id="topCardCompletionRateExNew" class="completion-rate-value purple">0%</span>
+                                </div>
+                                <div class="completion-bar-track">
+                                    <div id="topCardCompletionBarExNew" class="completion-bar-fill purple" style="width: 0%;"></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -808,7 +822,7 @@
 
     <!-- jsPDF for PDF Generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="script.js?v=20260410b"></script>
+    <script src="script.js?v=20260410f"></script>
 </body>
 
 </html>

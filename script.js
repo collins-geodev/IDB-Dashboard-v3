@@ -1715,25 +1715,36 @@ document.addEventListener('DOMContentLoaded', () => {
             topActiveEl.textContent = activeUsersCount.toLocaleString();
         }
 
+        // Split Project Completion Rate: Incl. New Poles and Excl. New Poles
         const topCompRateEl = document.getElementById('topCardCompletionRate');
         const topCompBarEl = document.getElementById('topCardCompletionBar');
+        const topCompRateExNewEl = document.getElementById('topCardCompletionRateExNew');
+        const topCompBarExNewEl = document.getElementById('topCardCompletionBarExNew');
+
+        const totalBoqAll = activeBoqData.reduce((sum, d) => sum + (parseInt(d["POLES Grand Total"]) || 0), 0);
+        const totalBoqNewTop = activeBoqData.reduce((sum, d) => sum + (parseInt(d["NEW POLE"]) || 0), 0);
+        const totalBoqExNew = Math.max(0, totalBoqAll - totalBoqNewTop);
+        const actRecordsAll = filteredData.length;
+        const actNewCount = filteredData.filter(d =>
+            (d.Pole_Type && d.Pole_Type.toLowerCase().includes('new')) ||
+            (d.Issue_Type && d.Issue_Type.toLowerCase().includes('new'))
+        ).length;
+        const actRecordsExNew = Math.max(0, actRecordsAll - actNewCount);
+
+        // Incl. New Poles (Total Poles card base)
         if (topCompRateEl && topCompBarEl) {
-            let completionRate = 0;
-            // Mirror the TOTAL POLES (EX. NEW) KPI: exclude new poles from both sides
-            const totalBoqAll = activeBoqData.reduce((sum, d) => sum + (parseInt(d["POLES Grand Total"]) || 0), 0);
-            const totalBoqNew = activeBoqData.reduce((sum, d) => sum + (parseInt(d["NEW POLE"]) || 0), 0);
-            const totalBoqExNew = Math.max(0, totalBoqAll - totalBoqNew);
-            const actNewCount = filteredData.filter(d =>
-                (d.Pole_Type && d.Pole_Type.toLowerCase().includes('new')) ||
-                (d.Issue_Type && d.Issue_Type.toLowerCase().includes('new'))
-            ).length;
-            const actRecordsExNew = Math.max(0, filteredData.length - actNewCount);
-            if (totalBoqExNew > 0) {
-                completionRate = (actRecordsExNew / totalBoqExNew) * 100;
-            }
-            if (completionRate > 100) completionRate = 100;
-            topCompRateEl.textContent = completionRate.toFixed(1) + '%';
-            topCompBarEl.style.width = completionRate + '%';
+            let rateIncl = totalBoqAll > 0 ? (actRecordsAll / totalBoqAll) * 100 : 0;
+            if (rateIncl > 100) rateIncl = 100;
+            topCompRateEl.textContent = rateIncl.toFixed(1) + '%';
+            topCompBarEl.style.width = rateIncl + '%';
+        }
+
+        // Excl. New Poles (Total Poles Ex. New card base)
+        if (topCompRateExNewEl && topCompBarExNewEl) {
+            let rateExcl = totalBoqExNew > 0 ? (actRecordsExNew / totalBoqExNew) * 100 : 0;
+            if (rateExcl > 100) rateExcl = 100;
+            topCompRateExNewEl.textContent = rateExcl.toFixed(1) + '%';
+            topCompBarExNewEl.style.width = rateExcl + '%';
         }
 
         // 1. Calculate Metrics

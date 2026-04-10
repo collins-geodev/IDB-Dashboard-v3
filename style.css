@@ -1459,6 +1459,48 @@ footer {
     transition: width 0.5s ease-in-out;
 }
 
+/* Split completion card: two stacked rows (Incl. / Excl. New Poles) */
+.completion-title-row {
+    margin-bottom: 0.7rem;
+}
+
+.completion-split {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+}
+
+.completion-split-row .completion-header {
+    margin-bottom: 0.35rem;
+}
+
+.completion-sub-label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+    letter-spacing: 0.2px;
+}
+
+.completion-split-row .completion-rate-value {
+    font-size: 1.15rem;
+}
+
+.completion-rate-value.blue {
+    color: #3b82f6;
+}
+
+.completion-rate-value.purple {
+    color: #8b5cf6;
+}
+
+.completion-bar-fill.blue {
+    background: #3b82f6;
+}
+
+.completion-bar-fill.purple {
+    background: #8b5cf6;
+}
+
 /* ============================================
    HAMBURGER MENU & MOBILE SIDEBAR
    ============================================ */
