@@ -1493,12 +1493,28 @@ footer {
     color: #8b5cf6;
 }
 
+.completion-rate-value.green {
+    color: #10b981;
+}
+
+.completion-rate-value.red {
+    color: #ef4444;
+}
+
 .completion-bar-fill.blue {
     background: #3b82f6;
 }
 
 .completion-bar-fill.purple {
     background: #8b5cf6;
+}
+
+.completion-bar-fill.green {
+    background: #10b981;
+}
+
+.completion-bar-fill.red {
+    background: #ef4444;
 }
 
 /* ============================================
