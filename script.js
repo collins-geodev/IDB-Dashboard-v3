@@ -29,6 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let globalData = [];
     let filteredData = [];
     let boqData = []; // Store BOQ Data
+    let duplicateInfo = { poles: 0, buildings: 0, poleDuplicates: [], buildingDuplicates: [] };
     let viewMode = 'field'; // 'field' or 'boq'
     let currentPage = 1;
     const rowsPerPage = 25;
@@ -469,6 +470,66 @@ document.addEventListener('DOMContentLoaded', () => {
         return username;
     }
 
+    // Detect duplicate SLRNs in the dataset and populate duplicateInfo
+    function detectDuplicateSLRNs(data) {
+        const poleCounts = {};
+        const buildingCounts = {};
+
+        data.forEach(item => {
+            // Count pole SLRNs
+            const poleSLRN = (item["Lt PoleSLRN"] || item["LT Pole No"] || "").toString().trim();
+            if (poleSLRN) {
+                poleCounts[poleSLRN] = (poleCounts[poleSLRN] || 0) + 1;
+            }
+
+            // Count building SLRNs (semicolon-separated)
+            const bldgField = item["Associated Buildings SLRN"] || "";
+            bldgField.split(";").forEach(s => {
+                const trimmed = s.trim();
+                if (trimmed) {
+                    buildingCounts[trimmed] = (buildingCounts[trimmed] || 0) + 1;
+                }
+            });
+        });
+
+        const poleDuplicates = Object.entries(poleCounts).filter(([, count]) => count > 1);
+        const buildingDuplicates = Object.entries(buildingCounts).filter(([, count]) => count > 1);
+
+        duplicateInfo = {
+            poles: poleDuplicates.length,
+            buildings: buildingDuplicates.length,
+            poleDuplicates: poleDuplicates,     // [[slrn, count], ...]
+            buildingDuplicates: buildingDuplicates
+        };
+
+        if (poleDuplicates.length || buildingDuplicates.length) {
+            console.warn(`[Data Quality] Duplicates detected — Pole SLRNs: ${poleDuplicates.length}, Building SLRNs: ${buildingDuplicates.length}`);
+            if (poleDuplicates.length) console.table(poleDuplicates.slice(0, 20).map(([slrn, count]) => ({ SLRN: slrn, Occurrences: count })));
+            if (buildingDuplicates.length) console.table(buildingDuplicates.slice(0, 20).map(([slrn, count]) => ({ SLRN: slrn, Occurrences: count })));
+        }
+
+        showDuplicateBanner();
+    }
+
+    // Show or hide the duplicate warning banner
+    function showDuplicateBanner() {
+        const banner = document.getElementById('duplicate-warning-banner');
+        if (!banner) return;
+
+        if (duplicateInfo.poles === 0 && duplicateInfo.buildings === 0) {
+            banner.style.display = 'none';
+            return;
+        }
+
+        const parts = [];
+        if (duplicateInfo.poles > 0) parts.push(`${duplicateInfo.poles} duplicate Pole SLRN${duplicateInfo.poles > 1 ? 's' : ''}`);
+        if (duplicateInfo.buildings > 0) parts.push(`${duplicateInfo.buildings} duplicate Building SLRN${duplicateInfo.buildings > 1 ? 's' : ''}`);
+
+        const msgEl = document.getElementById('duplicate-warning-msg');
+        if (msgEl) msgEl.textContent = `Data Quality Notice: ${parts.join(' and ')} detected. KPI counts reflect unique values only.`;
+        banner.style.display = 'flex';
+    }
+
     // Helper to simulate issues (for demo purposes)
     function simulateIssue(item) {
         // Deterministic 'random' based on ID or something, or just random
@@ -546,6 +607,9 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             globalData = fieldData;
             filteredData = fieldData;
+
+            // Detect duplicate SLRNs before rendering
+            detectDuplicateSLRNs(fieldData);
 
             // Process BOQ Data
             boqData = boq;
@@ -1749,31 +1813,56 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 1. Calculate Metrics
 
-        // --- A. Records (Poles) ---
+        // --- A. Records (Poles) — unique by SLRN ---
         const boqRecords = activeBoqData.reduce((sum, d) => sum + (parseInt(d["POLES Grand Total"]) || 0), 0);
-        const actRecords = filteredData.length;
+        const uniquePoleSLRNs = new Set();
+        filteredData.forEach(item => {
+            const slrn = (item["Lt PoleSLRN"] || item["LT Pole No"] || "").toString().trim();
+            if (slrn) uniquePoleSLRNs.add(slrn);
+        });
+        const actRecords = uniquePoleSLRNs.size;
         updateModernCard('records', boqRecords, actRecords);
 
-        // --- D. New Poles (Install) --- (calculated early so Ex. New card can subtract it)
+        // --- D. New Poles (Install) — unique by SLRN --- (calculated early so Ex. New card can subtract it)
         const boqNew = activeBoqData.reduce((sum, d) => sum + (parseInt(d["NEW POLE"]) || 0), 0);
-        const actNew = filteredData.filter(d =>
-            (d.Pole_Type && d.Pole_Type.toLowerCase().includes('new')) ||
-            (d.Issue_Type && d.Issue_Type.toLowerCase().includes('new'))
-        ).length;
+        const newPoleSLRNs = new Set();
+        filteredData.forEach(item => {
+            const isNew = (item.Pole_Type && item.Pole_Type.toLowerCase().includes('new')) ||
+                          (item.Issue_Type && item.Issue_Type.toLowerCase().includes('new'));
+            if (isNew) {
+                const slrn = (item["Lt PoleSLRN"] || item["LT Pole No"] || "").toString().trim();
+                if (slrn) newPoleSLRNs.add(slrn);
+            }
+        });
+        const actNew = newPoleSLRNs.size;
 
         // --- A2. Total Poles excluding New Poles ---
         const boqRecordsExNew = Math.max(0, boqRecords - boqNew);
         const actRecordsExNew = Math.max(0, actRecords - actNew);
         updateModernCard('records-exnew', boqRecordsExNew, actRecordsExNew);
 
-        // --- B. Good Poles (Concrete/Good) ---
+        // --- B. Good Poles (Concrete/Good) — unique by SLRN ---
         const boqGood = activeBoqData.reduce((sum, d) => sum + (parseInt(d["GOOD"]) || 0), 0);
-        const actGood = filteredData.filter(d => (d.Issue_Type === 'Good Condition')).length;
+        const goodPoleSLRNs = new Set();
+        filteredData.forEach(item => {
+            if (item.Issue_Type === 'Good Condition') {
+                const slrn = (item["Lt PoleSLRN"] || item["LT Pole No"] || "").toString().trim();
+                if (slrn) goodPoleSLRNs.add(slrn);
+            }
+        });
+        const actGood = goodPoleSLRNs.size;
         updateModernCard('concrete', boqGood, actGood);
 
-        // --- C. Bad Poles (Wooden/Replace) ---
+        // --- C. Bad Poles (Wooden/Replace) — unique by SLRN ---
         const boqBad = activeBoqData.reduce((sum, d) => sum + (parseInt(d["BAD"]) || 0), 0);
-        const actBad = filteredData.filter(d => (d.Issue_Type !== 'Good Condition')).length;
+        const badPoleSLRNs = new Set();
+        filteredData.forEach(item => {
+            if (item.Issue_Type !== 'Good Condition') {
+                const slrn = (item["Lt PoleSLRN"] || item["LT Pole No"] || "").toString().trim();
+                if (slrn) badPoleSLRNs.add(slrn);
+            }
+        });
+        const actBad = badPoleSLRNs.size;
         updateModernCard('wooden', boqBad, actBad);
 
         updateModernCard('users', boqNew, actNew);
