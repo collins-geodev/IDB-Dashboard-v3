@@ -546,9 +546,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize Dashboard - Auto Fetch
     // CRITICAL: To update data, upload your file to Supabase as "converted_data_latest.json".
     // Do NOT change this code. Just overwrite the file in Supabase.
-    const fieldDataUrl = "https://zgypltdsqjhftnxadunu.supabase.co/storage/v1/object/public/dashboard-assets/converted_data_latest.json";
+    const fieldDataUrl = "https://mvfguayhttcdeibomjru.supabase.co/storage/v1/object/public/dashboard-assets/converted_data_latest.json";
 
-    const boqDataUrl = "https://zgypltdsqjhftnxadunu.supabase.co/storage/v1/object/public/dashboard-assets/BOQ-IDB.json";
+    const boqDataUrl = "https://mvfguayhttcdeibomjru.supabase.co/storage/v1/object/public/dashboard-assets/BOQ-IDB.json";
 
     const fetchWithFallback = async (primaryUrl, localPath, githubRawUrl) => {
         try {
