@@ -603,6 +603,13 @@ document.addEventListener('DOMContentLoaded', () => {
             console.warn('[Dashboard] Skipping processing — data not available.');
             return;
         }
+        // Some exports wrap the records under a sheet key (e.g. {"Sheet2": [...]})
+        if (!Array.isArray(fieldData) && fieldData && typeof fieldData === 'object') {
+            fieldData = fieldData.Sheet2 || fieldData.Sheet1 || Object.values(fieldData).find(Array.isArray) || [];
+        }
+        if (!Array.isArray(boq) && boq && typeof boq === 'object') {
+            boq = boq.Sheet2 || boq.Sheet1 || Object.values(boq).find(Array.isArray) || [];
+        }
         try {
             // Process Field Data
             fieldData.forEach(item => {
