@@ -546,43 +546,47 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize Dashboard - Auto Fetch
     // CRITICAL: To update data, upload your file to Supabase as "converted_data_latest.json".
     // Do NOT change this code. Just overwrite the file in Supabase.
-    const fieldDataUrl = "https://mvfguayhttcdeibomjru.supabase.co/storage/v1/object/public/dashboard-assets/converted_data_latest.json";
+    const fieldDataUrls = [
+        "https://mvfguayhttcdeibomjru.supabase.co/storage/v1/object/public/dashboard-assets/converted_data_latest.json",
+        "https://zgypltdsqjhftnxadunu.supabase.co/storage/v1/object/public/dashboard-assets/converted_data_latest.json"
+    ];
 
-    const boqDataUrl = "https://mvfguayhttcdeibomjru.supabase.co/storage/v1/object/public/dashboard-assets/BOQ-IDB.json";
+    const boqDataUrls = [
+        "https://mvfguayhttcdeibomjru.supabase.co/storage/v1/object/public/dashboard-assets/BOQ-IDB.json",
+        "https://zgypltdsqjhftnxadunu.supabase.co/storage/v1/object/public/dashboard-assets/BOQ-IDB.json"
+    ];
 
-    const fetchWithFallback = async (primaryUrl, localPath, githubRawUrl) => {
-        try {
-            const res = await fetch(primaryUrl + '?t=' + new Date().getTime());
-            if (!res.ok) throw new Error('Supabase network response was not ok');
-            return await res.json();
-        } catch (error) {
-            console.warn(`Fetch from Supabase failed, falling back to local file ${localPath}...`, error);
+    const fetchWithFallback = async (primaryUrls, localPath, githubRawUrl) => {
+        const urls = Array.isArray(primaryUrls) ? primaryUrls : [primaryUrls];
+        for (const url of urls) {
             try {
-                const resFallback = await fetch(localPath + '?t=' + new Date().getTime());
-                if (!resFallback.ok) throw new Error('Fallback network response was not ok');
-                return await resFallback.json();
-            } catch (fallbackError) {
-                console.warn(`Local fallback also failed, trying GitHub Raw Content...`, fallbackError);
-                try {
-                    const resGithub = await fetch(githubRawUrl + '?t=' + new Date().getTime());
-                    if (!resGithub.ok) throw new Error('GitHub Raw network response was not ok');
-                    return await resGithub.json();
-                } catch (finalError) {
-                    console.error('All data loading mechanisms failed.', finalError);
-                    throw finalError; // Triggers the alert
-                }
+                const res = await fetch(url + '?t=' + new Date().getTime());
+                if (!res.ok) throw new Error(`Supabase response not ok (${url})`);
+                return await res.json();
+            } catch (error) {
+                console.warn(`Fetch from ${url} failed, trying next source...`, error);
             }
+        }
+        try {
+            const resFallback = await fetch(localPath + '?t=' + new Date().getTime());
+            if (!resFallback.ok) throw new Error('Fallback network response was not ok');
+            return await resFallback.json();
+        } catch (fallbackError) {
+            console.warn(`Local fallback also failed, trying GitHub Raw Content...`, fallbackError);
+            const resGithub = await fetch(githubRawUrl + '?t=' + new Date().getTime());
+            if (!resGithub.ok) throw new Error('GitHub Raw network response was not ok');
+            return await resGithub.json();
         }
     };
 
     Promise.all([
         fetchWithFallback(
-            fieldDataUrl,
+            fieldDataUrls,
             './converted_data_latest.json',
             'https://raw.githubusercontent.com/Collins76/IDB-2.0-Assets-Tracking-Dashboard-V2/main/converted_data_latest.json'
         ),
         fetchWithFallback(
-            boqDataUrl,
+            boqDataUrls,
             './BOQ-IDB.json',
             'https://raw.githubusercontent.com/Collins76/IDB-2.0-Assets-Tracking-Dashboard-V2/main/BOQ-IDB.json'
         )
