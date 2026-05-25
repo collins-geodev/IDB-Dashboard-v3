@@ -610,17 +610,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!Array.isArray(boq) && boq && typeof boq === 'object') {
             boq = boq.Sheet2 || boq.Sheet1 || Object.values(boq).find(Array.isArray) || [];
         }
-        // Feeder blocklist — Apata is excluded from V2. Match case-insensitively
-        // and ignore spacing so minor source variants are also dropped.
-        const BLOCKED_FEEDERS = ["11-IgbobiINJ-T1-Apata"];
-        const normalizeFeederName = (name) => (name || '').toString().trim().toLowerCase().replace(/\s+/g, ' ');
-        const blockedSet = new Set(BLOCKED_FEEDERS.map(normalizeFeederName));
-        const beforeFieldBlock = fieldData.length;
-        fieldData = fieldData.filter(item => !blockedSet.has(normalizeFeederName(item.Feeder)));
-        const beforeBoqBlock = boq.length;
-        boq = boq.filter(item => !blockedSet.has(normalizeFeederName(item["FEEDER NAME"])));
-        console.log(`[V2 Blocklist] Field rows: ${beforeFieldBlock} -> ${fieldData.length}; BOQ rows: ${beforeBoqBlock} -> ${boq.length}`);
-
         try {
             // Process Field Data
             fieldData.forEach(item => {
