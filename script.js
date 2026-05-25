@@ -255,7 +255,7 @@ document.addEventListener('DOMContentLoaded', () => {
             dtFilter:       { onChange: () => { updateUpriserOptions(); applyFilters(); } },
             upriserFilter:  { onChange: applyFilters },
             materialFilter: { allValue: '', onChange: applyFilters },
-            dateFilter:     { onChange: applyFilters },
+            dateFilter:     { onChange: handleDateChange },
         };
 
         for (const [id, cfg] of Object.entries(filterConfigs)) {
@@ -1474,7 +1474,8 @@ document.addEventListener('DOMContentLoaded', () => {
         refreshAllMultiSelects();
     }
 
-    function populateDependentFilters(data) {
+    function populateDependentFilters(data, opts = {}) {
+        const { skipDate = false } = opts;
         const buSelect = document.getElementById('buFilter');
         const utSelect = document.getElementById('utFilter');
         const userSelect = document.getElementById('userFilter');
@@ -1507,7 +1508,9 @@ document.addEventListener('DOMContentLoaded', () => {
         dtSelect.innerHTML = '<option value="All">All DTs</option>';
         upriserSelect.innerHTML = '<option value="All">All Uprisers</option>';
         feederSelect.innerHTML = '<option value="All">All Feeders</option>';
-        dateSelect.innerHTML = '<option value="All">All Dates</option>';
+        if (!skipDate) {
+            dateSelect.innerHTML = '<option value="All">All Dates</option>';
+        }
 
         // Dynamically populate Pole Material filter from actual data
         materialSelect.innerHTML = '<option value="">All Materials</option>';
@@ -1595,7 +1598,31 @@ document.addEventListener('DOMContentLoaded', () => {
         populateSelect(dtSelect, dts);
         populateSelect(upriserSelect, uprisers);
         populateSelect(feederSelect, feeders);
-        populateSelect(dateSelect, dates);
+        if (!skipDate) populateSelect(dateSelect, dates);
+    }
+
+    function handleDateChange() {
+        const vendorVals = multiSelects.vendorFilter?.getValues();
+        const dateVals = multiSelects.dateFilter?.getValues();
+
+        let relevantData = globalData;
+        if (vendorVals) {
+            relevantData = relevantData.filter(item => vendorVals.includes(item["Vendor_Name"]));
+        }
+        if (dateVals) {
+            relevantData = relevantData.filter(item => {
+                const itemDate = (item["Date/timestamp"] || '').split(' ')[0];
+                return dateVals.includes(itemDate);
+            });
+        }
+
+        populateDependentFilters(relevantData, { skipDate: true });
+
+        ['buFilter', 'utFilter', 'userFilter', 'feederFilter', 'dtFilter', 'upriserFilter', 'materialFilter'].forEach(id => {
+            multiSelects[id]?.refresh();
+        });
+
+        applyFilters();
     }
 
     function handleVendorChange() {
@@ -1624,14 +1651,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const feederVals = multiSelects.feederFilter.getValues();
         const dtSelect = document.getElementById('dtFilter');
 
-        // Respect Vendor Context
+        // Respect Vendor + Date Context
         const vendorVals = multiSelects.vendorFilter.getValues();
+        const dateVals = multiSelects.dateFilter?.getValues();
         let contextData = globalData;
         if (vendorVals) {
-            contextData = globalData.filter(item => vendorVals.includes(item["Vendor_Name"]));
+            contextData = contextData.filter(item => vendorVals.includes(item["Vendor_Name"]));
+        }
+        if (dateVals) {
+            contextData = contextData.filter(item => {
+                const itemDate = (item["Date/timestamp"] || '').split(' ')[0];
+                return dateVals.includes(itemDate);
+            });
         }
 
-        // Get relevant data based on Feeder selection within Vendor Context
+        // Get relevant data based on Feeder selection within Vendor + Date Context
         let relevantData = contextData;
         if (feederVals) {
             relevantData = contextData.filter(item => feederVals.includes(item["Feeder"]));
@@ -1667,11 +1701,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const feederVals = multiSelects.feederFilter.getValues();
         const upriserSelect = document.getElementById('upriserFilter');
 
-        // Respect Vendor Context
+        // Respect Vendor + Date Context
         const vendorVals = multiSelects.vendorFilter.getValues();
+        const dateVals = multiSelects.dateFilter?.getValues();
         let contextData = globalData;
         if (vendorVals) {
-            contextData = globalData.filter(item => vendorVals.includes(item["Vendor_Name"]));
+            contextData = contextData.filter(item => vendorVals.includes(item["Vendor_Name"]));
+        }
+        if (dateVals) {
+            contextData = contextData.filter(item => {
+                const itemDate = (item["Date/timestamp"] || '').split(' ')[0];
+                return dateVals.includes(itemDate);
+            });
         }
 
         // Get relevant data based on DT (and implicitly Feeder)
