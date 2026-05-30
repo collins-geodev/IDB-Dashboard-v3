@@ -118,40 +118,58 @@
     var password = $("suPass").value;
     var fullName = $("suName").value.trim();
 
-    sb.auth
-      .signUp({
+    // Create a PRE-CONFIRMED viewer account via the signup-viewer Edge
+    // Function (service role). No confirmation email is sent, so the user
+    // can use the account immediately — no waiting on email delivery.
+    var resetBtn = function () {
+      btn.disabled = false;
+      btn.textContent = "Create Viewer Account";
+    };
+
+    fetch(IDB.URL + "/functions/v1/signup-viewer", {
+      method: "POST",
+      headers: { apikey: IDB.ANON_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({
         email: email,
         password: password,
-        options: { data: { full_name: fullName || email.split("@")[0] } },
+        full_name: fullName,
+      }),
+    })
+      .then(function (r) {
+        return r.json().then(function (b) {
+          return { status: r.status, body: b };
+        });
       })
       .then(function (res) {
-        if (res.error) {
-          showMsg(res.error.message, "error");
-          btn.disabled = false;
-          btn.textContent = "Create Viewer Account";
+        if (res.status !== 200 || !res.body || !res.body.ok) {
+          showMsg(
+            (res.body && res.body.error) || "Sign up failed. Please try again.",
+            "error"
+          );
+          resetBtn();
           return;
         }
-        // If confirmations are OFF, a session is returned -> log straight in.
-        if (res.data.session && res.data.user) {
-          showMsg("Account created. Signing you in…", "ok");
-          withTimeout(IDB.recordLogin(res.data.user), 5000).then(function () {
-            redirectFor("viewer");
+        // Account is ready immediately -> sign in and go to the dashboard.
+        showMsg("Account created. Signing you in…", "ok");
+        sb.auth
+          .signInWithPassword({ email: email, password: password })
+          .then(function (si) {
+            if (si.error || !si.data.user) {
+              // Created, but auto sign-in failed -> let them sign in manually.
+              showMsg("Account created! You can now sign in.", "ok");
+              resetBtn();
+              setTab("signin");
+              $("siEmail").value = email;
+              return;
+            }
+            withTimeout(IDB.recordLogin(si.data.user), 5000).then(function () {
+              redirectFor("viewer");
+            });
           });
-        } else {
-          showMsg(
-            "Account created! Please check your email to confirm your address, then sign in.",
-            "ok"
-          );
-          btn.disabled = false;
-          btn.textContent = "Create Viewer Account";
-          setTab("signin");
-          $("siEmail").value = email;
-        }
       })
       .catch(function (err) {
         showMsg(err.message || "Sign up failed", "error");
-        btn.disabled = false;
-        btn.textContent = "Create Viewer Account";
+        resetBtn();
       });
   });
 
