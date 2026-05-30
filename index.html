@@ -70,8 +70,11 @@
                         Charts</a>
                     <a href="#dt-analysis" class="nav-link sub-link" style="font-size: 0.9rem; padding: 0.5rem;">📝
                         Table</a>
+                    <a href="admin.html" class="nav-link sub-link" id="nav-admin"
+                        style="font-size: 0.9rem; padding: 0.5rem;">🛡️ Admin</a>
                 </div>
             </div>
+            <div id="auth-status" class="sidebar-auth"></div>
         </nav>
 
         <main class="main-content">
@@ -836,6 +839,11 @@
 
     <!-- jsPDF for PDF Generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <!-- Auth + audit trail -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.0/dist/umd/supabase.min.js"></script>
+    <script src="supabase-client.js?v=20260530a"></script>
+    <script src="auth-footprint.js?v=20260530b"></script>
+    <script src="dashboard-auth.js?v=20260530a"></script>
     <script src="script.js?v=20260525c"></script>
 </body>
 

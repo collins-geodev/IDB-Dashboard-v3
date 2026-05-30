@@ -86,4 +86,63 @@
     }
 }
 
+/* Sidebar auth status control (pinned to the bottom) */
+.sidebar-auth {
+    margin-top: auto;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.sidebar-auth .sa-login {
+    display: block;
+    padding: 0.7rem 1rem;
+    text-align: center;
+    color: hsl(var(--primary-foreground));
+    background-color: hsl(var(--primary));
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.sidebar-auth .sa-login:hover {
+    filter: brightness(1.08);
+}
+
+.sidebar-auth .sa-user {
+    font-size: 0.82rem;
+    color: var(--text-color);
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sidebar-auth .sa-role {
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.sidebar-auth .sa-logout {
+    margin-top: 0.2rem;
+    padding: 0.5rem 0.8rem;
+    background-color: hsl(var(--destructive) / 0.15);
+    color: #ff8a8a;
+    border: 1px solid hsl(var(--destructive) / 0.4);
+    border-radius: 7px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.82rem;
+    transition: background-color 0.15s ease;
+}
+
+.sidebar-auth .sa-logout:hover {
+    background-color: hsl(var(--destructive) / 0.28);
+}
+
 /* Mobile sidebar is now handled by style.css with hamburger menu */

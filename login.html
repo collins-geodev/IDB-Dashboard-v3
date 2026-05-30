@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign In · IDB Assets Dashboard</title>
+    <link rel="icon" type="image/jpeg" href="images/favicon.jpg?v=2">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="auth.css?v=20260530a">
+</head>
+
+<body>
+    <div class="auth-wrap">
+        <div class="auth-card">
+            <div class="auth-brand">
+                <img src="images/ie-logo.png?v=20260405c" alt="IE Logo"
+                    onerror="this.style.display='none'">
+                <h1>IDB Assets Dashboard</h1>
+                <p>Sign in to continue</p>
+            </div>
+
+            <!-- Active-session banner (shown if already logged in) -->
+            <div id="sessionBox" style="display:none">
+                <div class="msg info show" id="sessionMsg"></div>
+                <div style="display:flex;gap:.6rem;margin-top:1rem;flex-wrap:wrap">
+                    <a class="btn btn-primary" id="goAdmin" style="display:none;width:auto;flex:1">🛡️ Admin Console</a>
+                    <a class="btn btn-ghost" href="index.html" style="flex:1">📊 Dashboard</a>
+                    <button class="btn btn-danger" id="sessionLogout" style="flex:1">Logout</button>
+                </div>
+            </div>
+
+            <!-- Auth forms -->
+            <div id="authBox">
+                <div class="tabs">
+                    <button id="tabSignin" class="active" type="button">Sign In</button>
+                    <button id="tabSignup" type="button">Create Account</button>
+                </div>
+
+                <form id="formSignin" autocomplete="on">
+                    <div class="field">
+                        <label for="siEmail">Email</label>
+                        <input id="siEmail" type="email" required placeholder="you@example.com" autocomplete="email">
+                    </div>
+                    <div class="field">
+                        <label for="siPass">Password</label>
+                        <input id="siPass" type="password" required placeholder="••••••••"
+                            autocomplete="current-password">
+                    </div>
+                    <button class="btn btn-primary" type="submit" id="siBtn">Sign In</button>
+                </form>
+
+                <form id="formSignup" autocomplete="on" style="display:none">
+                    <div class="field">
+                        <label for="suName">Full name <span class="muted">(optional)</span></label>
+                        <input id="suName" type="text" placeholder="Jane Doe" autocomplete="name">
+                    </div>
+                    <div class="field">
+                        <label for="suEmail">Email</label>
+                        <input id="suEmail" type="email" required placeholder="you@example.com" autocomplete="email">
+                    </div>
+                    <div class="field">
+                        <label for="suPass">Password <span class="muted">(min 6 characters)</span></label>
+                        <input id="suPass" type="password" required minlength="6" placeholder="••••••••"
+                            autocomplete="new-password">
+                    </div>
+                    <button class="btn btn-primary" type="submit" id="suBtn">Create Viewer Account</button>
+                </form>
+
+                <div class="msg" id="msg"></div>
+            </div>
+
+            <div class="auth-foot">
+                <a href="index.html">← Back to dashboard</a>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.0/dist/umd/supabase.min.js"></script>
+    <script src="supabase-client.js?v=20260530a"></script>
+    <script src="auth-footprint.js?v=20260530b"></script>
+    <script src="login.js?v=20260530a"></script>
+</body>
+
+</html>
