@@ -40,15 +40,26 @@
       });
   }
 
+  // Authoritative redirect to login (used when no valid session exists).
+  // auth-gate.js already did a fast synchronous check before paint; this is
+  // the definitive check once supabase-js has loaded and (if needed) tried
+  // to refresh the token. Catches revoked/expired sessions the sync pass let through.
+  function gotoLogin() {
+    var here = location.pathname.split("/").pop() || "index.html";
+    location.replace("login.html?next=" + encodeURIComponent(here));
+  }
+
   function init() {
     if (!IDB || !IDB.sb) {
+      // supabase-js failed to load; fall back to the sync gate's verdict.
       renderLoggedOut();
       return;
     }
     IDB.sb.auth.getSession().then(function (res) {
       var session = res.data ? res.data.session : null;
       if (!session) {
-        renderLoggedOut();
+        // No valid session (e.g. revoked/expired) -> enforce the gate.
+        gotoLogin();
         return;
       }
       // Continue capturing this session in the audit trail.

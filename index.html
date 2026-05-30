@@ -5,6 +5,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>IDB 2.0 Assets Tagging Monitoring Dashboard</title>
+    <!-- Auth gate: must run before anything renders. Redirects anonymous
+         visitors to the login page (no flash of the protected dashboard). -->
+    <script src="auth-gate.js?v=20260530c"></script>
     <!-- Favicon -->
     <link rel="icon" type="image/jpeg" href="images/favicon.jpg?v=2">
     <link rel="shortcut icon" type="image/jpeg" href="images/favicon.jpg?v=2">
@@ -843,7 +846,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.0/dist/umd/supabase.min.js"></script>
     <script src="supabase-client.js?v=20260530a"></script>
     <script src="auth-footprint.js?v=20260530b"></script>
-    <script src="dashboard-auth.js?v=20260530a"></script>
+    <script src="dashboard-auth.js?v=20260530c"></script>
     <script src="script.js?v=20260525c"></script>
 </body>
 
