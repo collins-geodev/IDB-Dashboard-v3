@@ -130,14 +130,14 @@
   /* ---------- data ---------- */
   function loadAll() {
     $("usersBody").innerHTML =
-      '<tr><td colspan="5" class="empty"><span class="spin"></span></td></tr>';
+      '<tr><td colspan="6" class="empty"><span class="spin"></span></td></tr>';
     $("auditBody").innerHTML =
       '<tr><td colspan="7" class="empty"><span class="spin"></span></td></tr>';
 
     Promise.all([
       sb
         .from("profiles")
-        .select("id, email, full_name, role, created_at")
+        .select("id, email, full_name, role, is_active, created_at")
         .order("created_at", { ascending: false }),
       sb
         .from("audit_logs")
@@ -149,7 +149,7 @@
         aRes = results[1];
       if (uRes.error) {
         $("usersBody").innerHTML =
-          '<tr><td colspan="5" class="empty">Failed to load users: ' +
+          '<tr><td colspan="6" class="empty">Failed to load users: ' +
           esc(uRes.error.message) +
           "</td></tr>";
       }
@@ -179,6 +179,9 @@
     var admins = allUsers.filter(function (u) {
       return u.role === "admin";
     }).length;
+    var inactive = allUsers.filter(function (u) {
+      return u.is_active === false;
+    }).length;
     var since = Date.now() - 24 * 3600 * 1000;
     var logins24 = allAudit.filter(function (a) {
       return new Date(a.login_at).getTime() >= since;
@@ -187,6 +190,7 @@
     $("statAdmins").textContent = admins;
     $("statViewers").textContent = allUsers.length - admins;
     $("statLogins").textContent = logins24;
+    if ($("statInactive")) $("statInactive").textContent = inactive;
   }
 
   /* ---------- users table ---------- */
@@ -203,50 +207,68 @@
 
     if (!rows.length) {
       $("usersBody").innerHTML =
-        '<tr><td colspan="5" class="empty">No users found.</td></tr>';
+        '<tr><td colspan="6" class="empty">No users found.</td></tr>';
       return;
     }
 
     var html = rows
       .map(function (u) {
         var isSelf = u.id === me.id;
+        var active = u.is_active !== false; // default true when undefined
         var roleBadge =
           '<span class="badge ' +
           (u.role === "admin" ? "admin" : "viewer") +
           '">' +
           esc(u.role) +
           "</span>";
+        var statusBadge =
+          '<span class="badge ' +
+          (active ? "status-active" : "status-inactive") +
+          '"><span class="status-dot"></span>' +
+          (active ? "Active" : "Inactive") +
+          "</span>";
 
-        var actions = "";
+        // Per-user action buttons.
+        var actions;
         if (isSelf) {
           actions = '<span class="muted">— you —</span>';
-        } else if (u.role === "admin") {
-          actions =
-            '<button class="btn btn-ghost btn-sm" data-act="demote" data-id="' +
-            esc(u.id) +
-            '">Make Viewer</button>' +
-            '<button class="btn btn-danger btn-sm" data-act="delete" data-id="' +
-            esc(u.id) +
-            '" data-email="' +
-            esc(u.email) +
-            '">Delete</button>';
         } else {
-          actions =
-            '<button class="btn btn-ghost btn-sm" data-act="promote" data-id="' +
-            esc(u.id) +
-            '">Make Admin</button>' +
+          var roleBtn =
+            u.role === "admin"
+              ? '<button class="btn btn-ghost btn-sm" data-act="demote" data-id="' +
+                esc(u.id) +
+                '">Make Viewer</button>'
+              : '<button class="btn btn-ghost btn-sm" data-act="promote" data-id="' +
+                esc(u.id) +
+                '">Make Admin</button>';
+
+          var activeBtn = active
+            ? '<button class="btn btn-warn btn-sm" data-act="deactivate" data-id="' +
+              esc(u.id) +
+              '" data-email="' +
+              esc(u.email) +
+              '">Deactivate</button>'
+            : '<button class="btn btn-success btn-sm" data-act="activate" data-id="' +
+              esc(u.id) +
+              '" data-email="' +
+              esc(u.email) +
+              '">Activate</button>';
+
+          var deleteBtn =
             '<button class="btn btn-danger btn-sm" data-act="delete" data-id="' +
             esc(u.id) +
             '" data-email="' +
             esc(u.email) +
             '">Delete</button>';
+
+          actions = roleBtn + activeBtn + deleteBtn;
         }
 
-        var name = u.full_name
-          ? '<div>' + esc(u.full_name) + "</div>"
-          : "";
+        var name = u.full_name ? "<div>" + esc(u.full_name) + "</div>" : "";
         return (
-          "<tr>" +
+          '<tr class="' +
+          (active ? "" : "row-inactive") +
+          '">' +
           "<td>" +
           name +
           '<div class="muted">' +
@@ -254,6 +276,9 @@
           "</div></td>" +
           "<td>" +
           roleBadge +
+          "</td>" +
+          "<td>" +
+          statusBadge +
           "</td>" +
           "<td>" +
           fmtDate(u.created_at) +
@@ -282,6 +307,36 @@
         } else {
           btn.disabled = false;
           toast((r.body && r.body.error) || "Failed to update role.", "err");
+        }
+      });
+    } else if (act === "activate" || act === "deactivate") {
+      var makeActive = act === "activate";
+      if (
+        !makeActive &&
+        !confirm(
+          "Deactivate " +
+            (email || "this user") +
+            "?\n\nThey will be signed out and blocked from logging in until reactivated."
+        )
+      )
+        return;
+      btn.disabled = true;
+      callFn("set_active", { user_id: id, active: makeActive }).then(function (
+        r
+      ) {
+        if (r.status === 200 && r.body.ok) {
+          toast(
+            makeActive ? "Account activated." : "Account deactivated.",
+            "ok"
+          );
+          loadAll();
+        } else {
+          btn.disabled = false;
+          toast(
+            (r.body && r.body.error) ||
+              "Failed to update account status.",
+            "err"
+          );
         }
       });
     } else if (act === "delete") {

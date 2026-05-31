@@ -182,6 +182,22 @@ a:hover {
 .btn-danger:hover {
   background: hsl(var(--destructive) / 0.25);
 }
+.btn-warn {
+  background: hsl(38 92% 50% / 0.15);
+  color: #ffc977;
+  border-color: hsl(38 92% 50% / 0.4);
+}
+.btn-warn:hover {
+  background: hsl(38 92% 50% / 0.25);
+}
+.btn-success {
+  background: hsl(var(--accent) / 0.15);
+  color: #7ef0cf;
+  border-color: hsl(var(--accent) / 0.45);
+}
+.btn-success:hover {
+  background: hsl(var(--accent) / 0.25);
+}
 .btn-sm {
   padding: 0.4rem 0.7rem;
   font-size: 0.8rem;
@@ -369,6 +385,32 @@ tbody tr:last-child td {
 .badge.evt.resume {
   background: hsl(var(--muted) / 0.8);
   color: var(--txt-dim);
+}
+.badge.status-active {
+  background: hsl(var(--accent) / 0.15);
+  color: #7ef0cf;
+}
+.badge.status-inactive {
+  background: hsl(0 84% 60% / 0.15);
+  color: #ff9b9b;
+}
+.badge .status-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 5px;
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor;
+  vertical-align: middle;
+}
+/* Dim deactivated users' rows for at-a-glance scanning */
+tbody tr.row-inactive td {
+  opacity: 0.55;
+}
+tbody tr.row-inactive td .row-actions,
+tbody tr.row-inactive td .badge {
+  opacity: 1;
 }
 
 .row-actions {

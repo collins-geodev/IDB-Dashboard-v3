@@ -86,7 +86,16 @@
       .signInWithPassword({ email: email, password: password })
       .then(function (res) {
         if (res.error) {
-          showMsg(res.error.message, "error");
+          // A deactivated account is banned at the auth level.
+          var raw = (res.error.message || "").toLowerCase();
+          var code = (res.error.code || res.error.error_code || "")
+            .toString()
+            .toLowerCase();
+          var msg =
+            code === "user_banned" || raw.indexOf("banned") >= 0
+              ? "Your account has been deactivated. Please contact an administrator."
+              : res.error.message;
+          showMsg(msg, "error");
           btn.disabled = false;
           btn.textContent = "Sign In";
           return;

@@ -7,7 +7,7 @@
     <title>Admin Console · IDB Assets Dashboard</title>
     <link rel="icon" type="image/jpeg" href="images/favicon.jpg?v=2">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="auth.css?v=20260530a">
+    <link rel="stylesheet" href="auth.css?v=20260531a">
 </head>
 
 <body>
@@ -52,6 +52,10 @@
                 <div class="l">Viewers</div>
             </div>
             <div class="stat">
+                <div class="n" id="statInactive">–</div>
+                <div class="l">Inactive</div>
+            </div>
+            <div class="stat">
                 <div class="n" id="statLogins">–</div>
                 <div class="l">Logins (24h)</div>
             </div>
@@ -72,6 +76,7 @@
                         <tr>
                             <th>User</th>
                             <th>Role</th>
+                            <th>Status</th>
                             <th>Joined</th>
                             <th>Last Login</th>
                             <th>Actions</th>
@@ -79,7 +84,7 @@
                     </thead>
                     <tbody id="usersBody">
                         <tr>
-                            <td colspan="5" class="empty"><span class="spin"></span></td>
+                            <td colspan="6" class="empty"><span class="spin"></span></td>
                         </tr>
                     </tbody>
                 </table>
@@ -123,7 +128,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.0/dist/umd/supabase.min.js"></script>
     <script src="supabase-client.js?v=20260530a"></script>
     <script src="auth-footprint.js?v=20260530b"></script>
-    <script src="admin.js?v=20260530a"></script>
+    <script src="admin.js?v=20260531a"></script>
 </body>
 
 </html>

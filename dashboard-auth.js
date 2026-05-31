@@ -133,10 +133,23 @@
       IDB.ensureTracking();
       IDB.sb
         .from("profiles")
-        .select("role, full_name")
+        .select("role, full_name, is_active")
         .eq("id", session.user.id)
         .single()
         .then(function (r) {
+          // Enforce deactivation mid-session: sign out and bounce to login.
+          if (r.data && r.data.is_active === false) {
+            IDB.logout().then(function () {
+              location.replace(
+                "login.html?next=" +
+                  encodeURIComponent(
+                    location.pathname.split("/").pop() || "index.html"
+                  ) +
+                  "&deactivated=1"
+              );
+            });
+            return;
+          }
           renderLoggedIn(session, r.data || { role: "viewer" });
         })
         .catch(function () {
