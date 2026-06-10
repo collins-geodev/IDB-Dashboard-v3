@@ -272,6 +272,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Tracks usernames that miss every vendor list so each is logged only once
+    const unmappedVendorUsers = new Set();
+
     // Helper to infer vendor from user
     function inferVendor(user) {
         // Based on provided documents
@@ -321,11 +324,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (jesomUsers.has(user)) return 'Jesom Technology';
         if (user && ikejaUsers.has(user.toLowerCase())) return 'Ikeja Electric';
 
-        // Fallback heuristic: Many ETC users start with 'a' followed by a name
-        if (user && user.startsWith('a') && user.length > 3) return 'ETC Workforce';
-
-        // Default unmapped users to Ikeja Electric (no 'Other' classification)
-        return 'Ikeja Electric';
+        // Fallback heuristic: Many ETC users start with 'a' followed by a name;
+        // everyone else defaults to Ikeja Electric (no 'Other' classification)
+        const fallbackVendor = (user && user.startsWith('a') && user.length > 3)
+            ? 'ETC Workforce'
+            : 'Ikeja Electric';
+        if (user && !unmappedVendorUsers.has(user)) {
+            unmappedVendorUsers.add(user);
+            console.warn(`[Vendor Mapping] User "${user}" not in any vendor list — defaulting to ${fallbackVendor}`);
+        }
+        return fallbackVendor;
     }
 
     // User Name Mapping
