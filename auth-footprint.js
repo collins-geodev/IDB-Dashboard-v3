@@ -1,8 +1,8 @@
 /* =====================================================================
  * Digital-footprint capture + session/duration tracking.
- * Depends on window.IDB.sb (supabase-client.js).
+ * Depends on window.IDB (convex-client.js).
  *
- * On login we call the `log-event` Edge Function, which records the
+ * On login we call the Convex `/log-event` HTTP action, which records the
  * authoritative client IP (from request headers) + a server-side geo
  * lookup, merged with the device fingerprint collected here. While the
  * session is active a heartbeat keeps duration_seconds fresh; on logout
@@ -13,7 +13,6 @@
   var SESSION_KEY = "idb-audit-session";
   var HEARTBEAT_MS = 60 * 1000;
   var heartbeatTimer = null;
-  var cachedAccessToken = null;
 
   /* ---- helpers -------------------------------------------------------- */
 
@@ -104,31 +103,26 @@
     } catch (e) {}
   }
 
-  function refreshToken() {
-    return IDB.sb.auth.getSession().then(function (res) {
-      var tok =
-        res && res.data && res.data.session ? res.data.session.access_token : null;
-      if (tok) cachedAccessToken = tok;
-      return cachedAccessToken;
-    });
-  }
-
-  // Direct REST PATCH so it also works from an unload handler (keepalive).
+  // Direct mutation call so it also works from an unload handler (keepalive).
+  // Returns a promise that never rejects, so callers can sequence on it.
   function patchLog(logId, payload, keepalive) {
-    if (!logId || !cachedAccessToken) return;
+    var token = IDB.auth.getToken();
+    if (!logId || !token) return Promise.resolve();
     try {
-      fetch(IDB.URL + "/rest/v1/audit_logs?id=eq." + logId, {
-        method: "PATCH",
-        keepalive: !!keepalive,
-        headers: {
-          apikey: IDB.ANON_KEY,
-          Authorization: "Bearer " + cachedAccessToken,
-          "Content-Type": "application/json",
-          Prefer: "return=minimal",
+      return IDB.mutation(
+        "audit:patchLog",
+        {
+          token: token,
+          log_id: logId,
+          last_seen_at: payload.last_seen_at,
+          logout_at: payload.logout_at,
+          duration_seconds: payload.duration_seconds,
         },
-        body: JSON.stringify(payload),
-      });
-    } catch (e) {}
+        { keepalive: !!keepalive }
+      ).catch(function () {});
+    } catch (e) {
+      return Promise.resolve();
+    }
   }
 
   function secsSince(ms) {
@@ -146,9 +140,7 @@
 
   function startHeartbeat() {
     stopHeartbeat();
-    heartbeatTimer = setInterval(function () {
-      refreshToken().then(beat);
-    }, HEARTBEAT_MS);
+    heartbeatTimer = setInterval(beat, HEARTBEAT_MS);
   }
   function stopHeartbeat() {
     if (heartbeatTimer) {
@@ -189,35 +181,35 @@
     installUnloadHandler();
   }
 
-  // Fallback when the edge function is unreachable: client insert (no IP).
+  // Fallback when the /log-event HTTP action is unreachable: plain mutation
+  // insert (no IP/geo, which only the HTTP action can capture).
   function clientInsertFallback(user, payload, sessionId) {
-    var row = Object.assign(
-      {
-        user_id: user.id,
-        email: user.email,
-        login_at: new Date().toISOString(),
-        session_id: sessionId,
-      },
-      payload
-    );
-    return IDB.sb
-      .from("audit_logs")
-      .insert(row)
-      .select("id")
-      .single()
+    var token = IDB.auth.getToken();
+    if (!token) return Promise.resolve(null);
+    return IDB.mutation("audit:clientInsert", {
+      token: token,
+      payload: payload,
+    })
       .then(function (res) {
-        if (res.error) {
-          console.warn("[IDB] audit fallback insert failed:", res.error.message);
+        if (!res || !res.ok) {
+          console.warn(
+            "[IDB] audit fallback insert failed:",
+            res && res.error
+          );
           return null;
         }
-        beginTracking(res.data.id, user.id, sessionId);
-        return res.data.id;
+        beginTracking(res.id, user.id, sessionId);
+        return res.id;
+      })
+      .catch(function (err) {
+        console.warn("[IDB] audit fallback insert failed:", err.message);
+        return null;
       });
   }
 
   /* ---- public API ----------------------------------------------------- */
 
-  // Record a login (or session resume): server-side IP/geo via log-event.
+  // Record a login (or session resume): server-side IP/geo via /log-event.
   function recordLogin(user, opts) {
     opts = opts || {};
     var sessionId = uuid();
@@ -225,72 +217,72 @@
       { event_type: opts.eventType || "login", session_id: sessionId },
       collectDevice()
     );
-    return refreshToken().then(function (token) {
-      return fetch(IDB.URL + "/functions/v1/log-event", {
-        method: "POST",
-        headers: {
-          Authorization: "Bearer " + token,
-          apikey: IDB.ANON_KEY,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
+    var token = IDB.auth.getToken();
+    if (!token) return Promise.resolve(null);
+    return fetch(IDB.SITE_URL + "/log-event", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer " + token,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    })
+      .then(function (r) {
+        return r.json();
       })
-        .then(function (r) {
-          return r.json();
-        })
-        .then(function (res) {
-          if (res && res.id) {
-            beginTracking(res.id, user.id, sessionId);
-            return res.id;
-          }
-          throw new Error((res && res.error) || "log-event failed");
-        })
-        .catch(function (err) {
-          console.warn("[IDB] server log failed, using fallback:", err.message);
-          return clientInsertFallback(user, payload, sessionId);
-        });
-    });
+      .then(function (res) {
+        if (res && res.id) {
+          beginTracking(res.id, user.id, sessionId);
+          return res.id;
+        }
+        throw new Error((res && res.error) || "log-event failed");
+      })
+      .catch(function (err) {
+        console.warn("[IDB] server log failed, using fallback:", err.message);
+        return clientInsertFallback(user, payload, sessionId);
+      });
   }
   IDB.recordLogin = recordLogin;
 
   // Keep an existing session's tracking alive, or start a "session_resume".
   function ensureTracking() {
-    return IDB.sb.auth.getSession().then(function (res) {
-      var session = res && res.data ? res.data.session : null;
-      if (!session) {
-        clearSession();
-        return null;
-      }
-      cachedAccessToken = session.access_token;
-      var s = readSession();
-      if (s && s.userId === session.user.id) {
-        startHeartbeat();
-        installUnloadHandler();
-        return s.logId;
-      }
-      return recordLogin(session.user, { eventType: "session_resume" });
-    });
+    var session = IDB.auth.getSession();
+    if (!session) {
+      clearSession();
+      return Promise.resolve(null);
+    }
+    var s = readSession();
+    if (s && s.userId === session.user.id) {
+      startHeartbeat();
+      installUnloadHandler();
+      return Promise.resolve(s.logId);
+    }
+    return recordLogin(session.user, { eventType: "session_resume" });
   }
   IDB.ensureTracking = ensureTracking;
 
-  // Finalise the current session row, then sign out.
+  // Finalise the current session row, then sign out. The patch must settle
+  // BEFORE signOut: signOut deletes the server-side session, which would
+  // reject the patch's token. A short timeout guard keeps a hung patch from
+  // blocking logout.
   function logout() {
     var s = readSession();
-    return refreshToken()
-      .then(function () {
-        if (s) {
-          patchLog(s.logId, {
-            logout_at: new Date().toISOString(),
-            last_seen_at: new Date().toISOString(),
-            duration_seconds: secsSince(s.loginAtMs),
-          });
-        }
-      })
-      .then(function () {
-        stopHeartbeat();
-        clearSession();
-        return IDB.sb.auth.signOut();
+    var patched = Promise.resolve();
+    if (s) {
+      patched = patchLog(s.logId, {
+        logout_at: new Date().toISOString(),
+        last_seen_at: new Date().toISOString(),
+        duration_seconds: secsSince(s.loginAtMs),
       });
+    }
+    stopHeartbeat();
+    clearSession();
+    var timeout = new Promise(function (res) {
+      setTimeout(res, 2000);
+    });
+    return Promise.race([patched, timeout]).then(function () {
+      return IDB.auth.signOut();
+    });
   }
   IDB.logout = logout;
 })();

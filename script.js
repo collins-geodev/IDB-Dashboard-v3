@@ -552,17 +552,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initialize Dashboard
     // Initialize Dashboard - Auto Fetch
-    // CRITICAL: To update data, upload your file to Supabase as "converted_data_latest.json".
-    // Do NOT change this code. Just overwrite the file in Supabase.
-    const fieldDataUrls = [
-        "https://mvfguayhttcdeibomjru.supabase.co/storage/v1/object/public/dashboard-assets/converted_data_latest.json",
-        "https://zgypltdsqjhftnxadunu.supabase.co/storage/v1/object/public/dashboard-assets/converted_data_latest.json"
-    ];
+    // CRITICAL: Data now lives in Convex file storage. To update it, run:
+    //   npx convex run --prod assets:importFromUrls '{"sources":[{"name":"converted_data_latest.json","url":"<public url of new file>"}]}'
+    // or replace the file in the Convex dashboard (assets table + storage).
+    const CONVEX_SITE = (window.IDB && window.IDB.SITE_URL) || "";
+    const fieldDataUrls = CONVEX_SITE
+        ? [CONVEX_SITE + "/assets/converted_data_latest.json"]
+        : [];
 
-    const boqDataUrls = [
-        "https://mvfguayhttcdeibomjru.supabase.co/storage/v1/object/public/dashboard-assets/BOQ-IDB.json",
-        "https://zgypltdsqjhftnxadunu.supabase.co/storage/v1/object/public/dashboard-assets/BOQ-IDB.json"
-    ];
+    const boqDataUrls = CONVEX_SITE
+        ? [CONVEX_SITE + "/assets/BOQ-IDB.json"]
+        : [];
 
     const fetchWithFallback = async (primaryUrls, localPath, githubRawUrl) => {
         const urls = Array.isArray(primaryUrls) ? primaryUrls : [primaryUrls];
@@ -591,12 +591,12 @@ document.addEventListener('DOMContentLoaded', () => {
         fetchWithFallback(
             fieldDataUrls,
             './converted_data_latest.json',
-            'https://raw.githubusercontent.com/Collins76/IDB-2.0-Assets-Tracking-Dashboard-V2/main/converted_data_latest.json'
+            'https://raw.githubusercontent.com/collins-geodev/IDB-Dashboard-v3/main/converted_data_latest.json'
         ),
         fetchWithFallback(
             boqDataUrls,
             './BOQ-IDB.json',
-            'https://raw.githubusercontent.com/Collins76/IDB-2.0-Assets-Tracking-Dashboard-V2/main/BOQ-IDB.json'
+            'https://raw.githubusercontent.com/collins-geodev/IDB-Dashboard-v3/main/BOQ-IDB.json'
         )
     ])
     .catch(error => {

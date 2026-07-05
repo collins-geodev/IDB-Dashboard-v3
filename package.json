@@ -1,0 +1,14 @@
+{
+  "name": "idb-assets-dashboard",
+  "private": true,
+  "version": "3.0.0",
+  "description": "IDB Assets Tracking Dashboard - static frontend with Convex backend",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "convex": "^1.42.1"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "typescript": "^5.5.4"
+  }
+}

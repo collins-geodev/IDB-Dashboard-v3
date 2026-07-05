@@ -1,7 +1,8 @@
 /* Lightweight auth glue for the main dashboard:
  *  - renders a Sign In / Logout control in the sidebar
  *  - continues the audit session (heartbeat) while the user browses
- * Non-blocking: the dashboard works fine whether or not anyone is signed in. */
+ * The dashboard requires a signed-in user (auth-gate.js does the fast
+ * synchronous check; this file does the definitive Convex-backed one). */
 (function () {
   var IDB = window.IDB;
   function $(id) {
@@ -57,12 +58,12 @@
       "<span>Sign In</span></a>";
   }
 
-  function renderLoggedIn(session, profile) {
+  function renderLoggedIn(user) {
     var box = $("auth-status");
     if (!box) return;
-    var role = (profile && profile.role) || "viewer";
-    var email = session.user.email || "";
-    var fullName = (profile && profile.full_name) || "";
+    var role = user.role || "viewer";
+    var email = user.email || "";
+    var fullName = user.full_name || "";
     var name = displayName(fullName, email);
     var ini = initials(fullName, email);
     var isAdmin = role === "admin";
@@ -109,52 +110,37 @@
 
   // Authoritative redirect to login (used when no valid session exists).
   // auth-gate.js already did a fast synchronous check before paint; this is
-  // the definitive check once supabase-js has loaded and (if needed) tried
-  // to refresh the token. Catches revoked/expired sessions the sync pass let through.
-  function gotoLogin() {
+  // the definitive check against the Convex backend. Catches revoked/expired
+  // sessions the sync pass let through.
+  function gotoLogin(extra) {
     var here = location.pathname.split("/").pop() || "index.html";
-    location.replace("login.html?next=" + encodeURIComponent(here));
+    location.replace(
+      "login.html?next=" + encodeURIComponent(here) + (extra || "")
+    );
   }
 
   function init() {
-    if (!IDB || !IDB.sb) {
-      // supabase-js failed to load; fall back to the sync gate's verdict.
+    if (!IDB || !IDB.auth) {
+      // convex-client.js failed to load; fall back to the sync gate's verdict.
       renderLoggedOut();
       return;
     }
-    IDB.sb.auth.getSession().then(function (res) {
-      var session = res.data ? res.data.session : null;
-      if (!session) {
+    IDB.auth.me().then(function (res) {
+      if (!res || !res.user) {
         // No valid session (e.g. revoked/expired) -> enforce the gate.
         gotoLogin();
         return;
       }
+      // Enforce deactivation mid-session: sign out and bounce to login.
+      if (res.user.is_active === false) {
+        IDB.logout().then(function () {
+          gotoLogin("&deactivated=1");
+        });
+        return;
+      }
       // Continue capturing this session in the audit trail.
       IDB.ensureTracking();
-      IDB.sb
-        .from("profiles")
-        .select("role, full_name, is_active")
-        .eq("id", session.user.id)
-        .single()
-        .then(function (r) {
-          // Enforce deactivation mid-session: sign out and bounce to login.
-          if (r.data && r.data.is_active === false) {
-            IDB.logout().then(function () {
-              location.replace(
-                "login.html?next=" +
-                  encodeURIComponent(
-                    location.pathname.split("/").pop() || "index.html"
-                  ) +
-                  "&deactivated=1"
-              );
-            });
-            return;
-          }
-          renderLoggedIn(session, r.data || { role: "viewer" });
-        })
-        .catch(function () {
-          renderLoggedIn(session, { role: "viewer" });
-        });
+      renderLoggedIn(res.user);
     });
   }
 

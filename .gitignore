@@ -13,6 +13,11 @@ desktop.ini
 # Vercel
 .vercel/
 
+# Node / Convex
+node_modules/
+.env
+.env.local
+
 # Temp files
 *.tmp
 *.log

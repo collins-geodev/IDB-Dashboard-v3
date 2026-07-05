@@ -1,6 +1,6 @@
-/* Login + viewer sign-up logic for the IDB dashboard. */
+/* Login + viewer sign-up logic for the IDB dashboard (Convex-backed). */
 (function () {
-  var sb = window.IDB && window.IDB.sb;
+  var IDB = window.IDB;
   var $ = function (id) {
     return document.getElementById(id);
   };
@@ -31,20 +31,6 @@
         setTimeout(res, ms);
       }),
     ]);
-  }
-
-  function getRole(userId) {
-    return sb
-      .from("profiles")
-      .select("role")
-      .eq("id", userId)
-      .single()
-      .then(function (r) {
-        return r.data ? r.data.role : "viewer";
-      })
-      .catch(function () {
-        return "viewer";
-      });
   }
 
   function redirectFor(role) {
@@ -82,31 +68,23 @@
     var email = $("siEmail").value.trim();
     var password = $("siPass").value;
 
-    sb.auth
-      .signInWithPassword({ email: email, password: password })
+    IDB.auth
+      .signIn(email, password)
       .then(function (res) {
-        if (res.error) {
-          // A deactivated account is banned at the auth level.
-          var raw = (res.error.message || "").toLowerCase();
-          var code = (res.error.code || res.error.error_code || "")
-            .toString()
-            .toLowerCase();
-          var msg =
-            code === "user_banned" || raw.indexOf("banned") >= 0
-              ? "Your account has been deactivated. Please contact an administrator."
-              : res.error.message;
-          showMsg(msg, "error");
+        if (!res || !res.ok) {
+          showMsg(
+            (res && res.error) || "Sign in failed. Please try again.",
+            "error"
+          );
           btn.disabled = false;
           btn.textContent = "Sign In";
           return;
         }
-        var user = res.data.user;
+        var user = res.user;
         showMsg("Welcome back. Loading…", "ok");
-        getRole(user.id).then(function (role) {
-          // Capture the login footprint, then route by role.
-          withTimeout(IDB.recordLogin(user), 5000).then(function () {
-            redirectFor(role);
-          });
+        // Capture the login footprint, then route by role.
+        withTimeout(IDB.recordLogin(user), 5000).then(function () {
+          redirectFor(user.role);
         });
       })
       .catch(function (err) {
@@ -127,54 +105,28 @@
     var password = $("suPass").value;
     var fullName = $("suName").value.trim();
 
-    // Create a PRE-CONFIRMED viewer account via the signup-viewer Edge
-    // Function (service role). No confirmation email is sent, so the user
-    // can use the account immediately — no waiting on email delivery.
     var resetBtn = function () {
       btn.disabled = false;
       btn.textContent = "Create Viewer Account";
     };
 
-    fetch(IDB.URL + "/functions/v1/signup-viewer", {
-      method: "POST",
-      headers: { apikey: IDB.ANON_KEY, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email: email,
-        password: password,
-        full_name: fullName,
-      }),
-    })
-      .then(function (r) {
-        return r.json().then(function (b) {
-          return { status: r.status, body: b };
-        });
-      })
+    // Creates an immediately-usable viewer account (no confirmation email)
+    // and signs the user in in the same call.
+    IDB.auth
+      .signUp(email, password, fullName)
       .then(function (res) {
-        if (res.status !== 200 || !res.body || !res.body.ok) {
+        if (!res || !res.ok) {
           showMsg(
-            (res.body && res.body.error) || "Sign up failed. Please try again.",
+            (res && res.error) || "Sign up failed. Please try again.",
             "error"
           );
           resetBtn();
           return;
         }
-        // Account is ready immediately -> sign in and go to the dashboard.
         showMsg("Account created. Signing you in…", "ok");
-        sb.auth
-          .signInWithPassword({ email: email, password: password })
-          .then(function (si) {
-            if (si.error || !si.data.user) {
-              // Created, but auto sign-in failed -> let them sign in manually.
-              showMsg("Account created! You can now sign in.", "ok");
-              resetBtn();
-              setTab("signin");
-              $("siEmail").value = email;
-              return;
-            }
-            withTimeout(IDB.recordLogin(si.data.user), 5000).then(function () {
-              redirectFor("viewer");
-            });
-          });
+        withTimeout(IDB.recordLogin(res.user), 5000).then(function () {
+          redirectFor("viewer");
+        });
       })
       .catch(function (err) {
         showMsg(err.message || "Sign up failed", "error");
@@ -192,16 +144,12 @@
     });
   });
 
-  function showSession(session, role) {
+  function showSession(user) {
     $("authBox").style.display = "none";
     $("sessionBox").style.display = "";
     $("sessionMsg").textContent =
-      "You are signed in as " +
-      session.user.email +
-      " (" +
-      role +
-      ").";
-    if (role === "admin") {
+      "You are signed in as " + user.email + " (" + user.role + ").";
+    if (user.role === "admin") {
       var ga = $("goAdmin");
       ga.style.display = "";
       ga.href = "admin.html";
@@ -209,14 +157,9 @@
   }
 
   // On load: if there is already a valid session, show the session panel.
-  if (sb) {
-    sb.auth.getSession().then(function (res) {
-      var session = res.data ? res.data.session : null;
-      if (session) {
-        getRole(session.user.id).then(function (role) {
-          showSession(session, role);
-        });
-      }
+  if (IDB && IDB.auth) {
+    IDB.auth.me().then(function (res) {
+      if (res && res.user) showSession(res.user);
     });
   } else {
     showMsg("Could not initialise authentication. Please refresh.", "error");

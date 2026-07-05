@@ -1,13 +1,13 @@
-/* Admin console: user management + audit trail.
- * Privileged mutations go through the `admin-users` Edge Function
- * (service role, admin-verified). Reads use RLS-protected queries. */
+/* Admin console: user management + audit trail (Convex-backed).
+ * Privileged reads and mutations all go through admin:* Convex functions,
+ * which verify the caller's session token resolves to an active admin. */
 (function () {
-  var sb = window.IDB && window.IDB.sb;
+  var IDB = window.IDB;
   var $ = function (id) {
     return document.getElementById(id);
   };
 
-  var me = null; // current admin user
+  var me = null; // current admin user (from auth:me)
   var allUsers = [];
   var allAudit = [];
   var lastLoginByUser = {};
@@ -58,29 +58,20 @@
     }, 3800);
   }
 
-  // Call the admin-users Edge Function with the caller's JWT.
-  function callFn(action, payload) {
-    return sb.auth.getSession().then(function (r) {
-      var token = r.data && r.data.session ? r.data.session.access_token : null;
-      return fetch(IDB.URL + "/functions/v1/admin-users", {
-        method: "POST",
-        headers: {
-          Authorization: "Bearer " + token,
-          apikey: IDB.ANON_KEY,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(Object.assign({ action: action }, payload || {})),
-      }).then(function (resp) {
-        return resp
-          .json()
-          .catch(function () {
-            return {};
-          })
-          .then(function (body) {
-            return { status: resp.status, body: body };
-          });
+  // Call a privileged admin mutation with the caller's session token.
+  // Returns { status, body } like the old edge-function helper did.
+  function callFn(path, payload) {
+    var token = IDB.auth.getToken();
+    if (!token) {
+      return Promise.resolve({ status: 401, body: { error: "No session" } });
+    }
+    return IDB.mutation(path, Object.assign({ token: token }, payload || {}))
+      .then(function (body) {
+        return { status: body && body.ok ? 200 : 400, body: body || {} };
+      })
+      .catch(function (err) {
+        return { status: 500, body: { error: err.message } };
       });
-    });
   }
 
   /* ---------- access guard ---------- */
@@ -90,32 +81,23 @@
   }
 
   function guard() {
-    if (!sb) {
+    if (!IDB || !IDB.auth) {
       denied("Authentication failed to initialise. Please refresh.");
       return;
     }
-    sb.auth.getSession().then(function (res) {
-      var session = res.data ? res.data.session : null;
-      if (!session) {
+    IDB.auth.me().then(function (res) {
+      if (!res || !res.user) {
         location.href = "login.html?next=admin.html";
         return;
       }
-      me = session.user;
-      sb.from("profiles")
-        .select("role, full_name, email")
-        .eq("id", me.id)
-        .single()
-        .then(function (r) {
-          if (r.error || !r.data || r.data.role !== "admin") {
-            denied(
-              "Access denied. This area is restricted to administrators."
-            );
-            return;
-          }
-          // Keep tracking this admin's session for the audit trail.
-          IDB.ensureTracking();
-          startApp(r.data);
-        });
+      me = res.user;
+      if (me.role !== "admin") {
+        denied("Access denied. This area is restricted to administrators.");
+        return;
+      }
+      // Keep tracking this admin's session for the audit trail.
+      IDB.ensureTracking();
+      startApp(me);
     });
   }
 
@@ -123,7 +105,7 @@
     $("gate").style.display = "none";
     $("app").style.display = "";
     $("who").textContent =
-      "Signed in as " + (profile.email || me.email) + " · Administrator";
+      "Signed in as " + (profile.email || "") + " · Administrator";
     loadAll();
   }
 
@@ -134,33 +116,33 @@
     $("auditBody").innerHTML =
       '<tr><td colspan="7" class="empty"><span class="spin"></span></td></tr>';
 
+    var token = IDB.auth.getToken();
     Promise.all([
-      sb
-        .from("profiles")
-        .select("id, email, full_name, role, is_active, created_at")
-        .order("created_at", { ascending: false }),
-      sb
-        .from("audit_logs")
-        .select("*")
-        .order("login_at", { ascending: false })
-        .limit(500),
+      IDB.query("admin:listUsers", { token: token }).catch(function (e) {
+        return { ok: false, error: e.message };
+      }),
+      IDB.query("admin:listAudit", { token: token }).catch(function (e) {
+        return { ok: false, error: e.message };
+      }),
     ]).then(function (results) {
       var uRes = results[0],
         aRes = results[1];
-      if (uRes.error) {
+      var usersOk = !!(uRes && uRes.ok);
+      var auditOk = !!(aRes && aRes.ok);
+      if (!usersOk) {
         $("usersBody").innerHTML =
           '<tr><td colspan="6" class="empty">Failed to load users: ' +
-          esc(uRes.error.message) +
+          esc((uRes && uRes.error) || "unknown error") +
           "</td></tr>";
       }
-      if (aRes.error) {
+      if (!auditOk) {
         $("auditBody").innerHTML =
           '<tr><td colspan="7" class="empty">Failed to load audit: ' +
-          esc(aRes.error.message) +
+          esc((aRes && aRes.error) || "unknown error") +
           "</td></tr>";
       }
-      allUsers = uRes.data || [];
-      allAudit = aRes.data || [];
+      allUsers = usersOk ? uRes.users : [];
+      allAudit = auditOk ? aRes.logs : [];
 
       // last login per user
       lastLoginByUser = {};
@@ -169,9 +151,11 @@
         if (!lastLoginByUser[a.user_id]) lastLoginByUser[a.user_id] = a.login_at;
       });
 
-      renderStats();
-      renderUsers();
-      renderAudit();
+      // Only render over the tables when their load succeeded, so a failure
+      // message isn't masked by "No users found." / "No audit records yet.".
+      if (usersOk && auditOk) renderStats();
+      if (usersOk) renderUsers();
+      if (auditOk) renderAudit();
     });
   }
 
@@ -300,7 +284,7 @@
     if (act === "promote" || act === "demote") {
       var role = act === "promote" ? "admin" : "viewer";
       btn.disabled = true;
-      callFn("set_role", { user_id: id, role: role }).then(function (r) {
+      callFn("admin:setRole", { user_id: id, role: role }).then(function (r) {
         if (r.status === 200 && r.body.ok) {
           toast("Role updated to " + role + ".", "ok");
           loadAll();
@@ -321,24 +305,24 @@
       )
         return;
       btn.disabled = true;
-      callFn("set_active", { user_id: id, active: makeActive }).then(function (
-        r
-      ) {
-        if (r.status === 200 && r.body.ok) {
-          toast(
-            makeActive ? "Account activated." : "Account deactivated.",
-            "ok"
-          );
-          loadAll();
-        } else {
-          btn.disabled = false;
-          toast(
-            (r.body && r.body.error) ||
-              "Failed to update account status.",
-            "err"
-          );
+      callFn("admin:setActive", { user_id: id, active: makeActive }).then(
+        function (r) {
+          if (r.status === 200 && r.body.ok) {
+            toast(
+              makeActive ? "Account activated." : "Account deactivated.",
+              "ok"
+            );
+            loadAll();
+          } else {
+            btn.disabled = false;
+            toast(
+              (r.body && r.body.error) ||
+                "Failed to update account status.",
+              "err"
+            );
+          }
         }
-      });
+      );
     } else if (act === "delete") {
       if (
         !confirm(
@@ -349,7 +333,7 @@
       )
         return;
       btn.disabled = true;
-      callFn("delete_user", { user_id: id }).then(function (r) {
+      callFn("admin:deleteUser", { user_id: id }).then(function (r) {
         if (r.status === 200 && r.body.ok) {
           toast("User deleted.", "ok");
           loadAll();
