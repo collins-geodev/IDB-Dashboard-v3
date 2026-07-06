@@ -1,9 +1,9 @@
-# IDB Assets Tracking Dashboard – V3
+# IDB Assets Tracking Dashboard – V2
 
 A read-only, browser-based monitoring dashboard for tracking the field tagging of LT poles, distribution transformers (DTs), and connected buildings across **20 prioritized SHOMOLU 11kV feeders**. V3 is a focused replica of the V2 dashboard scoped to a curated feeder list — same UI/UX, same KPIs, narrower data set.
 
-**Live deployment:** https://idb-assets-dashboard-v3.vercel.app *(updated after first Vercel deploy)*
-**Source repo:** https://github.com/Collins76/IDB-Assets-Tracking-Dashboard-V3
+**Live deployment:** https://idb-assets-dashboard-v2.vercel.app *(updated after first Vercel deploy)*
+**Source repo:** https://github.com/collins-geodev/IDB-Dashboard-v2
 
 ---
 

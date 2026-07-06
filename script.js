@@ -591,12 +591,12 @@ document.addEventListener('DOMContentLoaded', () => {
         fetchWithFallback(
             fieldDataUrls,
             './converted_data_latest.json',
-            'https://raw.githubusercontent.com/collins-geodev/IDB-Dashboard-v3/main/converted_data_latest.json'
+            'https://raw.githubusercontent.com/collins-geodev/IDB-Dashboard-v2/main/converted_data_latest.json'
         ),
         fetchWithFallback(
             boqDataUrls,
             './BOQ-IDB.json',
-            'https://raw.githubusercontent.com/collins-geodev/IDB-Dashboard-v3/main/BOQ-IDB.json'
+            'https://raw.githubusercontent.com/collins-geodev/IDB-Dashboard-v2/main/BOQ-IDB.json'
         )
     ])
     .catch(error => {
