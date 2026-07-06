@@ -618,6 +618,28 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!Array.isArray(boq) && boq && typeof boq === 'object') {
             boq = boq.Sheet2 || boq.Sheet1 || Object.values(boq).find(Array.isArray) || [];
         }
+
+        // V3 scope: restrict the field dataset to the 20 approved SHOMOLU
+        // feeders at load time, independent of the data source (Convex /
+        // local / GitHub raw). Re-adds the ALLOWED_FEEDERS_V3 allowlist that
+        // was dropped in the Supabase->Convex migration, so every KPI, chart,
+        // filter and map reflects only these 20 even while Convex still holds
+        // the full 37-feeder file. Matched case-insensitively, whitespace-trimmed.
+        const ALLOWED_FEEDERS_V3 = [
+            "11-IgbobiINJ-T2-Market", "11-OworoINJ-T3-Gbagada", "11-OguduINJ-T1-Ogudu",
+            "11-IlupejuINJ-T3-Palmgrove", "11-OguduINJ-T2-Alapere", "11-MarylandINJ-T1-Okupe",
+            "11-OguduINJ-T3-Soluyi", "11-MagodoINJ-T2-CMD", "11-OguduINJ-T1-Express",
+            "11-IgbobiINJ-T3-Ikorodu", "11-New OworoINJ-T1-Odunsi", "11-IgbobiINJ-T3-Railway",
+            "11-IgbobiINJ-T2-Adurosakin", "11-OguduINJ-T3-Kola Adeshina", "11-IsheriINJ-T1-Isheri",
+            "11-WasimiINJ-T1-Araromi", "11-MarylandINJ-T1-Ketu", "11-MarylandINJ-T3-Sylvia",
+            "11-OguduINJ-T2-Oriola", "11-OguduINJ-T1-CAC"
+        ];
+        const _allowedFeederSet = new Set(ALLOWED_FEEDERS_V3.map(f => f.trim().toLowerCase()));
+        if (Array.isArray(fieldData)) {
+            const _before = fieldData.length;
+            fieldData = fieldData.filter(r => _allowedFeederSet.has(String((r && r.Feeder) || '').trim().toLowerCase()));
+            console.log(`[V3] Feeder allowlist: ${fieldData.length}/${_before} records kept (20 approved feeders).`);
+        }
         try {
             // Process Field Data
             fieldData.forEach(item => {
