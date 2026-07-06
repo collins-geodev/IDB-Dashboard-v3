@@ -619,12 +619,13 @@ document.addEventListener('DOMContentLoaded', () => {
             boq = boq.Sheet2 || boq.Sheet1 || Object.values(boq).find(Array.isArray) || [];
         }
 
-        // V3 scope: restrict the field dataset to the 20 approved SHOMOLU
-        // feeders at load time, independent of the data source (Convex /
-        // local / GitHub raw). Re-adds the ALLOWED_FEEDERS_V3 allowlist that
-        // was dropped in the Supabase->Convex migration, so every KPI, chart,
-        // filter and map reflects only these 20 even while Convex still holds
-        // the full 37-feeder file. Matched case-insensitively, whitespace-trimmed.
+        // V3 scope: restrict BOTH the field dataset (Feeder) and the BOQ
+        // targets (FEEDER NAME) to the 20 approved SHOMOLU feeders at load
+        // time, independent of the data source (Convex / local / GitHub raw).
+        // Re-adds the ALLOWED_FEEDERS_V3 allowlist that was dropped in the
+        // Supabase->Convex migration, so every KPI card (Actual AND target),
+        // chart, filter and map reflects only these 20 even while Convex still
+        // holds the full file. Matched case-insensitively, whitespace-trimmed.
         const ALLOWED_FEEDERS_V3 = [
             "11-IgbobiINJ-T2-Market", "11-OworoINJ-T3-Gbagada", "11-OguduINJ-T1-Ogudu",
             "11-IlupejuINJ-T3-Palmgrove", "11-OguduINJ-T2-Alapere", "11-MarylandINJ-T1-Okupe",
@@ -638,7 +639,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (Array.isArray(fieldData)) {
             const _before = fieldData.length;
             fieldData = fieldData.filter(r => _allowedFeederSet.has(String((r && r.Feeder) || '').trim().toLowerCase()));
-            console.log(`[V3] Feeder allowlist: ${fieldData.length}/${_before} records kept (20 approved feeders).`);
+            console.log(`[V3] Feeder allowlist (field): ${fieldData.length}/${_before} records kept (20 approved feeders).`);
+        }
+        if (Array.isArray(boq)) {
+            const _bqBefore = boq.length;
+            boq = boq.filter(r => _allowedFeederSet.has(String((r && r['FEEDER NAME']) || '').trim().toLowerCase()));
+            console.log(`[V3] Feeder allowlist (BOQ): ${boq.length}/${_bqBefore} rows kept (20 approved feeders).`);
         }
         try {
             // Process Field Data
