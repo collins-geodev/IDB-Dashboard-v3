@@ -83,7 +83,12 @@ export const sessionUserInternal = internalQuery({
   handler: async (ctx, { token }) => {
     const su = await sessionUser(ctx, token);
     if (!su) return null;
-    return { uid: su.user.uid, email: su.user.email, role: su.user.role };
+    return {
+      uid: su.user.uid,
+      email: su.user.email,
+      role: su.user.role,
+      is_active: su.user.is_active,
+    };
   },
 });
 
@@ -177,12 +182,15 @@ export const clearLoginFailures = internalMutation({
   },
 });
 
+// Insert a user. `role` is set by the admin-invite flow (adminCreateUser);
+// it defaults to 'viewer' and only ever resolves to 'viewer' or 'admin'.
 export const createUser = internalMutation({
   args: {
     uid: v.string(),
     email: v.string(),
     full_name: v.string(),
     password_hash: v.string(),
+    role: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const existing = await ctx.db
@@ -195,7 +203,7 @@ export const createUser = internalMutation({
       uid: args.uid,
       email: args.email,
       full_name: args.full_name,
-      role: "viewer", // self-service signups are always viewers
+      role: args.role === "admin" ? "admin" : "viewer",
       is_active: true,
       password_hash: args.password_hash,
       created_at: now,

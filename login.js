@@ -1,4 +1,6 @@
-/* Login + viewer sign-up logic for the IDB dashboard (Convex-backed). */
+/* Sign-in logic for the IDB dashboard (Convex-backed).
+ * Invite-only: there is no public sign-up here — accounts are created by an
+ * admin in the Admin Console (authNode:adminCreateUser). */
 (function () {
   var IDB = window.IDB;
   var $ = function (id) {
@@ -42,22 +44,6 @@
     location.href = role === "admin" ? "admin.html" : "index.html";
   }
 
-  /* ---- tab switching ---- */
-  function setTab(which) {
-    var si = which === "signin";
-    $("tabSignin").classList.toggle("active", si);
-    $("tabSignup").classList.toggle("active", !si);
-    $("formSignin").style.display = si ? "" : "none";
-    $("formSignup").style.display = si ? "none" : "";
-    clearMsg();
-  }
-  $("tabSignin").addEventListener("click", function () {
-    setTab("signin");
-  });
-  $("tabSignup").addEventListener("click", function () {
-    setTab("signup");
-  });
-
   /* ---- sign in ---- */
   $("formSignin").addEventListener("submit", function (e) {
     e.preventDefault();
@@ -91,46 +77,6 @@
         showMsg(err.message || "Sign in failed", "error");
         btn.disabled = false;
         btn.textContent = "Sign In";
-      });
-  });
-
-  /* ---- sign up (always as viewer) ---- */
-  $("formSignup").addEventListener("submit", function (e) {
-    e.preventDefault();
-    clearMsg();
-    var btn = $("suBtn");
-    btn.disabled = true;
-    btn.textContent = "Creating…";
-    var email = $("suEmail").value.trim();
-    var password = $("suPass").value;
-    var fullName = $("suName").value.trim();
-
-    var resetBtn = function () {
-      btn.disabled = false;
-      btn.textContent = "Create Viewer Account";
-    };
-
-    // Creates an immediately-usable viewer account (no confirmation email)
-    // and signs the user in in the same call.
-    IDB.auth
-      .signUp(email, password, fullName)
-      .then(function (res) {
-        if (!res || !res.ok) {
-          showMsg(
-            (res && res.error) || "Sign up failed. Please try again.",
-            "error"
-          );
-          resetBtn();
-          return;
-        }
-        showMsg("Account created. Signing you in…", "ok");
-        withTimeout(IDB.recordLogin(res.user), 5000).then(function () {
-          redirectFor("viewer");
-        });
-      })
-      .catch(function (err) {
-        showMsg(err.message || "Sign up failed", "error");
-        resetBtn();
       });
   });
 

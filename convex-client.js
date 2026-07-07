@@ -119,22 +119,9 @@
         return res;
       });
     },
-    signUp: function (email, password, fullName) {
-      return IDB.action("authNode:signUp", {
-        email: email,
-        password: password,
-        full_name: fullName || undefined,
-      }).then(function (res) {
-        if (res && res.ok) {
-          writeAuth({
-            token: res.token,
-            expires_at: res.expires_at,
-            user: res.user,
-          });
-        }
-        return res;
-      });
-    },
+    // NOTE: there is no public self-service signUp. The dashboard is
+    // admin-invite-only; new accounts are created by an admin via the Admin
+    // Console (authNode:adminCreateUser).
     signOut: function () {
       var a = readAuth();
       clearAuth();

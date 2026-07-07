@@ -7,7 +7,7 @@
     <title>Admin Console · IDB Assets Dashboard</title>
     <link rel="icon" type="image/jpeg" href="images/favicon.jpg?v=2">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="auth.css?v=20260531a">
+    <link rel="stylesheet" href="auth.css?v=20260707a">
 </head>
 
 <body>
@@ -59,6 +59,41 @@
                 <div class="n" id="statLogins">–</div>
                 <div class="l">Logins (24h)</div>
             </div>
+        </div>
+
+        <!-- Create user (admin invite — no public sign-up) -->
+        <div class="panel">
+            <div class="panel-head">
+                <h2>➕ Create User</h2>
+            </div>
+            <form id="createUserForm" class="create-user" autocomplete="off">
+                <div class="field">
+                    <label for="cuName">Full name <span class="muted">(optional)</span></label>
+                    <input id="cuName" type="text" placeholder="Jane Doe" autocomplete="off">
+                </div>
+                <div class="field">
+                    <label for="cuEmail">Email</label>
+                    <input id="cuEmail" type="email" required placeholder="name@ikejaelectric.com"
+                        autocomplete="off">
+                </div>
+                <div class="field">
+                    <label for="cuPass">Initial password <span class="muted">(min 6)</span></label>
+                    <input id="cuPass" type="text" required minlength="6" placeholder="Share with the user"
+                        autocomplete="off">
+                </div>
+                <div class="field">
+                    <label for="cuRole">Role</label>
+                    <select id="cuRole">
+                        <option value="viewer" selected>Viewer</option>
+                        <option value="admin">Admin</option>
+                    </select>
+                </div>
+                <div class="cu-actions">
+                    <button class="btn btn-primary" type="submit" id="cuBtn">Create Account</button>
+                </div>
+            </form>
+            <p class="cu-hint">Accounts are created active and ready to use. Share the initial password
+                with the user; they can sign in immediately.</p>
         </div>
 
         <!-- Users -->
@@ -125,9 +160,9 @@
 
     <div class="toast" id="toast"></div>
 
-    <script src="convex-client.js?v=20260705a"></script>
+    <script src="convex-client.js?v=20260707a"></script>
     <script src="auth-footprint.js?v=20260705a"></script>
-    <script src="admin.js?v=20260705a"></script>
+    <script src="admin.js?v=20260707a"></script>
 </body>
 
 </html>
