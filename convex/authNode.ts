@@ -70,23 +70,38 @@ export const signIn = action({
   },
 });
 
-// Public self-service registration -> always a viewer account, immediately
-// usable (mirrors the old signup-viewer edge function: no email confirmation).
-export const signUp = action({
+// Admin-invite-only account creation. There is intentionally NO public
+// self-service signup: the dashboard is a private internal tool, so only an
+// existing active admin can create accounts (this replaces the old public
+// signUp action / signup-viewer edge function). No session is minted here —
+// the admin creates the account and shares the initial password.
+export const adminCreateUser = action({
   args: {
+    token: v.string(),
     email: v.string(),
     password: v.string(),
     full_name: v.optional(v.string()),
+    role: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    // Authorize: caller's session must resolve to an active admin.
+    const caller = await ctx.runQuery(internal.auth.sessionUserInternal, {
+      token: args.token,
+    });
+    if (!caller || caller.role !== "admin" || caller.is_active === false) {
+      return { ok: false, error: "Forbidden: administrator access required" };
+    }
+
     const email = args.email.trim().toLowerCase();
     const fullName = (args.full_name ?? "").trim() || email.split("@")[0];
+    const role = args.role === "admin" ? "admin" : "viewer";
     if (!EMAIL_RE.test(email)) {
       return { ok: false, error: "Please enter a valid email address." };
     }
     if (args.password.length < 6) {
       return { ok: false, error: "Password must be at least 6 characters." };
     }
+
     const password_hash = await bcrypt.hash(args.password, 10);
     const uid = randomUUID();
     const created = await ctx.runMutation(internal.auth.createUser, {
@@ -94,32 +109,11 @@ export const signUp = action({
       email,
       full_name: fullName,
       password_hash,
+      role,
     });
     if (!created.ok) {
-      return {
-        ok: false,
-        error:
-          "An account with this email already exists. Please sign in instead.",
-      };
+      return { ok: false, error: "An account with this email already exists." };
     }
-    const token = newToken();
-    const res = await ctx.runMutation(internal.auth.createSession, {
-      user_uid: uid,
-      token,
-    });
-    return {
-      ok: true,
-      token,
-      expires_at: res.expires_at,
-      user: {
-        id: uid,
-        email,
-        full_name: fullName,
-        role: "viewer",
-        is_active: true,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      },
-    };
+    return { ok: true, email, full_name: fullName, role };
   },
 });

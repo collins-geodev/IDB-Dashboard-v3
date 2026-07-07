@@ -7,7 +7,7 @@
     <title>Sign In · IDB Assets Dashboard</title>
     <link rel="icon" type="image/jpeg" href="images/favicon.jpg?v=2">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="auth.css?v=20260530a">
+    <link rel="stylesheet" href="auth.css?v=20260707a">
 </head>
 
 <body>
@@ -17,7 +17,16 @@
                 <img src="images/ie-logo.png?v=20260405c" alt="IE Logo"
                     onerror="this.style.display='none'">
                 <h1>IDB Assets Dashboard</h1>
-                <p>Sign in to continue</p>
+                <p>Powered by the GIS Team, Ikeja Electric</p>
+            </div>
+
+            <!-- Ownership / legitimacy notice (internal tool, invite-only) -->
+            <div class="auth-notice">
+                <strong>Internal tool — authorized staff only.</strong>
+                This is a private asset-tracking dashboard for the Ikeja Electric
+                GIS team. Access is by administrator invitation; there is no
+                public sign-up. Need access? Contact the IDB administrator at
+                <a href="mailto:polosoft.collins@gmail.com">polosoft.collins@gmail.com</a>.
             </div>
 
             <!-- Active-session banner (shown if already logged in) -->
@@ -30,13 +39,8 @@
                 </div>
             </div>
 
-            <!-- Auth forms -->
+            <!-- Sign-in form (invite-only: no public account creation) -->
             <div id="authBox">
-                <div class="tabs">
-                    <button id="tabSignin" class="active" type="button">Sign In</button>
-                    <button id="tabSignup" type="button">Create Account</button>
-                </div>
-
                 <form id="formSignin" autocomplete="on">
                     <div class="field">
                         <label for="siEmail">Email</label>
@@ -50,23 +54,6 @@
                     <button class="btn btn-primary" type="submit" id="siBtn">Sign In</button>
                 </form>
 
-                <form id="formSignup" autocomplete="on" style="display:none">
-                    <div class="field">
-                        <label for="suName">Full name <span class="muted">(optional)</span></label>
-                        <input id="suName" type="text" placeholder="Jane Doe" autocomplete="name">
-                    </div>
-                    <div class="field">
-                        <label for="suEmail">Email</label>
-                        <input id="suEmail" type="email" required placeholder="you@example.com" autocomplete="email">
-                    </div>
-                    <div class="field">
-                        <label for="suPass">Password <span class="muted">(min 6 characters)</span></label>
-                        <input id="suPass" type="password" required minlength="6" placeholder="••••••••"
-                            autocomplete="new-password">
-                    </div>
-                    <button class="btn btn-primary" type="submit" id="suBtn">Create Viewer Account</button>
-                </form>
-
                 <div class="msg" id="msg"></div>
             </div>
 
@@ -76,9 +63,9 @@
         </div>
     </div>
 
-    <script src="convex-client.js?v=20260705a"></script>
+    <script src="convex-client.js?v=20260707a"></script>
     <script src="auth-footprint.js?v=20260705a"></script>
-    <script src="login.js?v=20260705a"></script>
+    <script src="login.js?v=20260707a"></script>
 </body>
 
 </html>

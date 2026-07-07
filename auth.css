@@ -90,6 +90,24 @@ a:hover {
   font-size: 0.85rem;
 }
 
+/* Ownership / legitimacy notice on the login screen */
+.auth-notice {
+  background: hsl(var(--primary) / 0.08);
+  border: 1px solid hsl(var(--primary) / 0.25);
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+  margin-bottom: 1.4rem;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--txt-dim);
+}
+.auth-notice strong {
+  display: block;
+  color: var(--txt);
+  margin-bottom: 0.25rem;
+  font-weight: 600;
+}
+
 .tabs {
   display: flex;
   background: hsl(var(--secondary));
@@ -241,6 +259,43 @@ a:hover {
   max-width: 1280px;
   margin: 0 auto;
   padding: 1.5rem;
+}
+
+/* Create-user (admin invite) form */
+.create-user {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.9rem;
+  align-items: end;
+  padding: 1.1rem 1.3rem;
+}
+.create-user .field {
+  margin-bottom: 0;
+}
+.create-user select {
+  width: 100%;
+  padding: 0.75rem 0.9rem;
+  background: hsl(var(--background));
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--txt);
+  font-size: 0.95rem;
+  outline: none;
+}
+.create-user select:focus {
+  border-color: var(--blue);
+}
+.create-user .cu-actions {
+  display: flex;
+}
+.create-user .btn {
+  width: 100%;
+}
+.cu-hint {
+  padding: 0 1.3rem 1rem;
+  font-size: 0.8rem;
+  color: var(--txt-dim);
+  margin: 0;
 }
 
 .admin-top {

@@ -345,6 +345,63 @@
     }
   }
 
+  /* ---------- create user (admin invite) ---------- */
+  function handleCreateUser(e) {
+    e.preventDefault();
+    var btn = $("cuBtn");
+    var email = ($("cuEmail").value || "").trim();
+    var password = $("cuPass").value || "";
+    var fullName = ($("cuName").value || "").trim();
+    var role = $("cuRole").value === "admin" ? "admin" : "viewer";
+
+    if (!email) {
+      toast("Email is required.", "err");
+      return;
+    }
+    if (password.length < 6) {
+      toast("Password must be at least 6 characters.", "err");
+      return;
+    }
+
+    var token = IDB.auth.getToken();
+    if (!token) {
+      toast("Your session has expired. Please sign in again.", "err");
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = "Creating…";
+    IDB.action("authNode:adminCreateUser", {
+      token: token,
+      email: email,
+      password: password,
+      full_name: fullName || undefined,
+      role: role,
+    })
+      .then(function (res) {
+        btn.disabled = false;
+        btn.textContent = "Create Account";
+        if (res && res.ok) {
+          toast(
+            (role === "admin" ? "Admin" : "Viewer") +
+              " account created for " +
+              email +
+              ".",
+            "ok"
+          );
+          $("createUserForm").reset();
+          loadAll();
+        } else {
+          toast((res && res.error) || "Failed to create user.", "err");
+        }
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        btn.textContent = "Create Account";
+        toast(err.message || "Failed to create user.", "err");
+      });
+  }
+
   /* ---------- audit table ---------- */
   function renderAudit() {
     var q = ($("auditSearch").value || "").toLowerCase().trim();
@@ -424,6 +481,7 @@
     );
   });
 
+  $("createUserForm").addEventListener("submit", handleCreateUser);
   $("userSearch").addEventListener("input", renderUsers);
   $("auditSearch").addEventListener("input", renderAudit);
   $("refreshUsers").addEventListener("click", loadAll);
