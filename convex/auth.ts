@@ -182,6 +182,24 @@ export const clearLoginFailures = internalMutation({
   },
 });
 
+// Update a user's password hash (used by the self-service changePassword flow).
+export const updatePasswordHash = internalMutation({
+  args: { uid: v.string(), password_hash: v.string() },
+  handler: async (ctx, { uid, password_hash }) => {
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_uid", (q) => q.eq("uid", uid))
+      .unique();
+    if (user) {
+      await ctx.db.patch(user._id, {
+        password_hash,
+        updated_at: new Date().toISOString(),
+      });
+    }
+    return { ok: true };
+  },
+});
+
 // Insert a user. `role` is set by the admin-invite flow (adminCreateUser);
 // it defaults to 'viewer' and only ever resolves to 'viewer' or 'admin'.
 export const createUser = internalMutation({

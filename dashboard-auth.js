@@ -48,6 +48,8 @@
     '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>';
   var LOGIN_ICON =
     '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>';
+  var LOCK_ICON =
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
 
   function renderLoggedOut() {
     var box = $("auth-status");
@@ -92,11 +94,19 @@
       '"><span class="sa-dot"></span>' +
       (isAdmin ? "Administrator" : "Viewer") +
       "</div>" +
+      '<button class="sa-changepw" id="saChangePw" type="button" style="display:flex;align-items:center;justify-content:center;gap:.4rem;width:100%;padding:.55rem .8rem;margin-bottom:.5rem;background-color:#21262d;color:#c9d1d9;border:1px solid #2b3340;border-radius:8px;cursor:pointer;font-weight:600;font-size:.8rem">' +
+      LOCK_ICON +
+      "<span>Change password</span></button>" +
       '<button class="sa-logout" id="saLogout" type="button">' +
       LOGOUT_ICON +
       "<span>Sign out</span></button>" +
       "</div>";
 
+    var cpw = $("saChangePw");
+    if (cpw)
+      cpw.addEventListener("click", function () {
+        if (IDB.showChangePassword) IDB.showChangePassword();
+      });
     var btn = $("saLogout");
     if (btn)
       btn.addEventListener("click", function () {

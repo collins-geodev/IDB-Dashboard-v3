@@ -486,6 +486,11 @@
   $("auditSearch").addEventListener("input", renderAudit);
   $("refreshUsers").addEventListener("click", loadAll);
   $("refreshAudit").addEventListener("click", loadAll);
+  var acp = $("adminChangePw");
+  if (acp)
+    acp.addEventListener("click", function () {
+      if (IDB.showChangePassword) IDB.showChangePassword();
+    });
   $("logoutBtn").addEventListener("click", function () {
     var b = $("logoutBtn");
     b.disabled = true;
