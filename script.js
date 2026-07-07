@@ -550,6 +550,21 @@ document.addEventListener('DOMContentLoaded', () => {
         return 'No ID';
     }
 
+    // A pole record counts as a NEW installation (feeds the "New Poles
+    // (Install)" KPI) when it carries the "Pole Category = New Install" flag
+    // from the field-capture template, or — legacy — a Pole_Type/Issue_Type
+    // that mentions "new". Tolerates a few field-name/spelling variants so the
+    // KPI auto-updates as soon as captured new poles land in the dataset.
+    function isNewInstallPole(item) {
+        if (!item) return false;
+        var cat = String(item["Pole Category"] || item["Pole_Category"] ||
+            item["PoleCategory"] || item["Category"] || "").toLowerCase();
+        if (cat.indexOf('new') >= 0) return true;
+        var pt = String(item.Pole_Type || item["Pole_Type"] || "").toLowerCase();
+        var it = String(item.Issue_Type || item["Issue_Type"] || "").toLowerCase();
+        return pt.indexOf('new') >= 0 || it.indexOf('new') >= 0;
+    }
+
     // Initialize Dashboard
     // Initialize Dashboard - Auto Fetch
     // CRITICAL: Data now lives in Convex file storage. To update it, run:
@@ -1877,10 +1892,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const totalBoqNewTop = activeBoqData.reduce((sum, d) => sum + (parseInt(d["NEW POLE"]) || 0), 0);
         const totalBoqExNewTop = Math.max(0, totalBoqAllTop - totalBoqNewTop);
         const actRecordsAllTop = filteredData.length;
-        const actNewCountTop = filteredData.filter(d =>
-            (d.Pole_Type && d.Pole_Type.toLowerCase().includes('new')) ||
-            (d.Issue_Type && d.Issue_Type.toLowerCase().includes('new'))
-        ).length;
+        const actNewCountTop = filteredData.filter(isNewInstallPole).length;
         const actRecordsExNewTop = Math.max(0, actRecordsAllTop - actNewCountTop);
 
         // Incl. New Poles (Total Poles card base)
@@ -1915,9 +1927,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const boqNew = activeBoqData.reduce((sum, d) => sum + (parseInt(d["NEW POLE"]) || 0), 0);
         const newPoleSLRNs = new Set();
         filteredData.forEach(item => {
-            const isNew = (item.Pole_Type && item.Pole_Type.toLowerCase().includes('new')) ||
-                          (item.Issue_Type && item.Issue_Type.toLowerCase().includes('new'));
-            if (isNew) {
+            if (isNewInstallPole(item)) {
                 const slrn = (item["Lt PoleSLRN"] || item["LT Pole No"] || "").toString().trim();
                 if (slrn) newPoleSLRNs.add(slrn);
             }
@@ -2643,9 +2653,7 @@ document.addEventListener('DOMContentLoaded', () => {
             map[key].users.add(d.User);
 
             // New Poles (Install)
-            const poleType = String(d["Pole_Type"] || d["Type of Pole"] || "").toLowerCase();
-            const issueType = String(d["Issue_Type"] || "").toLowerCase();
-            if (poleType.includes('new') || issueType.includes('new')) map[key].newPoles++;
+            if (isNewInstallPole(d)) map[key].newPoles++;
 
             // Material
             const mat = String(d["Pole Material"] || d["Material"] || d["Pole_Material"] || "").toLowerCase();
