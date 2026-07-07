@@ -1618,10 +1618,11 @@ header.exec-header img.exec-header-logo,
 
 .dashboard-header-brand h1 {
     margin: 0;
-    font-size: 1rem;
-    white-space: normal;
+    font-size: 0.8rem;
+    white-space: nowrap;
     overflow: visible;
     text-overflow: clip;
+    letter-spacing: 0.2px;
     line-height: 1.2;
 }
 
