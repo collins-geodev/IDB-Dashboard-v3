@@ -117,3 +117,50 @@ export const adminCreateUser = action({
     return { ok: true, email, full_name: fullName, role };
   },
 });
+
+// Self-service password change for a signed-in user. Requires the current
+// password (so an admin-created default password can be replaced by the user).
+export const changePassword = action({
+  args: {
+    token: v.string(),
+    current_password: v.string(),
+    new_password: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const su = await ctx.runQuery(internal.auth.sessionUserInternal, {
+      token: args.token,
+    });
+    if (!su) {
+      return {
+        ok: false,
+        error: "Your session has expired. Please sign in again.",
+      };
+    }
+    if (args.new_password.length < 6) {
+      return { ok: false, error: "New password must be at least 6 characters." };
+    }
+    if (args.current_password === args.new_password) {
+      return {
+        ok: false,
+        error: "New password must be different from the current one.",
+      };
+    }
+    const user = await ctx.runQuery(internal.auth.getUserWithHash, {
+      email: su.email,
+    });
+    if (!user) return { ok: false, error: "Account not found." };
+    const match = await bcrypt.compare(
+      args.current_password,
+      user.password_hash
+    );
+    if (!match) {
+      return { ok: false, error: "Your current password is incorrect." };
+    }
+    const password_hash = await bcrypt.hash(args.new_password, 10);
+    await ctx.runMutation(internal.auth.updatePasswordHash, {
+      uid: su.uid,
+      password_hash,
+    });
+    return { ok: true };
+  },
+});
