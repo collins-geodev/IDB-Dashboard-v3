@@ -7,6 +7,21 @@ A read-only, browser-based monitoring dashboard for tracking the field tagging o
 
 ---
 
+## Deployment architecture (consolidated — one repo drives both dashboards)
+
+Both the **v3** (20-feeder) and **v2** (37-feeder) dashboards deploy from **this single repo**. Two Vercel projects are connected to it, and each `git push` to `main` deploys both.
+
+The only per-dashboard differences live in [`dashboard-config.js`](dashboard-config.js), which resolves the variant from the **hostname** at runtime (no build step):
+
+| Domain | variant | Convex backend | feeder scope |
+|--------|---------|----------------|--------------|
+| `idb-assets-dashboard-v2*.vercel.app` | `v2` | `fabulous-pigeon-544` | all feeders |
+| everything else (incl. `…-v3…`) | `v3` | `flexible-ostrich-263` | 20-feeder allowlist |
+
+`dashboard-config.js` sets `window.IDB_CONFIG`; `convex-client.js` reads the Convex URL from it, and `script.js` reads the feeder allowlist from it (applied only when non-null). To pin a **custom domain** to a variant, add it to the `DOMAIN_VARIANTS` map in `dashboard-config.js`. The Convex *backend* functions in `convex/` are deployed per-project separately (`npx convex deploy`).
+
+---
+
 ## What changed vs. V2
 
 V3 is functionally identical to V2 with one targeted addition: a feeder allowlist applied at data-load time. Every analytic, KPI, chart, table, and filter dropdown automatically reflects only the 20 feeders below — no UI changes, no logic forks.
