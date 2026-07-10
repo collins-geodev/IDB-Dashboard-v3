@@ -10,8 +10,11 @@
  *   { token, expires_at, user: {id, email, full_name, role, is_active} }
  * ===================================================================== */
 (function () {
-  var CONVEX_URL = "https://flexible-ostrich-263.convex.cloud";
-  var CONVEX_SITE_URL = "https://flexible-ostrich-263.convex.site";
+  // Convex deployment URL comes from dashboard-config.js (per-dashboard, resolved
+  // by hostname). Falls back to v3's deployment if the config script didn't load.
+  var _cfg = (typeof window !== "undefined" && window.IDB_CONFIG) || {};
+  var CONVEX_URL = _cfg.convexUrl || "https://flexible-ostrich-263.convex.cloud";
+  var CONVEX_SITE_URL = _cfg.convexSiteUrl || "https://flexible-ostrich-263.convex.site";
   var STORAGE_KEY = "idb-auth"; // must match auth-gate.js
 
   function readAuth() {

@@ -634,32 +634,30 @@ document.addEventListener('DOMContentLoaded', () => {
             boq = boq.Sheet2 || boq.Sheet1 || Object.values(boq).find(Array.isArray) || [];
         }
 
-        // V3 scope: restrict BOTH the field dataset (Feeder) and the BOQ
-        // targets (FEEDER NAME) to the 20 approved SHOMOLU feeders at load
-        // time, independent of the data source (Convex / local / GitHub raw).
-        // Re-adds the ALLOWED_FEEDERS_V3 allowlist that was dropped in the
-        // Supabase->Convex migration, so every KPI card (Actual AND target),
-        // chart, filter and map reflects only these 20 even while Convex still
-        // holds the full file. Matched case-insensitively, whitespace-trimmed.
-        const ALLOWED_FEEDERS_V3 = [
-            "11-IgbobiINJ-T2-Market", "11-OworoINJ-T3-Gbagada", "11-OguduINJ-T1-Ogudu",
-            "11-IlupejuINJ-T3-Palmgrove", "11-OguduINJ-T2-Alapere", "11-MarylandINJ-T1-Okupe",
-            "11-OguduINJ-T3-Soluyi", "11-MagodoINJ-T2-CMD", "11-OguduINJ-T1-Express",
-            "11-IgbobiINJ-T3-Ikorodu", "11-New OworoINJ-T1-Odunsi", "11-IgbobiINJ-T3-Railway",
-            "11-IgbobiINJ-T2-Adurosakin", "11-OguduINJ-T3-Kola Adeshina", "11-IsheriINJ-T1-Isheri",
-            "11-WasimiINJ-T1-Araromi", "11-MarylandINJ-T1-Ketu", "11-MarylandINJ-T3-Sylvia",
-            "11-OguduINJ-T2-Oriola", "11-OguduINJ-T1-CAC"
-        ];
-        const _allowedFeederSet = new Set(ALLOWED_FEEDERS_V3.map(f => f.trim().toLowerCase()));
-        if (Array.isArray(fieldData)) {
-            const _before = fieldData.length;
-            fieldData = fieldData.filter(r => _allowedFeederSet.has(String((r && r.Feeder) || '').trim().toLowerCase()));
-            console.log(`[V3] Feeder allowlist (field): ${fieldData.length}/${_before} records kept (20 approved feeders).`);
-        }
-        if (Array.isArray(boq)) {
-            const _bqBefore = boq.length;
-            boq = boq.filter(r => _allowedFeederSet.has(String((r && r['FEEDER NAME']) || '').trim().toLowerCase()));
-            console.log(`[V3] Feeder allowlist (BOQ): ${boq.length}/${_bqBefore} rows kept (20 approved feeders).`);
+        // Per-dashboard feeder scope comes from dashboard-config.js (resolved by
+        // hostname): v3 -> a 20-feeder SHOMOLU allowlist; v2 -> null (show all).
+        // When an allowlist is present, restrict BOTH the field dataset (Feeder)
+        // and the BOQ targets (FEEDER NAME) at load time, independent of the data
+        // source (Convex / local / GitHub raw), so every KPI card (Actual AND
+        // target), chart, filter and map reflects only those feeders even while
+        // Convex still holds the full file. Matched case-insensitively, trimmed.
+        const _cfgVariant = (window.IDB_CONFIG && window.IDB_CONFIG.variant) || 'v3';
+        const _allowedFeeders = (window.IDB_CONFIG && window.IDB_CONFIG.allowedFeeders) || null;
+        if (Array.isArray(_allowedFeeders) && _allowedFeeders.length) {
+            const _n = _allowedFeeders.length;
+            const _allowedFeederSet = new Set(_allowedFeeders.map(f => f.trim().toLowerCase()));
+            if (Array.isArray(fieldData)) {
+                const _before = fieldData.length;
+                fieldData = fieldData.filter(r => _allowedFeederSet.has(String((r && r.Feeder) || '').trim().toLowerCase()));
+                console.log(`[${_cfgVariant}] Feeder allowlist (field): ${fieldData.length}/${_before} records kept (${_n} approved feeders).`);
+            }
+            if (Array.isArray(boq)) {
+                const _bqBefore = boq.length;
+                boq = boq.filter(r => _allowedFeederSet.has(String((r && r['FEEDER NAME']) || '').trim().toLowerCase()));
+                console.log(`[${_cfgVariant}] Feeder allowlist (BOQ): ${boq.length}/${_bqBefore} rows kept (${_n} approved feeders).`);
+            }
+        } else {
+            console.log(`[${_cfgVariant}] No feeder allowlist — showing all feeders in the dataset.`);
         }
         try {
             // Process Field Data
