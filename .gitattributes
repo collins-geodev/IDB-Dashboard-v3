@@ -1,0 +1,12 @@
+# Normalize line endings: store LF in the repo for all detected text files,
+# so diffs stay clean regardless of the editor/OS that touched a file.
+* text=auto eol=lf
+
+# Known binaries — never apply end-of-line conversion.
+*.xlsx  binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary
