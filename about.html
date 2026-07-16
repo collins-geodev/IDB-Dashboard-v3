@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>About · IDB Assets Dashboard</title>
+    <meta name="description" content="Ownership and purpose of the IDB Assets Dashboard — a private, invitation-only internal tool for authorized Ikeja Electric IDB team staff.">
+    <meta name="robots" content="noindex">
+    <link rel="icon" type="image/jpeg" href="images/favicon.jpg?v=2">
+    <style>
+        :root {
+            --bg: #0e141b;
+            --card: #17212c;
+            --border: #26313f;
+            --ink: #e7edf4;
+            --muted: #9fb0c0;
+            --accent: #38bdf8;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: "Outfit", system-ui, -apple-system, "Segoe UI", sans-serif;
+            background: var(--bg);
+            color: var(--ink);
+            line-height: 1.65;
+            padding: clamp(1.5rem, 5vw, 3rem);
+            display: flex;
+            justify-content: center;
+        }
+        .about { width: 100%; max-width: 640px; }
+        .logo { width: 64px; height: auto; display: block; margin-bottom: 1rem; border-radius: 8px; }
+        h1 { font-size: 1.7rem; margin: 0 0 .3rem; letter-spacing: -.01em; }
+        .tagline { color: var(--muted); margin: 0 0 1.6rem; font-size: .95rem; }
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 1.4rem 1.5rem;
+        }
+        .card h2 { font-size: 1rem; margin: 1.3rem 0 .3rem; color: var(--accent); }
+        .card h2:first-child { margin-top: 0; }
+        .card p { margin: 0; color: #d4deea; }
+        a { color: var(--accent); }
+        .foot { margin-top: 1.4rem; font-size: .95rem; }
+    </style>
+</head>
+
+<body>
+    <main class="about">
+        <img src="images/ie-logo.png?v=20260405c" alt="Ikeja Electric logo" class="logo"
+            onerror="this.style.display='none'">
+        <h1>About this dashboard</h1>
+        <p class="tagline">IDB Assets Dashboard · Powered by the GIS Team, Ikeja Electric</p>
+
+        <div class="card">
+            <h2>What this is</h2>
+            <p>The IDB Assets Dashboard is a <strong>private, internal asset-tracking tool</strong> used by
+                the Ikeja Electric IDB (Intelligence Data Box) team to monitor field asset-tagging
+                progress across business units. It is <strong>not a public Ikeja Electric service</strong> and
+                does not offer accounts to the general public.</p>
+
+            <h2>Who operates it</h2>
+            <p>It is operated by the <strong>GIS Team, Ikeja Electric</strong>. The Ikeja Electric name and
+                logo are used with authorization for this internal tool.</p>
+
+            <h2>Access</h2>
+            <p>Access is <strong>by administrator invitation only</strong> — there is no public sign-up.
+                Authorized staff sign in with credentials issued by the IDB Dashboard Administrator.</p>
+
+            <h2>Contact</h2>
+            <p>IDB Dashboard Administrator: <a href="mailto:CAnyanwu@ikejaelectric.com">CAnyanwu@ikejaelectric.com</a><br>
+                Phone: <a href="tel:+2348162302110">+234-08162302110</a></p>
+        </div>
+
+        <p class="foot"><a href="login.html">← Back to sign in</a></p>
+    </main>
+</body>
+
+</html>

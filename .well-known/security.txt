@@ -1,0 +1,7 @@
+# Security contact for the IDB Assets Dashboard
+# A private, invitation-only, internal asset-tracking tool operated by the
+# GIS Team, Ikeja Electric. Not a public Ikeja Electric service.
+Contact: mailto:CAnyanwu@ikejaelectric.com
+Contact: tel:+2348162302110
+Expires: 2027-07-11T00:00:00.000Z
+Preferred-Languages: en
