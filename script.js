@@ -668,8 +668,12 @@ document.addEventListener('DOMContentLoaded', () => {
             globalData = fieldData;
             filteredData = fieldData;
 
+            // Re-apply any template poles the user uploaded earlier (persisted in
+            // localStorage) so the preview and its "+N" badge survive a page refresh.
+            const persistedUploadCount = applyPersistedUploadsOnLoad();
+
             // Detect duplicate SLRNs before rendering
-            detectDuplicateSLRNs(fieldData);
+            detectDuplicateSLRNs(globalData);
 
             // Process BOQ Data
             boqData = boq;
@@ -682,9 +686,11 @@ document.addEventListener('DOMContentLoaded', () => {
             populateFilters();
             updateDashboard();
             updateExecutiveSummary();
+            refreshPreviewBadge(); // show the persisted "+N" badge / Clear item on load
 
             document.querySelectorAll('.last-updated').forEach(el => {
-                el.textContent = `Last Updated: ${new Date().toLocaleTimeString()}`;
+                el.textContent = `Last Updated: ${new Date().toLocaleTimeString()}` +
+                    (persistedUploadCount ? ' · upload preview active' : '');
             });
         } catch (processingError) {
             // Post-fetch runtime errors (rendering, filter population, etc.)
@@ -834,7 +840,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (n > 0) {
             templatePreviewBadge.textContent = '+' + n;
             templatePreviewBadge.hidden = false;
-            templatePreviewBadge.title = n + ' pole(s) from your uploaded template (session preview)';
+            templatePreviewBadge.title = n + ' pole(s) from your uploaded template — kept on this device until you clear it';
             if (templateClearItem) templateClearItem.hidden = false;
         } else {
             templatePreviewBadge.hidden = true;
@@ -852,10 +858,71 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('.last-updated').forEach(el => { el.textContent = stamp; });
     }
 
+    // ── Persist uploaded poles across refresh (per-dashboard, localStorage) ──
+    function templateStorageKey() {
+        return 'idb-template-uploads:' + ((window.IDB_CONFIG && window.IDB_CONFIG.variant) || 'v3');
+    }
+    function loadPersistedUploads() {
+        try {
+            const raw = localStorage.getItem(templateStorageKey());
+            const arr = raw ? JSON.parse(raw) : [];
+            return Array.isArray(arr) ? arr : [];
+        } catch (e) { return []; }
+    }
+    // Snapshot whatever upload records are currently in globalData to localStorage
+    // (empty -> remove the key). Called after every upload and after Clear.
+    function savePersistedUploads() {
+        try {
+            const ups = globalData.filter(r => r && r.__source === 'template-upload');
+            if (ups.length) localStorage.setItem(templateStorageKey(), JSON.stringify(ups));
+            else localStorage.removeItem(templateStorageKey());
+        } catch (e) {}
+    }
+
+    // Upsert a batch of already-normalised upload records into globalData by
+    // Lt PoleSLRN. Snapshots the pristine (non-upload) dataset once so "Clear
+    // preview" can revert. Returns {added, updated, addedNoKey}.
+    function upsertUploadRecords(records) {
+        if (!templateOriginalSnapshot) {
+            templateOriginalSnapshot = globalData
+                .filter(r => !(r && r.__source === 'template-upload'))
+                .map(r => ({ ...r }));
+        }
+        const bySlrn = new Map();
+        globalData.forEach((r, idx) => {
+            const k = String((r && r['Lt PoleSLRN']) || '').trim().toLowerCase();
+            if (k) bySlrn.set(k, idx);
+        });
+        let added = 0, updated = 0, addedNoKey = 0;
+        records.forEach(rec => {
+            const k = String(rec['Lt PoleSLRN'] || '').trim().toLowerCase();
+            if (k && bySlrn.has(k)) { globalData[bySlrn.get(k)] = rec; updated++; }
+            else if (k) { bySlrn.set(k, globalData.length); globalData.push(rec); added++; }
+            else { globalData.push(rec); addedNoKey++; }
+        });
+        return { added, updated, addedNoKey };
+    }
+
+    // Re-apply persisted uploads after the canonical data loads (survive refresh).
+    // Returns the number of upload rows re-applied.
+    function applyPersistedUploadsOnLoad() {
+        let ups = loadPersistedUploads();
+        if (!ups.length) return 0;
+        const allowed = (window.IDB_CONFIG && window.IDB_CONFIG.allowedFeeders) || null;
+        if (Array.isArray(allowed) && allowed.length) {
+            const allowSet = new Set(allowed.map(f => f.trim().toLowerCase()));
+            ups = ups.filter(r => allowSet.has(String((r && r.Feeder) || '').trim().toLowerCase()));
+        }
+        if (!ups.length) return 0;
+        upsertUploadRecords(ups);
+        return ups.length;
+    }
+
     function clearTemplatePreview() {
         if (!templateOriginalSnapshot) return;
         globalData = templateOriginalSnapshot.map(r => ({ ...r }));
         templateOriginalSnapshot = null;
+        savePersistedUploads(); // globalData now has no uploads -> removes the stored key
         rerenderAfterDataChange('preview cleared');
         showTemplateResult({ title: 'Preview cleared', cleared: true });
     }
@@ -986,32 +1053,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            // Snapshot the pristine dataset once, so "Clear preview" can revert.
-            if (!templateOriginalSnapshot) {
-                templateOriginalSnapshot = globalData.map(r => ({ ...r }));
-            }
-
-            // Upsert by Lt PoleSLRN.
-            const bySlrn = new Map();
-            globalData.forEach((r, idx) => {
-                const k = String((r && r['Lt PoleSLRN']) || '').trim().toLowerCase();
-                if (k) bySlrn.set(k, idx);
-            });
-            let added = 0, updated = 0, addedNoKey = 0;
-            scoped.forEach(rec => {
-                const k = String(rec['Lt PoleSLRN'] || '').trim().toLowerCase();
-                if (k && bySlrn.has(k)) {
-                    globalData[bySlrn.get(k)] = rec;
-                    updated++;
-                } else if (k) {
-                    bySlrn.set(k, globalData.length);
-                    globalData.push(rec);
-                    added++;
-                } else {
-                    globalData.push(rec);
-                    addedNoKey++;
-                }
-            });
+            // Upsert by Lt PoleSLRN (snapshots the pristine data for Clear), then
+            // persist to localStorage so the preview survives a page refresh.
+            const { added, updated, addedNoKey } = upsertUploadRecords(scoped);
+            savePersistedUploads();
 
             rerenderAfterDataChange('upload preview active');
             showTemplateResult({
@@ -1076,7 +1121,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 rowLi('Skipped — outside feeder scope', r.outOfScope, 'warn') +
                 rowLi('Skipped — no feeder given', r.noFeederSkipped, 'warn') +
                 '</ul>' +
-                '<div class="note">This is a <strong>session preview</strong> (clears on refresh). A pole counts toward completion / new-pole KPIs only once GIS assigns it an <strong>LT&nbsp;Pole&nbsp;SLRN</strong>; rows still <em>awaiting GIS capture</em> are shown but not counted. Choose <strong>Clear uploaded preview</strong> to revert — the shared dataset is unchanged.</div>';
+                '<div class="note"><strong>Saved on this device</strong> — it stays after a refresh until you choose <strong>Clear uploaded preview</strong>. A pole counts toward completion / new-pole KPIs only once GIS assigns it an <strong>LT&nbsp;Pole&nbsp;SLRN</strong>; rows still <em>awaiting GIS capture</em> are shown but not counted. The shared dataset (other users) is unchanged.</div>';
         }
 
         const ov = document.createElement('div');
@@ -2249,10 +2294,16 @@ document.addEventListener('DOMContentLoaded', () => {
             activeBoqData = activeBoqData.filter(d => dtVals.includes(d["DT NAME"]));
         }
 
+        // Uploaded poles still awaiting GIS capture (no LT Pole SLRN) are shown on the
+        // map/table but must not inflate ANY "captured" tally. The SLRN-keyed KPIs below
+        // already exclude them; this subset also keeps them out of the presence counts
+        // (Active Users, Feeders, DTs).
+        const capturedData = filteredData.filter(d => d.__gisCaptured !== false);
+
         // Update Top Cards
         const topActiveEl = document.getElementById('topCardActiveUsers');
         if (topActiveEl) {
-            const activeUsersCount = new Set(filteredData.map(d => d.User).filter(Boolean)).size;
+            const activeUsersCount = new Set(capturedData.map(d => d.User).filter(Boolean)).size;
             topActiveEl.textContent = activeUsersCount.toLocaleString();
         }
 
@@ -2339,14 +2390,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         updateModernCard('users', boqNew, actNew);
 
-        // --- E. Feeders ---
+        // --- E. Feeders --- (exclude poles still awaiting GIS capture)
         const boqFeeders = new Set(activeBoqData.map(d => d["FEEDER NAME"])).size;
-        const actFeeders = new Set(filteredData.map(d => d.Feeder)).size;
+        const actFeeders = new Set(capturedData.map(d => d.Feeder)).size;
         updateModernCard('feeders', boqFeeders, actFeeders);
 
-        // --- F. DTs ---
+        // --- F. DTs --- (exclude poles still awaiting GIS capture)
         const boqDTs = new Set(activeBoqData.map(d => d["DT NAME"])).size;
-        const actDTs = new Set(filteredData.map(d => d["DT Name"] || d["DT_Name"])).size;
+        const actDTs = new Set(capturedData.map(d => d["DT Name"] || d["DT_Name"])).size;
         updateModernCard('dts', boqDTs, actDTs);
 
         // --- G. Buildings (unique by SLRN) ---
