@@ -14,6 +14,7 @@ import type * as audit from "../audit.js";
 import type * as auth from "../auth.js";
 import type * as authNode from "../authNode.js";
 import type * as http from "../http.js";
+import type * as poleUploads from "../poleUploads.js";
 
 import type {
   ApiFromModules,
@@ -28,6 +29,7 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   authNode: typeof authNode;
   http: typeof http;
+  poleUploads: typeof poleUploads;
 }>;
 
 /**

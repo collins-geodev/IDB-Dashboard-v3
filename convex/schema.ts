@@ -78,4 +78,18 @@ export default defineSchema({
     content_type: v.string(),
     updated_at: v.string(),
   }).index("by_name", ["name"]),
+
+  // Poles added via the New-Pole template "Upload" action. Shown to ALL users
+  // (merged client-side with the canonical dataset in script.js), separate from
+  // converted_data_latest.json so the weekly data refresh never disturbs them.
+  // Admin-managed (see poleUploads.ts). `slrn` is the normalized Lt PoleSLRN
+  // ("" when the pole has not yet been GIS-captured); `record` is the full,
+  // already-normalized pole object the dashboard renders.
+  pole_uploads: defineTable({
+    slrn: v.string(),
+    record: v.any(),
+    uploaded_by: v.optional(v.string()),
+    created_at: v.string(),
+    updated_at: v.optional(v.string()),
+  }).index("by_slrn", ["slrn"]),
 });

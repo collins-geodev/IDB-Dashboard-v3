@@ -612,16 +612,21 @@ document.addEventListener('DOMContentLoaded', () => {
             boqDataUrls,
             './BOQ-IDB.json',
             'https://raw.githubusercontent.com/collins-geodev/IDB-Dashboard-v3/main/BOQ-IDB.json'
-        )
+        ),
+        // Shared uploaded poles (visible to all users). Empty if the backend
+        // has no uploads or the query isn't available — never blocks the load.
+        (window.IDB && IDB.query)
+            ? IDB.query('poleUploads:list').catch(() => [])
+            : Promise.resolve([])
     ])
     .catch(error => {
         // True network / fetch failures land here — log silently, never
         // show a blocking alert. If data truly failed, the empty dashboard
         // is the clearest signal; developers can inspect the console.
         console.error('[Dashboard] Error fetching data from all sources:', error);
-        return [null, null];
+        return [null, null, []];
     })
-    .then(([fieldData, boq]) => {
+    .then(([fieldData, boq, sharedUploads]) => {
         if (!fieldData || !boq) {
             console.warn('[Dashboard] Skipping processing — data not available.');
             return;
@@ -668,9 +673,9 @@ document.addEventListener('DOMContentLoaded', () => {
             globalData = fieldData;
             filteredData = fieldData;
 
-            // Re-apply any template poles the user uploaded earlier (persisted in
-            // localStorage) so the preview and its "+N" badge survive a page refresh.
-            const persistedUploadCount = applyPersistedUploadsOnLoad();
+            // Merge the shared uploaded poles (from Convex) so every viewer sees
+            // them — scoped to this dashboard's allowed feeders.
+            const sharedUploadCount = applySharedUploads(sharedUploads);
 
             // Detect duplicate SLRNs before rendering
             detectDuplicateSLRNs(globalData);
@@ -686,11 +691,11 @@ document.addEventListener('DOMContentLoaded', () => {
             populateFilters();
             updateDashboard();
             updateExecutiveSummary();
-            refreshPreviewBadge(); // show the persisted "+N" badge / Clear item on load
+            refreshPreviewBadge(); // show the shared "+N" badge / Clear item on load
 
             document.querySelectorAll('.last-updated').forEach(el => {
                 el.textContent = `Last Updated: ${new Date().toLocaleTimeString()}` +
-                    (persistedUploadCount ? ' · upload preview active' : '');
+                    (sharedUploadCount ? ' · ' + sharedUploadCount + ' uploaded pole(s)' : '');
             });
         } catch (processingError) {
             // Post-fetch runtime errors (rendering, filter population, etc.)
@@ -840,8 +845,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (n > 0) {
             templatePreviewBadge.textContent = '+' + n;
             templatePreviewBadge.hidden = false;
-            templatePreviewBadge.title = n + ' pole(s) from your uploaded template — kept on this device until you clear it';
-            if (templateClearItem) templateClearItem.hidden = false;
+            templatePreviewBadge.title = n + ' uploaded pole(s), shared with all users';
+            // Only admins can remove shared uploads, so only they see the control.
+            if (templateClearItem) templateClearItem.hidden = !isAdminUser();
         } else {
             templatePreviewBadge.hidden = true;
             if (templateClearItem) templateClearItem.hidden = true;
@@ -858,30 +864,15 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('.last-updated').forEach(el => { el.textContent = stamp; });
     }
 
-    // ── Persist uploaded poles across refresh (per-dashboard, localStorage) ──
-    function templateStorageKey() {
-        return 'idb-template-uploads:' + ((window.IDB_CONFIG && window.IDB_CONFIG.variant) || 'v3');
-    }
-    function loadPersistedUploads() {
-        try {
-            const raw = localStorage.getItem(templateStorageKey());
-            const arr = raw ? JSON.parse(raw) : [];
-            return Array.isArray(arr) ? arr : [];
-        } catch (e) { return []; }
-    }
-    // Snapshot whatever upload records are currently in globalData to localStorage
-    // (empty -> remove the key). Called after every upload and after Clear.
-    function savePersistedUploads() {
-        try {
-            const ups = globalData.filter(r => r && r.__source === 'template-upload');
-            if (ups.length) localStorage.setItem(templateStorageKey(), JSON.stringify(ups));
-            else localStorage.removeItem(templateStorageKey());
-        } catch (e) {}
-    }
+    // ── Shared uploaded poles (Convex table "pole_uploads") ──────────────
+    // Uploaded poles live in the shared backend so EVERY viewer sees them.
+    // Reads are public; publishing and clearing are admin-only (enforced on the
+    // server in poleUploads.ts). There is no per-device copy — the Convex list
+    // is the single source of truth, merged into globalData client-side.
 
     // Upsert a batch of already-normalised upload records into globalData by
-    // Lt PoleSLRN. Snapshots the pristine (non-upload) dataset once so "Clear
-    // preview" can revert. Returns {added, updated, addedNoKey}.
+    // Lt PoleSLRN. Snapshots the pristine (non-upload) dataset once so a reset
+    // can revert the in-memory view. Returns {added, updated, addedNoKey}.
     function upsertUploadRecords(records) {
         if (!templateOriginalSnapshot) {
             templateOriginalSnapshot = globalData
@@ -895,6 +886,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         let added = 0, updated = 0, addedNoKey = 0;
         records.forEach(rec => {
+            if (rec && rec.__source !== 'template-upload') rec.__source = 'template-upload';
             const k = String(rec['Lt PoleSLRN'] || '').trim().toLowerCase();
             if (k && bySlrn.has(k)) { globalData[bySlrn.get(k)] = rec; updated++; }
             else if (k) { bySlrn.set(k, globalData.length); globalData.push(rec); added++; }
@@ -903,10 +895,10 @@ document.addEventListener('DOMContentLoaded', () => {
         return { added, updated, addedNoKey };
     }
 
-    // Re-apply persisted uploads after the canonical data loads (survive refresh).
-    // Returns the number of upload rows re-applied.
-    function applyPersistedUploadsOnLoad() {
-        let ups = loadPersistedUploads();
+    // Merge shared uploaded poles (from Convex) into globalData, scoped to this
+    // dashboard's allowed feeders. Returns the count applied.
+    function applySharedUploads(records) {
+        let ups = Array.isArray(records) ? records.slice() : [];
         if (!ups.length) return 0;
         const allowed = (window.IDB_CONFIG && window.IDB_CONFIG.allowedFeeders) || null;
         if (Array.isArray(allowed) && allowed.length) {
@@ -918,18 +910,82 @@ document.addEventListener('DOMContentLoaded', () => {
         return ups.length;
     }
 
+    // Re-fetch the shared list from Convex, rebuild globalData from the pristine
+    // base + shared uploads, and re-render. Keeps every client in sync after a
+    // publish/clear (including removals made elsewhere).
+    function reloadSharedUploads(note) {
+        if (!(window.IDB && IDB.query)) return Promise.resolve(0);
+        return IDB.query('poleUploads:list')
+            .catch(() => [])
+            .then(records => {
+                if (templateOriginalSnapshot) {
+                    globalData = templateOriginalSnapshot.map(r => ({ ...r }));
+                    templateOriginalSnapshot = null;
+                } else {
+                    globalData = globalData.filter(r => !(r && r.__source === 'template-upload'));
+                }
+                const n = applySharedUploads(records);
+                rerenderAfterDataChange(note || (n ? 'shared uploads active' : ''));
+                return n;
+            });
+    }
+
+    function currentUser() {
+        try { return (IDB.auth && IDB.auth.getSession() || {}).user || null; } catch (e) { return null; }
+    }
+    function isAdminUser() {
+        const u = currentUser();
+        return !!(u && u.role === 'admin');
+    }
+
+    // Publish records to Convex in chunks (admin only). Returns summed counts.
+    function publishUploadsToConvex(token, records) {
+        const CHUNK = 200;
+        const totals = { added: 0, updated: 0, pending: 0 };
+        let i = 0;
+        function next() {
+            if (i >= records.length) return Promise.resolve(totals);
+            const batch = records.slice(i, i + CHUNK);
+            i += CHUNK;
+            return IDB.mutation('poleUploads:addMany', { token: token, records: batch })
+                .then(res => {
+                    if (res) {
+                        totals.added += res.added || 0;
+                        totals.updated += res.updated || 0;
+                        totals.pending += res.pending || 0;
+                    }
+                    return next();
+                });
+        }
+        return next();
+    }
+
+    // Admin only: remove ALL shared uploaded poles for everyone.
     function clearTemplatePreview() {
-        if (!templateOriginalSnapshot) return;
-        globalData = templateOriginalSnapshot.map(r => ({ ...r }));
-        templateOriginalSnapshot = null;
-        savePersistedUploads(); // globalData now has no uploads -> removes the stored key
-        rerenderAfterDataChange('preview cleared');
-        showTemplateResult({ title: 'Preview cleared', cleared: true });
+        const token = IDB.auth && IDB.auth.getToken && IDB.auth.getToken();
+        if (!token || !currentUser()) {
+            showTemplateResult({ error: 'Please sign in as an administrator to remove uploaded poles.' });
+            return;
+        }
+        if (!isAdminUser()) {
+            showTemplateResult({ error: 'Only administrators can remove uploaded poles.' });
+            return;
+        }
+        if (!window.confirm('Remove ALL uploaded poles for everyone? This cannot be undone.')) return;
+        IDB.mutation('poleUploads:clearAll', { token: token })
+            .then(res => reloadSharedUploads('uploaded poles removed')
+                .then(() => showTemplateResult({ cleared: true, removed: res && res.removed })))
+            .catch(err => showTemplateResult({ error: (err && err.message) || 'Could not remove uploaded poles.' }));
     }
 
     function handleTemplateUpload(file) {
         if (typeof XLSX === 'undefined') {
             showTemplateResult({ error: 'The spreadsheet reader (SheetJS) failed to load. Check your connection and reload the page.' });
+            return;
+        }
+        // Publishing changes what every user sees — admins only.
+        if (!isAdminUser()) {
+            showTemplateResult({ error: 'Only administrators can publish uploaded poles to the dashboard. Please sign in with an admin account.' });
             return;
         }
         const reader = new FileReader();
@@ -1053,18 +1109,25 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            // Upsert by Lt PoleSLRN (snapshots the pristine data for Clear), then
-            // persist to localStorage so the preview survives a page refresh.
-            const { added, updated, addedNoKey } = upsertUploadRecords(scoped);
-            savePersistedUploads();
-
-            rerenderAfterDataChange('upload preview active');
-            showTemplateResult({
-                title: 'Template applied',
-                fileName: file.name,
-                added, updated, addedNoKey, outOfScope,
-                blankSkipped, exampleSkipped, noFeederSkipped
-            });
+            // Publish to the shared Convex store (admin only) so every viewer
+            // sees these poles. The server is authoritative; we also fail fast
+            // in the UI with a clear message.
+            const token = IDB.auth && IDB.auth.getToken && IDB.auth.getToken();
+            if (!token || !isAdminUser()) {
+                showTemplateResult({ error: 'Only administrators can publish uploaded poles to the dashboard.' });
+                return;
+            }
+            publishUploadsToConvex(token, scoped)
+                .then(t => reloadSharedUploads('upload published').then(() => {
+                    showTemplateResult({
+                        title: 'Template published',
+                        fileName: file.name,
+                        added: t.added, updated: t.updated, addedNoKey: t.pending,
+                        outOfScope: outOfScope,
+                        blankSkipped: blankSkipped, exampleSkipped: exampleSkipped, noFeederSkipped: noFeederSkipped
+                    });
+                }))
+                .catch(err => showTemplateResult({ error: (err && err.message) || 'Could not publish uploaded poles. Please try again.' }));
         };
         reader.readAsArrayBuffer(file);
     }
@@ -1106,13 +1169,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 `<div class="err">${r.error}</div>`;
         } else if (r.cleared) {
             body =
-                '<h3>↺ Preview cleared</h3>' +
-                '<p class="sub">The dashboard is back to the original dataset.</p>';
+                '<h3>↺ Uploaded poles removed</h3>' +
+                `<p class="sub">Removed ${r.removed || 0} uploaded pole(s) for all users. The dashboard is back to the official dataset.</p>`;
         } else {
             const scopeNote = (typeof window !== 'undefined' && window.IDB_CONFIG && window.IDB_CONFIG.variant)
                 ? window.IDB_CONFIG.variant.toUpperCase() : '';
             body =
-                '<h3>✅ Template applied</h3>' +
+                '<h3>✅ Template published</h3>' +
                 (r.fileName ? `<p class="sub">${r.fileName}${scopeNote ? ' · ' + scopeNote + ' scope' : ''}</p>` : '') +
                 '<ul>' +
                 rowLi('Captured poles added (counted)', r.added, 'pos') +
@@ -1121,7 +1184,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 rowLi('Skipped — outside feeder scope', r.outOfScope, 'warn') +
                 rowLi('Skipped — no feeder given', r.noFeederSkipped, 'warn') +
                 '</ul>' +
-                '<div class="note"><strong>Saved on this device</strong> — it stays after a refresh until you choose <strong>Clear uploaded preview</strong>. A pole counts toward completion / new-pole KPIs only once GIS assigns it an <strong>LT&nbsp;Pole&nbsp;SLRN</strong>; rows still <em>awaiting GIS capture</em> are shown but not counted. The shared dataset (other users) is unchanged.</div>';
+                '<div class="note"><strong>Published to everyone</strong> — all users now see these poles (they persist across refreshes until an admin removes them). A pole counts toward completion / new-pole KPIs only once GIS assigns it an <strong>LT&nbsp;Pole&nbsp;SLRN</strong>; rows still <em>awaiting GIS capture</em> are shown but not counted. The official weekly dataset is untouched.</div>';
         }
 
         const ov = document.createElement('div');
