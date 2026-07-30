@@ -194,6 +194,120 @@ h1 {
     display: none;
 }
 
+/* ── New-Pole Template dropdown (Download / Upload) ── */
+.template-dropdown {
+    position: relative;
+    display: inline-flex;
+}
+
+.template-dropdown-toggle {
+    gap: 0.4rem;
+    text-decoration: none;
+}
+
+.template-dropdown-toggle:hover {
+    background-color: #7c3aed !important;
+    border-color: #7c3aed !important;
+}
+
+.template-dropdown-caret {
+    transition: transform 0.2s ease;
+    flex-shrink: 0;
+}
+
+.template-dropdown.open .template-dropdown-caret {
+    transform: rotate(180deg);
+}
+
+.template-preview-badge {
+    background: rgba(255, 255, 255, 0.22);
+    color: #fff;
+    font-size: 0.68rem;
+    font-weight: 700;
+    line-height: 1;
+    padding: 0.15rem 0.4rem;
+    border-radius: 999px;
+    white-space: nowrap;
+}
+
+.template-dropdown-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 1200;
+    min-width: 260px;
+    background: var(--card-bg, #161b22);
+    border: 1px solid var(--border-color, #2b3340);
+    border-radius: 10px;
+    box-shadow: 0 18px 45px -15px rgba(0, 0, 0, 0.55);
+    padding: 0.35rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.template-dropdown-menu[hidden] {
+    display: none;
+}
+
+.template-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.55rem 0.65rem;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-color, #e6edf3);
+    font-family: inherit;
+    font-size: 0.85rem;
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.template-dropdown-item:hover,
+.template-dropdown-item:focus-visible {
+    background: rgba(139, 92, 246, 0.16);
+    outline: none;
+}
+
+.template-dropdown-item .tdi-icon {
+    font-size: 1rem;
+    flex-shrink: 0;
+    width: 1.25rem;
+    text-align: center;
+}
+
+.template-dropdown-item .tdi-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.25;
+}
+
+.template-dropdown-item .tdi-text strong {
+    font-weight: 600;
+}
+
+.template-dropdown-item .tdi-text small {
+    font-size: 0.72rem;
+    color: var(--text-secondary, #8b949e);
+}
+
+.template-dropdown-item--clear {
+    border-top: 1px solid var(--border-color, #2b3340);
+    border-radius: 0 0 7px 7px;
+    margin-top: 0.15rem;
+    padding-top: 0.6rem;
+}
+
+.template-dropdown-item--clear .tdi-icon {
+    font-size: 1.05rem;
+}
+
 .last-updated {
     font-size: 0.8rem;
     color: var(--text-secondary);

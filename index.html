@@ -31,7 +31,7 @@
     <!-- ApexCharts -->
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <!-- Custom CSS -->
-    <link rel="stylesheet" href="style.css?v=20260707d">
+    <link rel="stylesheet" href="style.css?v=20260730a">
     <link rel="stylesheet" href="sidebar.css?v=20260531a">
     <link rel="stylesheet" href="insights.css?v=20260405w">
     <link rel="stylesheet" href="ai-styles.css?v=20260405w">
@@ -208,11 +208,47 @@
                         <button id="downloadPDF" class="upload-btn" style="background-color: #ef4444; border: 1px solid #ef4444; color: white;">
                             Download PDF Report
                         </button>
-                        <a id="downloadTemplate" class="upload-btn" href="IDB_New_Pole_Installation_Template.xlsx?v=2" download="IDB_New_Pole_Installation_Template.xlsx"
-                            title="Download the blank Excel template for the Project & Works Team to record newly installed poles"
-                            style="background-color: #8b5cf6; border: 1px solid #8b5cf6; color: white; text-decoration: none;">
-                            📥 New-Pole Template
-                        </a>
+                        <div class="template-dropdown" id="templateDropdown">
+                            <button type="button" class="upload-btn template-dropdown-toggle" id="templateDropdownToggle"
+                                aria-haspopup="true" aria-expanded="false"
+                                title="Download the blank template or upload a filled one to update the dashboard"
+                                style="background-color: #8b5cf6; border: 1px solid #8b5cf6; color: white;">
+                                <span aria-hidden="true">📥</span>
+                                <span class="template-dropdown-label">New-Pole Template</span>
+                                <span class="template-preview-badge" id="templatePreviewBadge" hidden></span>
+                                <svg class="template-dropdown-caret" width="12" height="12" viewBox="0 0 24 24"
+                                    fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"
+                                    stroke-linejoin="round" aria-hidden="true">
+                                    <polyline points="6 9 12 15 18 9"></polyline>
+                                </svg>
+                            </button>
+                            <div class="template-dropdown-menu" id="templateDropdownMenu" role="menu" hidden>
+                                <a class="template-dropdown-item" id="templateDownloadItem" role="menuitem"
+                                    href="IDB_New_Pole_Installation_Template.xlsx?v=2"
+                                    download="IDB_New_Pole_Installation_Template.xlsx">
+                                    <span class="tdi-icon" aria-hidden="true">⬇️</span>
+                                    <span class="tdi-text">
+                                        <strong>Download Template</strong>
+                                        <small>Blank Excel capture sheet</small>
+                                    </span>
+                                </a>
+                                <button type="button" class="template-dropdown-item" id="templateUploadItem" role="menuitem">
+                                    <span class="tdi-icon" aria-hidden="true">⬆️</span>
+                                    <span class="tdi-text">
+                                        <strong>Upload Filled Template</strong>
+                                        <small>Update the dashboard with new poles</small>
+                                    </span>
+                                </button>
+                                <button type="button" class="template-dropdown-item template-dropdown-item--clear" id="templateClearItem" role="menuitem" hidden>
+                                    <span class="tdi-icon" aria-hidden="true">↺</span>
+                                    <span class="tdi-text">
+                                        <strong>Clear uploaded preview</strong>
+                                        <small>Restore the original dataset</small>
+                                    </span>
+                                </button>
+                            </div>
+                            <input type="file" id="templateUploadInput" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+                        </div>
                         <div class="last-updated" id="lastUpdated">Last Updated: Now</div>
                     </div>
                 </header>
@@ -853,7 +889,7 @@
     <script src="convex-client.js?v=20260710a"></script>
     <script src="auth-footprint.js?v=20260705a"></script>
     <script src="dashboard-auth.js?v=20260707b"></script>
-    <script src="script.js?v=20260710a"></script>
+    <script src="script.js?v=20260730a"></script>
 </body>
 
 </html>

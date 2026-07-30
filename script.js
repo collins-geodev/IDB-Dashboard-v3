@@ -715,6 +715,369 @@ document.addEventListener('DOMContentLoaded', () => {
         XLSX.writeFile(wb, "IDB_Monitor_Data.xlsx");
     }
 
+    /* =====================================================================
+     * New-Pole Template dropdown: Download / Upload-filled-template.
+     * Uploading a filled template parses it in-browser (SheetJS), maps its
+     * columns to the dashboard's field-data schema, restricts it to the
+     * feeders allowed by dashboard-config.js (window.IDB_CONFIG), upserts the
+     * rows into globalData by "Lt PoleSLRN", and re-renders every view. This
+     * is a SESSION PREVIEW — it clears on refresh and never touches the
+     * canonical Convex/Git dataset. "Clear uploaded preview" restores the
+     * pre-upload data.
+     * ===================================================================== */
+
+    // Maps a normalised template header (row-7 labels, whitespace collapsed +
+    // lower-cased) to the destination key used across the dashboard.
+    const TEMPLATE_HEADER_MAP = {
+        'business unit': 'Bussines Unit',
+        'undertaking': 'Undertaking',
+        'feeder': 'Feeder',
+        'dt name': 'DT Name',
+        'dt number': 'DT Number',
+        'upriser no': 'UpriserNo',
+        'pole category': 'Pole Category',
+        'type of pole': 'Type of Pole',
+        'no. of buildings connected': 'No of Buildings Connected to the Pole',
+        'no of buildings connected': 'No of Buildings Connected to the Pole',
+        'reason for installation': 'Reason for Installation',
+        'location address / landmark': 'Location address',
+        'location address': 'Location address',
+        'latitude': 'Latitude',
+        'longitude': 'Longitude',
+        'date installed': 'Date Installed',
+        'installed by (contractor)': 'Installed By',
+        'installed by': 'Installed By',
+        'work order / project ref': 'Work Order',
+        'remarks': 'Remarks',
+        'lt pole slrn': 'Lt PoleSLRN',
+        'lt pole no': 'LT Pole No',
+        'associated buildings slrn': 'Associated Buildings SLRN',
+        'captured by': 'User',
+        'capture date': 'Date/timestamp',
+        'status': 'Status'
+    };
+
+    let templateOriginalSnapshot = null; // pristine globalData before any upload
+
+    const normHeader = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim().toLowerCase();
+
+    function formatTimestampNow() {
+        const d = new Date();
+        const p = (n) => String(n).padStart(2, '0');
+        return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    }
+
+    // ── Dropdown open/close ──
+    const templateDropdown = document.getElementById('templateDropdown');
+    const templateToggle = document.getElementById('templateDropdownToggle');
+    const templateMenu = document.getElementById('templateDropdownMenu');
+    const templateUploadItem = document.getElementById('templateUploadItem');
+    const templateUploadInput = document.getElementById('templateUploadInput');
+    const templateClearItem = document.getElementById('templateClearItem');
+    const templateDownloadItem = document.getElementById('templateDownloadItem');
+    const templatePreviewBadge = document.getElementById('templatePreviewBadge');
+
+    function openTemplateMenu() {
+        if (!templateDropdown || !templateMenu) return;
+        templateDropdown.classList.add('open');
+        templateMenu.hidden = false;
+        templateToggle.setAttribute('aria-expanded', 'true');
+    }
+    function closeTemplateMenu() {
+        if (!templateDropdown || !templateMenu) return;
+        templateDropdown.classList.remove('open');
+        templateMenu.hidden = true;
+        templateToggle.setAttribute('aria-expanded', 'false');
+    }
+    function toggleTemplateMenu() {
+        if (templateMenu && templateMenu.hidden) openTemplateMenu();
+        else closeTemplateMenu();
+    }
+
+    if (templateToggle) {
+        templateToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleTemplateMenu();
+        });
+    }
+    if (templateDownloadItem) {
+        templateDownloadItem.addEventListener('click', () => closeTemplateMenu());
+    }
+    document.addEventListener('click', (e) => {
+        if (templateDropdown && !templateDropdown.contains(e.target)) closeTemplateMenu();
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeTemplateMenu();
+    });
+
+    if (templateUploadItem && templateUploadInput) {
+        templateUploadItem.addEventListener('click', () => {
+            closeTemplateMenu();
+            templateUploadInput.value = ''; // allow re-selecting the same file
+            templateUploadInput.click();
+        });
+        templateUploadInput.addEventListener('change', (e) => {
+            const file = e.target.files && e.target.files[0];
+            if (file) handleTemplateUpload(file);
+        });
+    }
+    if (templateClearItem) {
+        templateClearItem.addEventListener('click', () => {
+            closeTemplateMenu();
+            clearTemplatePreview();
+        });
+    }
+
+    function refreshPreviewBadge() {
+        if (!templatePreviewBadge) return;
+        const n = globalData.filter(r => r && r.__source === 'template-upload').length;
+        if (n > 0) {
+            templatePreviewBadge.textContent = '+' + n;
+            templatePreviewBadge.hidden = false;
+            templatePreviewBadge.title = n + ' pole(s) from your uploaded template (session preview)';
+            if (templateClearItem) templateClearItem.hidden = false;
+        } else {
+            templatePreviewBadge.hidden = true;
+            if (templateClearItem) templateClearItem.hidden = true;
+        }
+    }
+
+    function rerenderAfterDataChange(previewNote) {
+        detectDuplicateSLRNs(globalData);
+        populateFilters();     // rebuild filter option lists (new feeders/DTs/users)
+        applyFilters();        // recompute filteredData + updateDashboard()
+        updateExecutiveSummary();
+        refreshPreviewBadge();
+        const stamp = `Last Updated: ${new Date().toLocaleTimeString()}${previewNote ? ' · ' + previewNote : ''}`;
+        document.querySelectorAll('.last-updated').forEach(el => { el.textContent = stamp; });
+    }
+
+    function clearTemplatePreview() {
+        if (!templateOriginalSnapshot) return;
+        globalData = templateOriginalSnapshot.map(r => ({ ...r }));
+        templateOriginalSnapshot = null;
+        rerenderAfterDataChange('preview cleared');
+        showTemplateResult({ title: 'Preview cleared', cleared: true });
+    }
+
+    function handleTemplateUpload(file) {
+        if (typeof XLSX === 'undefined') {
+            showTemplateResult({ error: 'The spreadsheet reader (SheetJS) failed to load. Check your connection and reload the page.' });
+            return;
+        }
+        const reader = new FileReader();
+        reader.onerror = () => showTemplateResult({ error: 'Could not read the file. Please try again.' });
+        reader.onload = (ev) => {
+            let wb;
+            try {
+                wb = XLSX.read(ev.target.result, { type: 'array' });
+            } catch (err) {
+                showTemplateResult({ error: 'That file is not a valid Excel workbook (.xlsx).' });
+                return;
+            }
+            const sheetName = wb.SheetNames.find(n => /new pole/i.test(n)) || wb.SheetNames[0];
+            const ws = wb.Sheets[sheetName];
+            if (!ws) { showTemplateResult({ error: 'The workbook has no readable sheet.' }); return; }
+
+            const rows = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' });
+
+            // Locate the header row (row 7 in the shipped template).
+            const headerIdx = rows.findIndex(r =>
+                Array.isArray(r) && (
+                    r.some(c => normHeader(c) === 'lt pole slrn') ||
+                    (r.some(c => normHeader(c) === 'business unit') && r.some(c => normHeader(c) === 'feeder'))
+                )
+            );
+            if (headerIdx === -1) {
+                showTemplateResult({ error: "This doesn't look like the New-Pole Installation template — its header row (Business Unit, Feeder, LT Pole SLRN …) wasn't found. Please use the downloaded template." });
+                return;
+            }
+
+            const headerRow = rows[headerIdx];
+            const colToKey = {};
+            headerRow.forEach((h, i) => {
+                const key = TEMPLATE_HEADER_MAP[normHeader(h)];
+                if (key) colToKey[i] = key;
+            });
+
+            // Parse data rows below the header.
+            const parsed = [];
+            let blankSkipped = 0, exampleSkipped = 0, noFeederSkipped = 0;
+            for (let ri = headerIdx + 1; ri < rows.length; ri++) {
+                const row = rows[ri];
+                if (!Array.isArray(row)) continue;
+                const rec = {};
+                Object.keys(colToKey).forEach(ci => {
+                    let val = row[ci];
+                    if (val == null) val = '';
+                    rec[colToKey[ci]] = (typeof val === 'string') ? val.trim() : val;
+                });
+
+                const slrn = String(rec['Lt PoleSLRN'] || '').trim();
+                const feeder = String(rec['Feeder'] || '').trim();
+                const lat = String(rec['Latitude'] || '').trim();
+                const lng = String(rec['Longitude'] || '').trim();
+                const remarks = String(rec['Remarks'] || '').toLowerCase();
+
+                if (remarks.indexOf('example row') !== -1) { exampleSkipped++; continue; }
+                // Fully blank data row (e.g. the pre-numbered S/N rows) → skip.
+                if (!slrn && !feeder && !lat && !lng &&
+                    !String(rec['DT Name'] || '').trim() && !String(rec['DT Number'] || '').trim()) {
+                    blankSkipped++; continue;
+                }
+                // A record must at least name a feeder so it can be scoped.
+                if (!feeder) { noFeederSkipped++; continue; }
+
+                // Complete to the dashboard's field-data schema.
+                rec['Bussines Unit'] = String(rec['Bussines Unit'] || '').trim() || 'SHOMOLU';
+                rec['Status'] = String(rec['Status'] || '').trim() || 'COMPLETE';
+                rec['LT Pole ID'] = String(rec['LT Pole ID'] || rec['LT Pole No'] || '').trim();
+                if (!String(rec['Pole Category'] || '').trim()) rec['Pole Category'] = 'New Install';
+                if (!String(rec['Date/timestamp'] || '').trim()) {
+                    rec['Date/timestamp'] = String(rec['Date Installed'] || '').trim() || formatTimestampNow();
+                }
+                if (!String(rec['User'] || '').trim()) rec['User'] = String(rec['Installed By'] || '').trim() || 'Template Upload';
+                rec.Vendor_Name = inferVendor(rec['User']);
+                if (!rec.Issue_Type) rec.Issue_Type = String(rec['Reason for Installation'] || '').trim() || simulateIssue(rec);
+                rec.__source = 'template-upload';
+
+                parsed.push(rec);
+            }
+
+            if (!parsed.length) {
+                showTemplateResult({
+                    error: 'No filled pole rows were found in the template. Fill in at least the Feeder and location details, then upload again.',
+                    detail: { blankSkipped, exampleSkipped, noFeederSkipped }
+                });
+                return;
+            }
+
+            // Apply the per-dashboard feeder scope ("the configuration").
+            const allowed = (window.IDB_CONFIG && window.IDB_CONFIG.allowedFeeders) || null;
+            let outOfScope = 0;
+            let scoped = parsed;
+            if (Array.isArray(allowed) && allowed.length) {
+                const allowSet = new Set(allowed.map(f => f.trim().toLowerCase()));
+                scoped = parsed.filter(r => {
+                    const ok = allowSet.has(String(r.Feeder || '').trim().toLowerCase());
+                    if (!ok) outOfScope++;
+                    return ok;
+                });
+            }
+
+            if (!scoped.length) {
+                showTemplateResult({
+                    error: `All ${parsed.length} pole(s) in the file are on feeders outside this dashboard's scope (${(allowed || []).length} approved feeders), so nothing was added.`,
+                    detail: { outOfScope }
+                });
+                return;
+            }
+
+            // Snapshot the pristine dataset once, so "Clear preview" can revert.
+            if (!templateOriginalSnapshot) {
+                templateOriginalSnapshot = globalData.map(r => ({ ...r }));
+            }
+
+            // Upsert by Lt PoleSLRN.
+            const bySlrn = new Map();
+            globalData.forEach((r, idx) => {
+                const k = String((r && r['Lt PoleSLRN']) || '').trim().toLowerCase();
+                if (k) bySlrn.set(k, idx);
+            });
+            let added = 0, updated = 0, addedNoKey = 0;
+            scoped.forEach(rec => {
+                const k = String(rec['Lt PoleSLRN'] || '').trim().toLowerCase();
+                if (k && bySlrn.has(k)) {
+                    globalData[bySlrn.get(k)] = rec;
+                    updated++;
+                } else if (k) {
+                    bySlrn.set(k, globalData.length);
+                    globalData.push(rec);
+                    added++;
+                } else {
+                    globalData.push(rec);
+                    addedNoKey++;
+                }
+            });
+
+            rerenderAfterDataChange('upload preview active');
+            showTemplateResult({
+                title: 'Template applied',
+                fileName: file.name,
+                added, updated, addedNoKey, outOfScope,
+                blankSkipped, exampleSkipped, noFeederSkipped
+            });
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
+    // ── Self-contained result dialog (no external CSS) ──
+    function showTemplateResult(r) {
+        const existing = document.getElementById('tpl-result-overlay');
+        if (existing) existing.parentNode.removeChild(existing);
+
+        if (!document.getElementById('tpl-result-style')) {
+            const st = document.createElement('style');
+            st.id = 'tpl-result-style';
+            st.textContent =
+                "#tpl-result-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:100001;padding:1rem;font-family:'Inter',system-ui,-apple-system,sans-serif}" +
+                "#tpl-result{width:100%;max-width:420px;background:#161b22;color:#e6edf3;border:1px solid #2b3340;border-radius:14px;padding:1.4rem;box-shadow:0 25px 60px -20px rgba(0,0,0,.7)}" +
+                "#tpl-result h3{margin:0 0 .2rem;font-size:1.1rem;display:flex;align-items:center;gap:.5rem}" +
+                "#tpl-result p.sub{margin:.1rem 0 1rem;font-size:.82rem;color:#8b949e;word-break:break-word}" +
+                "#tpl-result ul{list-style:none;margin:0 0 .4rem;padding:0}" +
+                "#tpl-result li{display:flex;justify-content:space-between;gap:1rem;padding:.4rem .1rem;border-bottom:1px solid #21262d;font-size:.88rem}" +
+                "#tpl-result li:last-child{border-bottom:none}" +
+                "#tpl-result li .v{font-weight:700}" +
+                "#tpl-result li.pos .v{color:#7ee787}#tpl-result li.upd .v{color:#79c0ff}#tpl-result li.warn .v{color:#f0b849}" +
+                "#tpl-result .note{margin-top:.9rem;font-size:.76rem;color:#8b949e;line-height:1.5;background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:.6rem .7rem}" +
+                "#tpl-result .err{font-size:.9rem;color:#ffb3b3;line-height:1.55;margin:.2rem 0 .4rem}" +
+                "#tpl-result .tpl-actions{display:flex;justify-content:flex-end;margin-top:1.1rem}" +
+                "#tpl-result button{padding:.55rem 1.1rem;border-radius:8px;font-weight:600;font-size:.85rem;cursor:pointer;border:1px solid transparent;background:#8b5cf6;color:#fff}" +
+                "#tpl-result button:hover{background:#7c3aed}";
+            document.head.appendChild(st);
+        }
+
+        const rowLi = (label, val, cls) =>
+            (val && val > 0) ? `<li class="${cls || ''}"><span>${label}</span><span class="v">${val}</span></li>` : '';
+
+        let body;
+        if (r.error) {
+            body =
+                '<h3>⚠️ Couldn\'t apply template</h3>' +
+                (r.fileName ? `<p class="sub">${r.fileName}</p>` : '') +
+                `<div class="err">${r.error}</div>`;
+        } else if (r.cleared) {
+            body =
+                '<h3>↺ Preview cleared</h3>' +
+                '<p class="sub">The dashboard is back to the original dataset.</p>';
+        } else {
+            const scopeNote = (typeof window !== 'undefined' && window.IDB_CONFIG && window.IDB_CONFIG.variant)
+                ? window.IDB_CONFIG.variant.toUpperCase() : '';
+            body =
+                '<h3>✅ Template applied</h3>' +
+                (r.fileName ? `<p class="sub">${r.fileName}${scopeNote ? ' · ' + scopeNote + ' scope' : ''}</p>` : '') +
+                '<ul>' +
+                rowLi('New poles added', r.added, 'pos') +
+                rowLi('Existing poles updated', r.updated, 'upd') +
+                rowLi('Added without an SLRN', r.addedNoKey, 'warn') +
+                rowLi('Skipped — outside feeder scope', r.outOfScope, 'warn') +
+                rowLi('Skipped — no feeder given', r.noFeederSkipped, 'warn') +
+                '</ul>' +
+                '<div class="note">This is a <strong>session preview</strong>. Newly added poles default to <em>COMPLETE / New Install</em>. Refresh the page or choose <strong>Clear uploaded preview</strong> to revert — the shared dataset is unchanged.</div>';
+        }
+
+        const ov = document.createElement('div');
+        ov.id = 'tpl-result-overlay';
+        ov.innerHTML =
+            '<div id="tpl-result" role="dialog" aria-modal="true" aria-label="Template upload result">' +
+            body +
+            '<div class="tpl-actions"><button type="button" id="tplResultOk">Done</button></div></div>';
+        document.body.appendChild(ov);
+        const close = () => { if (ov.parentNode) ov.parentNode.removeChild(ov); };
+        document.getElementById('tplResultOk').addEventListener('click', close);
+        ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+    }
+
 
 
     // AI Assistant Logic
