@@ -930,7 +930,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // Complete to the dashboard's field-data schema.
                 rec['Bussines Unit'] = String(rec['Bussines Unit'] || '').trim() || 'SHOMOLU';
-                rec['Status'] = String(rec['Status'] || '').trim() || 'COMPLETE';
                 rec['LT Pole ID'] = String(rec['LT Pole ID'] || rec['LT Pole No'] || '').trim();
                 if (!String(rec['Pole Category'] || '').trim()) rec['Pole Category'] = 'New Install';
                 if (!String(rec['Date/timestamp'] || '').trim()) {
@@ -938,7 +937,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 if (!String(rec['User'] || '').trim()) rec['User'] = String(rec['Installed By'] || '').trim() || 'Template Upload';
                 rec.Vendor_Name = inferVendor(rec['User']);
-                if (!rec.Issue_Type) rec.Issue_Type = String(rec['Reason for Installation'] || '').trim() || simulateIssue(rec);
+                // A brand-new pole is in good condition. Keep "Reason for Installation"
+                // as its own field — do NOT fold it into Issue_Type, which drives the
+                // good/bad split (a blank Issue_Type would otherwise count as a defect).
+                if (!rec.Issue_Type) rec.Issue_Type = 'Good Condition';
+
+                // GIS-capture gate: a pole is only "captured / complete" once GIS has
+                // assigned it an LT Pole SLRN (the template's FOR-GIS-USE-ONLY field,
+                // "filled on field capture"). Until then it is installed-but-pending and
+                // must NOT count toward completion / new-pole KPIs. The dashboard already
+                // enforces this — every Actual count keys on the pole SLRN — so a pending
+                // pole (no SLRN) is shown but never counted. Reflect that in Status too
+                // instead of blindly defaulting to COMPLETE.
+                var _uploadedStatus = String(rec['Status'] || '').trim();
+                rec['__gisCaptured'] = !!slrn;
+                rec['Status'] = _uploadedStatus || (slrn ? 'COMPLETE' : 'PENDING CAPTURE');
                 rec.__source = 'template-upload';
 
                 parsed.push(rec);
@@ -1057,13 +1070,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 '<h3>✅ Template applied</h3>' +
                 (r.fileName ? `<p class="sub">${r.fileName}${scopeNote ? ' · ' + scopeNote + ' scope' : ''}</p>` : '') +
                 '<ul>' +
-                rowLi('New poles added', r.added, 'pos') +
-                rowLi('Existing poles updated', r.updated, 'upd') +
-                rowLi('Added without an SLRN', r.addedNoKey, 'warn') +
+                rowLi('Captured poles added (counted)', r.added, 'pos') +
+                rowLi('Captured poles updated', r.updated, 'upd') +
+                rowLi('Installed — awaiting GIS capture', r.addedNoKey, 'warn') +
                 rowLi('Skipped — outside feeder scope', r.outOfScope, 'warn') +
                 rowLi('Skipped — no feeder given', r.noFeederSkipped, 'warn') +
                 '</ul>' +
-                '<div class="note">This is a <strong>session preview</strong>. Newly added poles default to <em>COMPLETE / New Install</em>. Refresh the page or choose <strong>Clear uploaded preview</strong> to revert — the shared dataset is unchanged.</div>';
+                '<div class="note">This is a <strong>session preview</strong> (clears on refresh). A pole counts toward completion / new-pole KPIs only once GIS assigns it an <strong>LT&nbsp;Pole&nbsp;SLRN</strong>; rows still <em>awaiting GIS capture</em> are shown but not counted. Choose <strong>Clear uploaded preview</strong> to revert — the shared dataset is unchanged.</div>';
         }
 
         const ov = document.createElement('div');
