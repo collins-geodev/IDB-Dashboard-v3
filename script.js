@@ -251,7 +251,7 @@ document.addEventListener('DOMContentLoaded', () => {
             buFilter:       { onChange: applyFilters },
             utFilter:       { onChange: applyFilters },
             userFilter:     { onChange: applyFilters },
-            feederFilter:   { onChange: () => { updateDTOptions(); applyFilters(); } },
+            feederFilter:   { onChange: handleFeederChange },
             dtFilter:       { onChange: () => { updateUpriserOptions(); applyFilters(); } },
             upriserFilter:  { onChange: applyFilters },
             materialFilter: { allValue: '', onChange: applyFilters },
@@ -2275,7 +2275,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function populateDependentFilters(data, opts = {}) {
-        const { skipDate = false } = opts;
+        const { skipDate = false, skipFeeder = false } = opts;
         const buSelect = document.getElementById('buFilter');
         const utSelect = document.getElementById('utFilter');
         const userSelect = document.getElementById('userFilter');
@@ -2307,7 +2307,9 @@ document.addEventListener('DOMContentLoaded', () => {
         userSelect.innerHTML = '<option value="All">All Users</option>';
         dtSelect.innerHTML = '<option value="All">All DTs</option>';
         upriserSelect.innerHTML = '<option value="All">All Uprisers</option>';
-        feederSelect.innerHTML = '<option value="All">All Feeders</option>';
+        if (!skipFeeder) {
+            feederSelect.innerHTML = '<option value="All">All Feeders</option>';
+        }
         if (!skipDate) {
             dateSelect.innerHTML = '<option value="All">All Dates</option>';
         }
@@ -2328,14 +2330,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const userSet = new Set(data.map(item => item["User"]));
         const vendorVals = multiSelects.vendorFilter?.getValues();
-        const dateVals = multiSelects.dateFilter?.getValues();
-        const dateActive = Array.isArray(dateVals) && dateVals.length > 0;
         // The hardcoded Ikeja Electric roster lets you browse/pick any IE staff
-        // when no day is chosen. But once specific date(s) are selected, the User
-        // dropdown must list ONLY the people who actually worked those day(s), so we
+        // when nothing narrows the scope. But once any "where / when" filter is
+        // active (date, feeder, DT, business unit, undertaking, upriser), the User
+        // dropdown must list ONLY the people who actually worked in that scope — so
         // skip the roster padding and fall back to the users present in the
-        // (already vendor + date filtered) data — matching the Active Users count.
-        if (!dateActive && (!vendorVals || vendorVals.includes('Ikeja Electric'))) {
+        // (already filtered) data, matching the Active Users count.
+        const narrowingActive = ['dateFilter', 'feederFilter', 'dtFilter', 'buFilter', 'utFilter', 'upriserFilter']
+            .some(id => { const v = multiSelects[id]?.getValues(); return Array.isArray(v) && v.length > 0; });
+        if (!narrowingActive && (!vendorVals || vendorVals.includes('Ikeja Electric'))) {
             // Add Ikeja Electric system usernames to the user filter
             [
                 'kadebayo', 'ttope', 'rakinloye', 'vifeanyi', 'osunday', 'wadegoke', 'omoses',
@@ -2404,31 +2407,74 @@ document.addEventListener('DOMContentLoaded', () => {
 
         populateSelect(dtSelect, dts);
         populateSelect(upriserSelect, uprisers);
-        populateSelect(feederSelect, feeders);
+        if (!skipFeeder) populateSelect(feederSelect, feeders);
         if (!skipDate) populateSelect(dateSelect, dates);
     }
 
-    function handleDateChange() {
+    // Rebuild the Vendor <select> options from a data subset (keeps "All Vendors").
+    function rebuildVendorOptions(data) {
+        const sel = document.getElementById('vendorFilter');
+        if (!sel) return;
+        const vendors = [...new Set(data.map(d => d["Vendor_Name"]).filter(Boolean))].sort();
+        sel.innerHTML = '<option value="All">All Vendors</option>';
+        vendors.forEach(v => {
+            const o = document.createElement('option');
+            o.value = v; o.textContent = v; sel.appendChild(o);
+        });
+    }
+
+    // Rebuild the Date <select> options from a data subset (keeps "All Dates").
+    function rebuildDateOptions(data) {
+        const sel = document.getElementById('dateFilter');
+        if (!sel) return;
+        const dates = [...new Set(data.map(d => (d["Date/timestamp"] || '').split(' ')[0]).filter(Boolean))]
+            .sort((a, b) => new Date(b) - new Date(a));
+        sel.innerHTML = '<option value="All">All Dates</option>';
+        dates.forEach(dt => {
+            const o = document.createElement('option');
+            o.value = dt; o.textContent = dt; sel.appendChild(o);
+        });
+    }
+
+    // Faceted cascade shared by the Feeder and Date filters: each of Vendor / User
+    // / Date (and BU/UT/DT/Upriser/Material) is recomputed from the CURRENT Feeder +
+    // Vendor + Date selection, excluding its own axis so the dropdown isn't collapsed
+    // to what's already picked. Net effect: choosing a feeder (or date) reveals only
+    // the vendors, users and dates that actually worked that scope. The Feeder
+    // dropdown itself is left intact so more feeders can still be added. Current
+    // selections survive where still valid (MultiSelect.refresh prunes the rest).
+    function cascadeDependentOptions(opts = {}) {
+        const rebuildVendor = opts.rebuildVendor === true;
+        const feederVals = multiSelects.feederFilter?.getValues();
         const vendorVals = multiSelects.vendorFilter?.getValues();
         const dateVals = multiSelects.dateFilter?.getValues();
+        const byFeeder = d => !feederVals || feederVals.includes(d["Feeder"]);
+        const byVendor = d => !vendorVals || vendorVals.includes(d["Vendor_Name"]);
+        const byDate = d => !dateVals || dateVals.includes((d["Date/timestamp"] || '').split(' ')[0]);
 
-        let relevantData = globalData;
-        if (vendorVals) {
-            relevantData = relevantData.filter(item => vendorVals.includes(item["Vendor_Name"]));
-        }
-        if (dateVals) {
-            relevantData = relevantData.filter(item => {
-                const itemDate = (item["Date/timestamp"] || '').split(' ')[0];
-                return dateVals.includes(itemDate);
-            });
-        }
+        if (rebuildVendor) rebuildVendorOptions(globalData.filter(d => byFeeder(d) && byDate(d)));
+        rebuildDateOptions(globalData.filter(d => byFeeder(d) && byVendor(d)));
+        // User + BU/UT/DT/Upriser/Material from the full intersection; Feeder & Date
+        // are rebuilt above (or left intact), so skip them here.
+        populateDependentFilters(
+            globalData.filter(d => byFeeder(d) && byVendor(d) && byDate(d)),
+            { skipFeeder: true, skipDate: true }
+        );
 
-        populateDependentFilters(relevantData, { skipDate: true });
+        const toRefresh = ['buFilter', 'utFilter', 'userFilter', 'dtFilter', 'upriserFilter', 'materialFilter', 'dateFilter'];
+        if (rebuildVendor) toRefresh.push('vendorFilter');
+        toRefresh.forEach(id => multiSelects[id]?.refresh());
+    }
 
-        ['buFilter', 'utFilter', 'userFilter', 'feederFilter', 'dtFilter', 'upriserFilter', 'materialFilter'].forEach(id => {
-            multiSelects[id]?.refresh();
-        });
+    // Selecting a feeder narrows Vendor, User and Date (and DT/Upriser/etc.) to
+    // whatever actually worked that feeder.
+    function handleFeederChange() {
+        cascadeDependentOptions({ rebuildVendor: true });
+        applyFilters();
+    }
 
+    function handleDateChange() {
+        cascadeDependentOptions({ rebuildVendor: false });
         applyFilters();
     }
 
