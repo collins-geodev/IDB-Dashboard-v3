@@ -6,6 +6,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Internal, invitation-only asset-tracking dashboard for authorized Ikeja Electric IDB team staff. Operated by the GIS Team, Ikeja Electric — not a public service.">
     <title>IDB 2.0 Assets Tagging Monitoring Dashboard</title>
+    <!-- Apply the saved colour theme before any CSS paints, so there is no
+         flash of the wrong theme on load. Defaults to dark. -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('idb-theme');
+          document.documentElement.setAttribute('data-theme', t === 'light' ? 'light' : 'dark');
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
     <!-- Auth gate: must run before anything renders. Redirects anonymous
          visitors to the login page (no flash of the protected dashboard). -->
     <script src="auth-gate.js?v=20260705a"></script>
@@ -31,7 +43,7 @@
     <!-- ApexCharts -->
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <!-- Custom CSS -->
-    <link rel="stylesheet" href="style.css?v=20260730a">
+    <link rel="stylesheet" href="style.css?v=20260806b">
     <link rel="stylesheet" href="sidebar.css?v=20260531a">
     <link rel="stylesheet" href="insights.css?v=20260405w">
     <link rel="stylesheet" href="ai-styles.css?v=20260405w">
@@ -202,17 +214,50 @@
                             style="background-color: #10b981; border: 1px solid #10b981; color: white;">
                             Reset All
                         </button>
-                        <button id="downloadExcel" class="upload-btn"
-                            title="Download cleaned Excel — duplicate poles merged into one row per LT Pole SLRN (building lists unioned, counts recomputed)">
-                            Download Excel
+                        <button id="themeToggle" type="button" class="upload-btn theme-toggle-btn"
+                            aria-label="Toggle light or dark theme" title="Switch between dark and light theme">
+                            <span class="theme-toggle-icon" aria-hidden="true">🌙</span>
+                            <span class="theme-toggle-label">Dark</span>
                         </button>
-                        <button id="downloadCSV" class="upload-btn"
-                            title="Download cleaned CSV — duplicate poles merged into one row per LT Pole SLRN (building lists unioned, counts recomputed)">
-                            Download CSV
-                        </button>
-                        <button id="downloadPDF" class="upload-btn" style="background-color: #ef4444; border: 1px solid #ef4444; color: white;">
-                            Download PDF Report
-                        </button>
+                        <div class="template-dropdown export-dropdown" id="exportDropdown">
+                            <button type="button" class="upload-btn template-dropdown-toggle export-dropdown-toggle"
+                                id="exportDropdownToggle" aria-haspopup="true" aria-expanded="false"
+                                title="Export the dashboard data — duplicate poles are merged into one row per LT Pole SLRN and ordered by upriser/pole sequence">
+                                <span aria-hidden="true">⬇️</span>
+                                <span class="template-dropdown-label">Download / Export</span>
+                                <svg class="template-dropdown-caret" width="12" height="12" viewBox="0 0 24 24"
+                                    fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"
+                                    stroke-linejoin="round" aria-hidden="true">
+                                    <polyline points="6 9 12 15 18 9"></polyline>
+                                </svg>
+                            </button>
+                            <div class="template-dropdown-menu" id="exportDropdownMenu" role="menu" hidden>
+                                <button type="button" class="template-dropdown-item" id="downloadExcel" role="menuitem"
+                                    title="Cleaned .xlsx — duplicate poles merged into one row per LT Pole SLRN (building lists unioned, counts recomputed)">
+                                    <span class="tdi-icon" aria-hidden="true">📊</span>
+                                    <span class="tdi-text">
+                                        <strong>Download Excel</strong>
+                                        <small>Cleaned .xlsx — one row per pole</small>
+                                    </span>
+                                </button>
+                                <button type="button" class="template-dropdown-item" id="downloadCSV" role="menuitem"
+                                    title="Cleaned .csv — duplicate poles merged into one row per LT Pole SLRN (building lists unioned, counts recomputed)">
+                                    <span class="tdi-icon" aria-hidden="true">📄</span>
+                                    <span class="tdi-text">
+                                        <strong>Download CSV</strong>
+                                        <small>Cleaned .csv — one row per pole</small>
+                                    </span>
+                                </button>
+                                <button type="button" class="template-dropdown-item" id="downloadPDF" role="menuitem"
+                                    title="Formatted PDF summary report">
+                                    <span class="tdi-icon" aria-hidden="true">📕</span>
+                                    <span class="tdi-text">
+                                        <strong>Download PDF Report</strong>
+                                        <small>Formatted summary report</small>
+                                    </span>
+                                </button>
+                            </div>
+                        </div>
                         <div class="template-dropdown" id="templateDropdown">
                             <button type="button" class="upload-btn template-dropdown-toggle" id="templateDropdownToggle"
                                 aria-haspopup="true" aria-expanded="false"
@@ -894,7 +939,7 @@
     <script src="convex-client.js?v=20260710a"></script>
     <script src="auth-footprint.js?v=20260705a"></script>
     <script src="dashboard-auth.js?v=20260707b"></script>
-    <script src="script.js?v=20260806a"></script>
+    <script src="script.js?v=20260806b"></script>
 </body>
 
 </html>

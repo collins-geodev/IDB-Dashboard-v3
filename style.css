@@ -91,6 +91,70 @@
     --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
+/* =====================================================================
+ * LIGHT THEME  —  activated by <html data-theme="light"> (see the theme
+ * toggle in the header). Only the raw HSL design tokens are overridden; every
+ * component that reads hsl(var(--token)) — and the legacy --bg-color/--card-bg/
+ * … mappings, which resolve those tokens lazily — flips automatically. The few
+ * components that hardcode a dark surface are remapped just below so nothing is
+ * left as a dark island. All dark-theme values are untouched.
+ * ===================================================================== */
+:root[data-theme="light"] {
+    --background: 210 40% 97%;
+    --foreground: 222 47% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 12%;
+    --primary: 199 89% 45%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 40% 92%;
+    --muted: 210 30% 92%;
+    --muted-foreground: 215 20% 35%;
+    --accent: 162 72% 36%;
+    --destructive: 0 78% 52%;
+    --border: 214 30% 84%;
+    --input: 214 30% 84%;
+    --ring: 199 89% 45%;
+}
+
+:root[data-theme="light"] .kpi-card-modern {
+    background-color: #ffffff;
+    box-shadow: 0 2px 10px rgba(15, 23, 42, 0.08);
+    border: 1px solid hsl(var(--border));
+}
+:root[data-theme="light"] .stat-value { color: hsl(var(--foreground)); }
+:root[data-theme="light"] .stat-value.color-green { color: #059669; }
+:root[data-theme="light"] .parameter-list div strong { color: hsl(var(--foreground)); }
+:root[data-theme="light"] .filter-btn {
+    background-color: #ffffff;
+    color: hsl(var(--foreground));
+    border: 1px solid hsl(var(--border));
+}
+:root[data-theme="light"] .column-menu,
+:root[data-theme="light"] .search-suggestions {
+    background-color: #ffffff;
+    border: 1px solid hsl(var(--border));
+    color: hsl(var(--foreground));
+}
+
+/* Muted / accent text that hardcodes a dark-theme colour — remap so it stays
+   legible on the light surfaces (contrast fixes). */
+:root[data-theme="light"] .kpi-title,
+:root[data-theme="light"] .progress-label,
+:root[data-theme="light"] .page-btn,
+:root[data-theme="light"] .page-ellipsis { color: hsl(var(--muted-foreground)); }
+:root[data-theme="light"] .page-btn.active { color: hsl(var(--primary-foreground)); }
+:root[data-theme="light"] .col-check-item { color: hsl(var(--foreground)); }
+:root[data-theme="light"] .multi-select-trigger.has-selection { color: #1d4ed8; }
+
+/* Sidebar account card: hardcoded/inline dark colours remapped for light. */
+:root[data-theme="light"] .sidebar-auth .sa-role-admin { color: #1d4ed8; }
+:root[data-theme="light"] .sidebar-auth .sa-logout { color: hsl(var(--destructive)); }
+:root[data-theme="light"] .sidebar-auth .sa-changepw {
+    background-color: hsl(var(--secondary)) !important;
+    color: hsl(var(--foreground)) !important;
+    border-color: hsl(var(--border)) !important;
+}
+
 * {
     box-sizing: border-box;
     margin: 0;
@@ -306,6 +370,41 @@ h1 {
 
 .template-dropdown-item--clear .tdi-icon {
     font-size: 1.05rem;
+}
+
+/* ── Theme toggle button (dark ↔ light) ── */
+.theme-toggle-btn {
+    background-color: hsl(var(--secondary));
+    color: hsl(var(--foreground));
+    border: 1px solid hsl(var(--border));
+    gap: 0.4rem;
+}
+
+.theme-toggle-btn:hover {
+    background-color: hsl(var(--muted));
+}
+
+.theme-toggle-icon {
+    font-size: 1rem;
+    line-height: 1;
+}
+
+/* ── Unified export dropdown (reuses .template-dropdown structure) ── */
+.export-dropdown-toggle {
+    background-color: hsl(var(--primary));
+    border: 1px solid hsl(var(--primary));
+    color: #fff;
+    gap: 0.4rem;
+}
+
+.export-dropdown-toggle:hover {
+    background-color: hsl(var(--primary) / 0.85) !important;
+    border-color: hsl(var(--primary) / 0.85) !important;
+}
+
+.export-dropdown .template-dropdown-item:hover,
+.export-dropdown .template-dropdown-item:focus-visible {
+    background: hsl(var(--primary) / 0.14);
 }
 
 .last-updated {

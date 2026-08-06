@@ -715,6 +715,68 @@ document.addEventListener('DOMContentLoaded', () => {
         renderDTTable();
     });
 
+    // ── Theme toggle (dark ↔ light) ──────────────────────────────────────
+    // The theme itself is already applied in index.html's <head> (no flash);
+    // here we sync the button UI and handle clicks + persistence, re-rendering
+    // charts so their canvas/SVG colours follow the new theme.
+    function applyTheme(mode, persist) {
+        const theme = mode === 'light' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', theme);
+        if (persist) { try { localStorage.setItem('idb-theme', theme); } catch (e) {} }
+        const btn = document.getElementById('themeToggle');
+        if (btn) {
+            const icon = btn.querySelector('.theme-toggle-icon');
+            const label = btn.querySelector('.theme-toggle-label');
+            if (icon) icon.textContent = theme === 'light' ? '☀️' : '🌙';
+            if (label) label.textContent = theme === 'light' ? 'Light' : 'Dark';
+            btn.setAttribute('aria-pressed', theme === 'light' ? 'true' : 'false');
+        }
+    }
+    (function initThemeToggle() {
+        let saved = 'dark';
+        try { saved = localStorage.getItem('idb-theme') === 'light' ? 'light' : 'dark'; } catch (e) {}
+        applyTheme(saved, false); // sync button UI with the already-applied theme
+        const btn = document.getElementById('themeToggle');
+        if (btn) {
+            btn.addEventListener('click', () => {
+                const next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+                applyTheme(next, true);
+                try {
+                    if (typeof updateDashboard === 'function' && Array.isArray(filteredData) && filteredData.length) {
+                        updateDashboard();
+                    }
+                } catch (e) { console.warn('Theme re-render failed:', e); }
+            });
+        }
+    })();
+
+    // ── Unified export dropdown (Excel / CSV / PDF) open-close ────────────
+    (function initExportDropdown() {
+        const dd = document.getElementById('exportDropdown');
+        const toggle = document.getElementById('exportDropdownToggle');
+        const menu = document.getElementById('exportDropdownMenu');
+        if (!dd || !toggle || !menu) return;
+        // Close the sibling New-Pole Template dropdown so both can't be open at once
+        // (its toggle calls stopPropagation, so the document listeners don't cross-close).
+        const closeSiblingTemplate = () => {
+            const tdd = document.getElementById('templateDropdown');
+            const tmenu = document.getElementById('templateDropdownMenu');
+            const ttog = document.getElementById('templateDropdownToggle');
+            if (tdd) tdd.classList.remove('open');
+            if (tmenu) tmenu.hidden = true;
+            if (ttog) ttog.setAttribute('aria-expanded', 'false');
+        };
+        const open = () => { closeSiblingTemplate(); dd.classList.add('open'); menu.hidden = false; toggle.setAttribute('aria-expanded', 'true'); };
+        const close = () => { dd.classList.remove('open'); menu.hidden = true; toggle.setAttribute('aria-expanded', 'false'); };
+        toggle.addEventListener('click', (e) => { e.stopPropagation(); if (menu.hidden) open(); else close(); });
+        menu.querySelectorAll('.template-dropdown-item').forEach(item => item.addEventListener('click', close));
+        document.addEventListener('click', (e) => { if (!dd.contains(e.target)) close(); });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+        // Opening the sibling template dropdown must close this one (its own
+        // stopPropagation prevents the document listener above from firing).
+        document.getElementById('templateDropdownToggle')?.addEventListener('click', close);
+    })();
+
     // Parse the field-capture timestamp ("MM/DD/YYYY HH:mm") into a comparable
     // millisecond value. Returns NaN when it can't be parsed.
     function parseFieldTimestamp(ts) {
@@ -811,9 +873,34 @@ document.addEventListener('DOMContentLoaded', () => {
         return merged;
     }
 
+    // Order export rows by physical line sequence: Feeder → DT → Upriser → LT Pole
+    // No. This walks each DT starting from its upriser and follows the pole numbers
+    // outward from the first pole connected to the DT (the order the line is walked
+    // in the field), so the merged export reads as a clean sequence per the request.
+    // Missing/non-numeric Upriser or Pole numbers sink within their DT group.
+    function sortBySequence(rows) {
+        const num = (v) => {
+            const n = parseInt(String(v == null ? "" : v).replace(/[^\d]/g, ""), 10);
+            return Number.isNaN(n) ? Number.POSITIVE_INFINITY : n;
+        };
+        const str = (v) => String(v == null ? "" : v).trim().toLowerCase();
+        rows.sort((a, b) => {
+            const f = str(a.Feeder).localeCompare(str(b.Feeder));
+            if (f) return f;
+            const dt = str(a["DT Name"] || a["DT Number"]).localeCompare(str(b["DT Name"] || b["DT Number"]));
+            if (dt) return dt;
+            const u = num(a.UpriserNo) - num(b.UpriserNo);
+            if (u) return u;
+            const p = num(a["LT Pole No"]) - num(b["LT Pole No"]);
+            if (p) return p;
+            return str(a["Lt PoleSLRN"]).localeCompare(str(b["Lt PoleSLRN"])); // stable final tie-break
+        });
+        return rows;
+    }
+
     // Build the cleaned, de-duplicated dataset from whatever is currently filtered.
     function getCleanExportData() {
-        const cleaned = mergeDuplicatesBySLRN(filteredData);
+        const cleaned = sortBySequence(mergeDuplicatesBySLRN(filteredData));
         const removed = filteredData.length - cleaned.length;
         if (removed > 0) {
             console.log(`[Export] Merged ${removed} duplicate capture(s) by LT Pole SLRN → ${cleaned.length} unique poles.`);
@@ -853,6 +940,57 @@ document.addEventListener('DOMContentLoaded', () => {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+    }
+
+    /* =====================================================================
+     * Chart theming (dark ↔ light). One source of truth for chart text/grid
+     * colours, resolved from the active <html data-theme> at render time. Charts
+     * are re-rendered whenever the theme changes (via updateDashboard), so no
+     * chart definition needs to hardcode a theme-specific colour any more.
+     * ===================================================================== */
+    function chartTheme() {
+        const light = document.documentElement.getAttribute('data-theme') === 'light';
+        return {
+            light,
+            mode: light ? 'light' : 'dark',
+            text: light ? '#1e293b' : '#fafafa',
+            muted: light ? '#475569' : '#a0a0a0',
+            grid: light ? 'rgba(15,23,42,0.12)' : 'rgba(255,255,255,0.08)'
+        };
+    }
+
+    // Force theme-appropriate text/grid/annotation colours onto a Plotly layout
+    // so each chart definition can keep its (dark-oriented) literals unchanged.
+    function applyPlotlyTheme(layout) {
+        const t = chartTheme();
+        const L = layout || {};
+        L.font = Object.assign({}, L.font, { color: t.text });
+        if (L.title && typeof L.title === 'object') {
+            L.title.font = Object.assign({}, L.title.font, { color: t.text });
+        }
+        // Only re-colour gridlines in LIGHT mode; leave each chart's original
+        // dark-oriented gridcolor untouched so the dark theme is pixel-identical.
+        if (t.light) {
+            ['xaxis', 'yaxis', 'xaxis2', 'yaxis2'].forEach(ax => {
+                const a = L[ax];
+                if (a && typeof a === 'object' && 'gridcolor' in a) a.gridcolor = t.grid;
+            });
+        }
+        if (Array.isArray(L.annotations)) {
+            L.annotations.forEach(an => {
+                // Only re-theme annotations that used the default near-white text;
+                // leave deliberately-coloured callouts alone.
+                if (an && an.font && (an.font.color === '#fafafa' || an.font.color === '#e4e5e7')) {
+                    an.font = Object.assign({}, an.font, { color: t.text });
+                }
+            });
+        }
+        return L;
+    }
+
+    // Drop-in for Plotly.newPlot that applies the active theme first.
+    function themedPlot(id, traces, layout, config) {
+        return Plotly.newPlot(id, traces, applyPlotlyTheme(layout), config);
     }
 
     /* =====================================================================
@@ -2696,7 +2834,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ]
         };
 
-        Plotly.newPlot('userPerformanceChart', [trace], layout, { responsive: true });
+        themedPlot('userPerformanceChart', [trace], layout, { responsive: true });
     }
 
     // 2. Project Velocity (Area Chart Comparison)
@@ -2798,7 +2936,7 @@ document.addEventListener('DOMContentLoaded', () => {
             bargap: 0.15
         };
 
-        Plotly.newPlot('projectVelocityChart', [traceETC, traceJesom, traceIkeja, traceCumulative], layout, { responsive: true });
+        themedPlot('projectVelocityChart', [traceETC, traceJesom, traceIkeja, traceCumulative], layout, { responsive: true });
     }
 
     // 3. Pole Type Distribution (highcharts 3D Pie Chart)
@@ -2823,6 +2961,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         if (typeof Highcharts === 'undefined') { console.warn('Highcharts not loaded, skipping pole type chart'); return; }
+        const ct = chartTheme();
         Highcharts.chart('poleTypeChart', {
             chart: {
                 type: 'pie',
@@ -2838,6 +2977,10 @@ document.addEventListener('DOMContentLoaded', () => {
             tooltip: {
                 pointFormat: '{series.name}: <b>{point.percentage:.1f}%</b>'
             },
+            legend: {
+                itemStyle: { color: ct.text },
+                itemHoverStyle: { color: ct.text }
+            },
             plotOptions: {
                 pie: {
                     innerSize: 0,
@@ -2848,7 +2991,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         enabled: true,
                         format: '<b>{point.name}</b>: {point.percentage:.1f} %',
                         style: {
-                            color: '#e4e5e7',
+                            color: ct.text,
                             textOutline: 'none'
                         }
                     },
@@ -2911,7 +3054,7 @@ document.addEventListener('DOMContentLoaded', () => {
             legend: { orientation: 'h', y: 1.1 }
         };
 
-        Plotly.newPlot('staffIssuesChart', traces, layout, { responsive: true });
+        themedPlot('staffIssuesChart', traces, layout, { responsive: true });
     }
 
     // 4. Undertaking Breakdown (Bar Chart - Horizontal)
@@ -2943,7 +3086,7 @@ document.addEventListener('DOMContentLoaded', () => {
             xaxis: { title: 'Count' }
         };
 
-        Plotly.newPlot('undertakingChart', [trace], layout, { responsive: true });
+        themedPlot('undertakingChart', [trace], layout, { responsive: true });
     }
 
     // 5. Vendor Performance Comparison (Total Records & Run Rate)
@@ -3003,7 +3146,7 @@ document.addEventListener('DOMContentLoaded', () => {
             margin: { t: 40, b: 40, l: 40, r: 40 }
         };
 
-        Plotly.newPlot('vendorTotalChart', [traceTotal], layoutTotal, { responsive: true });
+        themedPlot('vendorTotalChart', [traceTotal], layoutTotal, { responsive: true });
 
         // --- Chart 2: Run Rate ---
         const traceRunRate = {
@@ -3052,7 +3195,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }]
         };
 
-        Plotly.newPlot('vendorRunRateChart', [traceRunRate], layoutRunRate, { responsive: true });
+        themedPlot('vendorRunRateChart', [traceRunRate], layoutRunRate, { responsive: true });
     }
 
 
@@ -3555,7 +3698,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         const config = { responsive: true, displayModeBar: false };
-        Plotly.newPlot('feederChart', [trace], layout, config);
+        themedPlot('feederChart', [trace], layout, config);
     }
 
     // Map control: search bar with datalist intellisense over Pole IDs / DT names / Feeders
@@ -4742,6 +4885,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const feederAct = sortedFeeders.map(x => x[1].act);
 
         // ApexChart Options for Target vs Actual
+        const ct = chartTheme();
         const options1 = {
             series: [
                 { name: 'Actual Captured', data: feederAct },
@@ -4758,13 +4902,13 @@ document.addEventListener('DOMContentLoaded', () => {
             dataLabels: {
                 enabled: true,
                 offsetX: -6,
-                style: { fontSize: '12px', colors: ['#fff'] }
+                style: { fontSize: '12px', colors: [ct.text] }
             },
             stroke: { show: true, width: 1, colors: ['#fff'] },
-            xaxis: { title: { text: 'Number of Poles', style: { color: '#a0a0a0' } }, labels: { style: { colors: '#a0a0a0' } } },
-            yaxis: { labels: { style: { colors: '#fff' } } },
-            theme: { mode: 'dark' },
-            grid: { borderColor: '#373a40' }
+            xaxis: { title: { text: 'Number of Poles', style: { color: ct.muted } }, labels: { style: { colors: ct.muted } } },
+            yaxis: { labels: { style: { colors: ct.text } } },
+            theme: { mode: ct.mode },
+            grid: { borderColor: ct.grid }
         };
 
         const chart1El = document.querySelector("#targetActualChart");
@@ -4792,11 +4936,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 bar: { horizontal: false, columnWidth: '55%', endingShape: 'rounded' }
             },
             dataLabels: { enabled: false },
-            xaxis: { categories: dtLabels, labels: { style: { colors: '#a0a0a0' } } },
-            yaxis: { title: { text: 'Count', style: { color: '#a0a0a0' } }, labels: { style: { colors: '#a0a0a0' } } },
-            theme: { mode: 'dark' },
-            grid: { borderColor: '#373a40' },
-            legend: { labels: { colors: '#fff' } }
+            xaxis: { categories: dtLabels, labels: { style: { colors: ct.muted } } },
+            yaxis: { title: { text: 'Count', style: { color: ct.muted } }, labels: { style: { colors: ct.muted } } },
+            theme: { mode: ct.mode },
+            grid: { borderColor: ct.grid },
+            legend: { labels: { colors: ct.text } }
         };
 
         const chart2El = document.querySelector("#poleHealthChart");
@@ -5290,19 +5434,26 @@ document.addEventListener('DOMContentLoaded', () => {
     // PDF Download Logic — Pure jsPDF (no html2canvas)
     const downloadPdfBtn = document.getElementById('downloadPDF');
     if (downloadPdfBtn) {
+        // #downloadPDF is now a dropdown menu item (icon + text spans), so update
+        // only the label text — never textContent, which would wipe the icon.
+        const setPdfBtnLabel = (text) => {
+            const strong = downloadPdfBtn.querySelector('.tdi-text strong');
+            if (strong) strong.textContent = text;
+            else downloadPdfBtn.textContent = text;
+        };
         downloadPdfBtn.addEventListener('click', () => {
             if (!filteredData || filteredData.length === 0) {
                 alert('No data available to generate PDF. Please load data first.');
                 return;
             }
-            downloadPdfBtn.textContent = 'Generating PDF...';
+            setPdfBtnLabel('Generating PDF...');
             downloadPdfBtn.style.opacity = '0.7';
             downloadPdfBtn.style.pointerEvents = 'none';
 
             try {
                 // Access jsPDF from html2pdf bundle
                 const { jsPDF } = window.jspdf || {};
-                if (!jsPDF) { alert('PDF library not loaded. Please refresh.'); downloadPdfBtn.textContent = 'Download PDF Report'; downloadPdfBtn.style.opacity = '1'; downloadPdfBtn.style.pointerEvents = 'auto'; return; }
+                if (!jsPDF) { alert('PDF library not loaded. Please refresh.'); setPdfBtnLabel('Download PDF Report'); downloadPdfBtn.style.opacity = '1'; downloadPdfBtn.style.pointerEvents = 'auto'; return; }
                 const doc = new jsPDF('p', 'mm', 'a4');
                 const pw = 210, ph = 297, ml = 14, mr = 14, mt = 14;
                 const cw = pw - ml - mr;
@@ -5610,14 +5761,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // === SAVE ===
                 doc.save(`IDB_Dashboard_Report_${new Date().toISOString().split('T')[0]}.pdf`);
-                downloadPdfBtn.textContent = 'Download PDF Report';
+                setPdfBtnLabel('Download PDF Report');
                 downloadPdfBtn.style.opacity = '1';
                 downloadPdfBtn.style.pointerEvents = 'auto';
 
             } catch (err) {
                 console.error('PDF Build Error:', err);
                 alert('Failed to build PDF report: ' + err.message);
-                downloadPdfBtn.textContent = 'Download PDF Report';
+                setPdfBtnLabel('Download PDF Report');
                 downloadPdfBtn.style.opacity = '1';
                 downloadPdfBtn.style.pointerEvents = 'auto';
             }
