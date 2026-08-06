@@ -184,6 +184,14 @@ header {
     border-bottom: 1px solid var(--border-color);
 }
 
+/* Dashboard header: when the controls (incl. the Total-vs-Actual toggle) no
+   longer fit beside the title, let them wrap to a second row instead of the
+   title text overflowing across them. */
+.dashboard-container header {
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+}
+
 .exec-header {
     display: flex;
     align-items: center;
@@ -233,7 +241,11 @@ h1 {
     display: flex;
     align-items: center;
     gap: 0.8rem;
-    flex-shrink: 0;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    min-width: 0;
+    /* Right-aligned; wraps its own buttons to another line when the row is too
+       narrow (e.g. the Total-vs-Actual toggle is showing) instead of overflowing. */
 }
 
 .upload-btn {
@@ -1827,14 +1839,16 @@ header.exec-header img.exec-header-logo,
     align-items: center;
     gap: 0.75rem;
     min-width: 0;
+    flex: 1 1 auto;
 }
 
 .dashboard-header-brand h1 {
     margin: 0;
     font-size: 0.8rem;
     white-space: nowrap;
-    overflow: visible;
-    text-overflow: clip;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
     letter-spacing: 0.2px;
     line-height: 1.2;
 }
