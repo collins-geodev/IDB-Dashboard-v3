@@ -710,9 +710,116 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('viewModeToggle').addEventListener('change', handleViewModeToggle);
     document.getElementById('downloadExcel').addEventListener('click', downloadExcel);
+    document.getElementById('downloadCSV')?.addEventListener('click', downloadCSV);
     document.getElementById('dtSearchInput')?.addEventListener('input', () => {
         renderDTTable();
     });
+
+    // Parse the field-capture timestamp ("MM/DD/YYYY HH:mm") into a comparable
+    // millisecond value. Returns NaN when it can't be parsed.
+    function parseFieldTimestamp(ts) {
+        if (!ts) return NaN;
+        const m = ts.toString().trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2}))?/);
+        if (!m) return NaN;
+        const [, mm, dd, yyyy, hh = "0", mi = "0"] = m;
+        return new Date(+yyyy, +mm - 1, +dd, +hh, +mi).getTime();
+    }
+
+    // Collapse duplicate poles (same key) into one cleaned row so the export
+    // matches the unique-pole counts the dashboard shows. The key is identical to
+    // the one every KPI uses: Lt PoleSLRN, falling back to LT Pole No.
+    //   • Associated Building SLRNs are UNIONed across every capture of the pole
+    //     (trimmed + de-duplicated) and "No of Buildings Connected" is recomputed —
+    //     no captured building is ever dropped.
+    //   • Every other field takes the most recent NON-BLANK value (latest capture
+    //     wins, falling back to earlier captures only where the latest is empty).
+    //   • Internal runtime flags (keys starting with "__") are omitted; provenance
+    //     columns (Captures Merged / First / Last Captured) are appended.
+    // Rows with no key at all are passed through as their own single row.
+    function mergeDuplicatesBySLRN(data) {
+        const BLDG_FIELD = "Associated Buildings SLRN";
+        const COUNT_FIELD = "No of Buildings Connected to the Pole";
+        const keyOf = it => (it["Lt PoleSLRN"] || it["LT Pole No"] || "").toString().trim();
+        const isBlank = v => v === undefined || v === null || v.toString().trim() === "";
+        const isInternal = k => k.charAt(0) === "_" && k.charAt(1) === "_";
+        const fmt = d => d
+            ? `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}/${d.getFullYear()} ` +
+              `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`
+            : "";
+
+        // Column order = first-seen union of every real (non-internal) key, so
+        // uploaded-pole fields survive while runtime flags (__source, …) don't.
+        const columns = [];
+        const colSeen = new Set();
+        data.forEach(item => Object.keys(item).forEach(k => {
+            if (!isInternal(k) && !colSeen.has(k)) { colSeen.add(k); columns.push(k); }
+        }));
+
+        const groups = new Map();   // key -> [records]
+        const passthrough = [];     // records with no usable key
+        data.forEach(item => {
+            const key = keyOf(item);
+            if (!key) { passthrough.push(item); return; }
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key).push(item);
+        });
+
+        // Build one cleaned row from a group of captures (already ordered newest-first).
+        const buildRow = (rows, ordered) => {
+            const seen = new Set();
+            const buildings = [];
+            ordered.forEach(r => {
+                (r[BLDG_FIELD] || "").toString().split(";").forEach(tok => {
+                    const b = tok.trim();
+                    if (b && !seen.has(b)) { seen.add(b); buildings.push(b); }
+                });
+            });
+
+            const out = {};
+            columns.forEach(col => {
+                if (col === BLDG_FIELD) {
+                    out[col] = buildings.join("; ");
+                } else if (col === COUNT_FIELD) {
+                    out[col] = String(buildings.length);
+                } else {
+                    let val = "";
+                    for (const r of ordered) { if (!isBlank(r[col])) { val = r[col]; break; } }
+                    out[col] = val;
+                }
+            });
+
+            const times = rows.map(r => parseFieldTimestamp(r["Date/timestamp"])).filter(t => !isNaN(t));
+            out["Captures Merged"] = rows.length;
+            out["First Captured"] = times.length ? fmt(new Date(Math.min(...times))) : "";
+            out["Last Captured"] = times.length ? fmt(new Date(Math.max(...times))) : "";
+            return out;
+        };
+
+        const orderNewestFirst = rows => rows
+            .map((r, i) => ({ r, i, t: parseFieldTimestamp(r["Date/timestamp"]) }))
+            .sort((a, b) => {
+                const at = isNaN(a.t) ? -Infinity : a.t;
+                const bt = isNaN(b.t) ? -Infinity : b.t;
+                if (bt !== at) return bt - at;   // newest first
+                return a.i - b.i;                // stable tie-break
+            })
+            .map(x => x.r);
+
+        const merged = [];
+        groups.forEach(rows => merged.push(buildRow(rows, orderNewestFirst(rows))));
+        passthrough.forEach(item => merged.push(buildRow([item], [item])));
+        return merged;
+    }
+
+    // Build the cleaned, de-duplicated dataset from whatever is currently filtered.
+    function getCleanExportData() {
+        const cleaned = mergeDuplicatesBySLRN(filteredData);
+        const removed = filteredData.length - cleaned.length;
+        if (removed > 0) {
+            console.log(`[Export] Merged ${removed} duplicate capture(s) by LT Pole SLRN → ${cleaned.length} unique poles.`);
+        }
+        return cleaned;
+    }
 
     function downloadExcel() {
         if (!filteredData || filteredData.length === 0) {
@@ -720,10 +827,32 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const ws = XLSX.utils.json_to_sheet(filteredData);
+        const cleaned = getCleanExportData();
+        const ws = XLSX.utils.json_to_sheet(cleaned);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Assets");
         XLSX.writeFile(wb, "IDB_Monitor_Data.xlsx");
+    }
+
+    function downloadCSV() {
+        if (!filteredData || filteredData.length === 0) {
+            alert("No data available to download.");
+            return;
+        }
+
+        const cleaned = getCleanExportData();
+        const ws = XLSX.utils.json_to_sheet(cleaned);
+        const csv = XLSX.utils.sheet_to_csv(ws);
+        // Prepend a UTF-8 BOM so Excel opens the CSV with correct encoding.
+        const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "IDB_Monitor_Data.csv";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
     }
 
     /* =====================================================================
