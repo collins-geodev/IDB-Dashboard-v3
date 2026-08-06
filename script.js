@@ -44,6 +44,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let utBoundsCache = null;       // UT-only bounds (fallback when no data)
     let mapInitiallyFitted = false; // first-render fit guard
     let pulseTimer = null;          // setTimeout id for pulse auto-stop
+    let mapBases = {};              // { dark, light, satellite, hybrid } base tile layers
+    let lastMapFilterSig = null;    // signature of the last filtered set drawn on the map
 
     // Generate a visually distinct color for each UT via golden-angle HSL.
     // 54 UTs need 54 colors that are easy to tell apart at a glance.
@@ -730,6 +732,22 @@ document.addEventListener('DOMContentLoaded', () => {
             if (icon) icon.textContent = theme === 'light' ? '☀️' : '🌙';
             if (label) label.textContent = theme === 'light' ? 'Light' : 'Dark';
             btn.setAttribute('aria-pressed', theme === 'light' ? 'true' : 'false');
+        }
+        syncMapBaseToTheme();
+    }
+
+    // Switch the map's basemap to match the dashboard theme (dark ↔ light). Only
+    // acts when the map is currently on the Dark/Light basemap — a manual
+    // Satellite/Hybrid choice is left untouched.
+    function syncMapBaseToTheme() {
+        if (!map || !mapBases.dark || !mapBases.light) return;
+        if (map.hasLayer(mapBases.satellite) || map.hasLayer(mapBases.hybrid)) return;
+        const wantLight = document.documentElement.getAttribute('data-theme') === 'light';
+        const want = wantLight ? mapBases.light : mapBases.dark;
+        const other = wantLight ? mapBases.dark : mapBases.light;
+        if (!map.hasLayer(want)) {
+            if (map.hasLayer(other)) map.removeLayer(other);
+            want.addTo(map);
         }
     }
     (function initThemeToggle() {
@@ -4044,8 +4062,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // Mirror whichever base layer the main map is currently showing,
             // so the lens content always matches (OSM / Satellite / Hybrid).
             const currentBase = {
-                url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-                opts: { maxZoom: 19 }
+                url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+                opts: { subdomains: 'abcd', maxZoom: 20 }
             };
             map.on('baselayerchange', (e) => {
                 if (e.layer && e.layer._url) {
@@ -4137,10 +4155,16 @@ document.addEventListener('DOMContentLoaded', () => {
             // Init map — default view centers on Lagos; boundary fit will take over once loaded
             map = L.map('map', { zoomControl: true }).setView([6.55, 3.45], 10);
 
-            // Base layers — OSM, Google Satellite, Google Hybrid
-            const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '&copy; OpenStreetMap contributors',
-                maxZoom: 19
+            // Base layers — Dark (default) & Light (CartoDB), Google Satellite/Hybrid.
+            const darkLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                subdomains: 'abcd',
+                attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+                maxZoom: 20
+            });
+            const lightLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+                subdomains: 'abcd',
+                attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+                maxZoom: 20
             });
             const satLayer = L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
                 subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
@@ -4152,9 +4176,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 attribution: '&copy; Google',
                 maxZoom: 20
             });
-            osmLayer.addTo(map);
+            mapBases = { dark: darkLayer, light: lightLayer, satellite: satLayer, hybrid: hybridLayer };
+            // Default the basemap to match the dashboard theme (dark by default).
+            const wantLight = document.documentElement.getAttribute('data-theme') === 'light';
+            (wantLight ? lightLayer : darkLayer).addTo(map);
             L.control.layers(
-                { 'OpenStreetMap': osmLayer, 'Satellite': satLayer, 'Hybrid': hybridLayer },
+                { 'Dark': darkLayer, 'Light': lightLayer, 'Satellite': satLayer, 'Hybrid': hybridLayer },
                 null,
                 { position: 'topright', collapsed: false }
             ).addTo(map);
@@ -4193,16 +4220,16 @@ document.addEventListener('DOMContentLoaded', () => {
         // Render data markers (rebuilt on every filter change)
         markersLayer.clearLayers();
         let count = 0;
-        const limit = 3000; // Performance limit
-        const dataLatLngs = [];
+        const limit = 3000; // Performance limit for rendered markers
+        const dataLatLngs = []; // ALL valid filtered points (used to frame the map)
 
         filteredData.forEach(d => {
-            if (count > limit) return;
-
             const lat = parseFloat(d.Latitude);
             const lon = parseFloat(d.Longitude);
 
             if (!isNaN(lat) && !isNaN(lon)) {
+                dataLatLngs.push([lat, lon]); // collect every point for bounds (uncapped)
+                if (count > limit) return;    // cap only the number of drawn markers
                 let color = '#a0a0a0';
                 if (d.Vendor_Name === 'ETC Workforce') color = '#0EA5E9';
                 if (d.Vendor_Name === 'Jesom Technology') color = '#EF4444';
@@ -4217,7 +4244,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     fillOpacity: 0.85,
                     className: 'data-point-marker' // enables CSS pulse animation
                 });
-                dataLatLngs.push([lat, lon]);
 
                 const captureDate = d["Date/timestamp"] ? String(d["Date/timestamp"]).split(' ')[0] : "N/A";
                 const val = (v) => (v === undefined || v === null || v === '') ? 'N/A' : String(v);
@@ -4258,6 +4284,12 @@ document.addEventListener('DOMContentLoaded', () => {
         // Frame the map to a wide Lagos-State regional view on first render,
         // so the user can see the whole operating area (Lagos + neighbouring
         // states + the UT polygons) before drilling in.
+        // Signature of the current filtered set — lets us re-frame the map ONLY
+        // when the filter actually changed (not on theme / view-mode re-renders).
+        const lastRow = filteredData.length ? filteredData[filteredData.length - 1] : null;
+        const idOf = r => r ? (r['Lt PoleSLRN'] || r['LT Pole No'] || '') : '';
+        const filterSig = filteredData.length + '|' + idOf(filteredData[0]) + '|' + idOf(lastRow);
+
         if (!mapInitiallyFitted) {
             try {
                 // Lagos State centroid, wide regional zoom level
@@ -4265,17 +4297,34 @@ document.addEventListener('DOMContentLoaded', () => {
                     duration: 2.8,
                     easeLinearity: 0.25
                 });
-                mapInitiallyFitted = true;
-                startMarkerPulse(20000);
             } catch (e) {
                 console.warn("flyTo failed", e);
                 map.setView([6.55, 3.55], 8);
-                mapInitiallyFitted = true;
-                startMarkerPulse(20000);
             }
-        } else if (mapInitiallyFitted && count > 0) {
-            // Filter change after the reveal — re-pulse, don't re-zoom
+            mapInitiallyFitted = true;
+            lastMapFilterSig = filterSig;
             startMarkerPulse(20000);
+        } else {
+            // Re-frame the map whenever the filtered set changed, so it always
+            // visibly reflects the current selection. Skip when nothing changed
+            // (theme toggle / view-mode re-render) to avoid gratuitous panning.
+            if (filterSig !== lastMapFilterSig) {
+                lastMapFilterSig = filterSig;
+                const filtersActive = ['vendorFilter', 'buFilter', 'utFilter', 'userFilter', 'feederFilter', 'dtFilter', 'upriserFilter', 'materialFilter', 'dateFilter']
+                    .some(id => multiSelects[id] && !multiSelects[id].isAll());
+                try {
+                    map.invalidateSize(); // ensure the container size is current before framing
+                    if (filtersActive && dataLatLngs.length) {
+                        // Snap to the filtered points (synchronous fitBounds is reliable
+                        // inside the render cycle; an animated flyTo can get cancelled).
+                        map.fitBounds(L.latLngBounds(dataLatLngs), { padding: [40, 40], maxZoom: 16 });
+                    } else if (!filtersActive) {
+                        // No filters -> return to the wide regional overview.
+                        map.setView([6.55, 3.55], 8);
+                    }
+                } catch (e) { console.warn('map reframe failed', e); }
+            }
+            if (count > 0) startMarkerPulse(20000);
         }
     }
 
