@@ -2328,7 +2328,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const userSet = new Set(data.map(item => item["User"]));
         const vendorVals = multiSelects.vendorFilter?.getValues();
-        if (!vendorVals || vendorVals.includes('Ikeja Electric')) {
+        const dateVals = multiSelects.dateFilter?.getValues();
+        const dateActive = Array.isArray(dateVals) && dateVals.length > 0;
+        // The hardcoded Ikeja Electric roster lets you browse/pick any IE staff
+        // when no day is chosen. But once specific date(s) are selected, the User
+        // dropdown must list ONLY the people who actually worked those day(s), so we
+        // skip the roster padding and fall back to the users present in the
+        // (already vendor + date filtered) data — matching the Active Users count.
+        if (!dateActive && (!vendorVals || vendorVals.includes('Ikeja Electric'))) {
             // Add Ikeja Electric system usernames to the user filter
             [
                 'kadebayo', 'ttope', 'rakinloye', 'vifeanyi', 'osunday', 'wadegoke', 'omoses',
