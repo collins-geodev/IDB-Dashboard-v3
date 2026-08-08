@@ -157,6 +157,19 @@ V3 reads `converted_data_latest.json` (field captures) and `BOQ-IDB.json` (plann
 
 For local fallback parity, you can also commit the new JSON files to this repo and push to `main` — Vercel will redeploy and the static fallback will match.
 
+### Updating the data from the dashboard (admin JSON upload)
+
+Admins can refresh the data **without touching the Convex dashboard or the CLI**, directly from the dashboard header:
+
+1. Sign in as an **administrator**. A green **🗄️ Update Data (JSON)** control appears next to *New-Pole Template* (it is hidden for viewers).
+2. Choose **Upload Field Data (JSON)** (replaces `converted_data_latest.json`) or **Upload BOQ Targets (JSON)** (replaces `BOQ-IDB.json`).
+3. Pick a `.json` file — an **array of row objects** in the same shape as the existing data files (or an object whose value is such an array, e.g. `{"Sheet2": [...]}`). The field file keys rows by `Feeder`; the BOQ file by `FEEDER NAME`.
+4. A confirmation summarises how many records the file holds and **how many fall inside this dashboard's feeder scope**, then publishes it to the shared Convex backend for **every viewer**. The dashboard reloads through its normal pipeline, so the per-variant feeder allowlist (the "configuration") is re-applied and every KPI, chart, filter and the map refresh against the new data.
+
+The upload is **admin-only, enforced on the Convex server** (`POST /admin/upload-asset` in [`convex/http.ts`](convex/http.ts) resolves the session token to an active admin before writing) — the UI control is only a convenience gate. Uploading a *full* dataset is fine: this dashboard scopes it to its 20 feeders on load, exactly as it does the CLI-loaded file. To revert, re-upload the previous file.
+
+> **Backend deploy required once:** this feature adds a new Convex HTTP route. After pulling these changes, deploy the backend so the endpoint goes live: `npx convex deploy` (run once per Convex project — v3 `flexible-ostrich-263`, v2 `fabulous-pigeon-544`). Until then the control is visible to admins but uploads return a "not deployed yet" message.
+
 ---
 
 ## Adding or removing a feeder from the V3 scope

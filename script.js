@@ -604,7 +604,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    Promise.all([
+    // Load (or reload) every dataset the dashboard renders from, then rebuild
+    // the whole UI. Wrapped in a function so an admin JSON upload can re-run the
+    // exact same pipeline in place (re-fetch from Convex → re-apply this
+    // dashboard's feeder scope → re-render) without a full page refresh.
+    // opts.reapplyFilters: on a RELOAD (e.g. after a JSON upload), recompute
+    // filteredData through applyFilters() so any filter selections the user
+    // still has active stay consistent with the KPIs/charts/map — the initial
+    // load leaves it undefined and renders the full dataset directly.
+    function loadDashboardData(opts) {
+      opts = opts || {};
+      return Promise.all([
         fetchWithFallback(
             fieldDataUrls,
             './converted_data_latest.json',
@@ -672,6 +682,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 item.Vendor_Name = inferVendor(item.User);
                 if (!item.Issue_Type) item.Issue_Type = simulateIssue(item);
             });
+            // Fresh canonical base: drop any prior shared-upload snapshot so the
+            // merge below re-snapshots from this reload (matters when the pipeline
+            // is re-run after an admin JSON upload).
+            templateOriginalSnapshot = null;
             globalData = fieldData;
             filteredData = fieldData;
 
@@ -691,7 +705,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (toggleWrapper) toggleWrapper.style.display = 'flex';
 
             populateFilters();
-            updateDashboard();
+            // On a reload, re-narrow filteredData to whatever filters are still
+            // selected (applyFilters() recomputes it, then renders); on first
+            // load there are no selections yet, so render the full set directly.
+            if (opts.reapplyFilters) applyFilters();
+            else updateDashboard();
             updateExecutiveSummary();
             refreshPreviewBadge(); // show the shared "+N" badge / Clear item on load
 
@@ -705,6 +723,8 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Dashboard processing error after successful data load:', processingError);
         }
     });
+    }
+    loadDashboardData();
 
     // Initialize multi-select filter dropdowns
     initMultiSelects();
@@ -1484,6 +1504,278 @@ document.addEventListener('DOMContentLoaded', () => {
         ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
     }
 
+
+    /* =====================================================================
+     * Update Dashboard Data (JSON) — ADMIN ONLY.
+     * Lets an administrator replace one of the dashboard's canonical data
+     * files by uploading a JSON file:
+     *   • Field captures  -> converted_data_latest.json
+     *   • BOQ targets     -> BOQ-IDB.json
+     * The file is validated in-browser, then POSTed to the admin-only Convex
+     * endpoint (/admin/upload-asset), which stores it in the shared backend
+     * and serves it to EVERY viewer. Writes are admin-only — enforced on the
+     * Convex server (convex/http.ts), not just in this UI. After a successful
+     * upload the dashboard reloads its data through the SAME pipeline, so this
+     * dashboard's own configuration (the per-variant feeder allowlist in
+     * dashboard-config.js) is re-applied and every KPI, chart, filter and the
+     * map re-render against the new data — no page refresh needed.
+     * ===================================================================== */
+    const JSON_DATA_ASSETS = {
+        field: { name: 'converted_data_latest.json', label: 'field capture data', feederKey: 'Feeder' },
+        boq:   { name: 'BOQ-IDB.json',               label: 'BOQ targets',        feederKey: 'FEEDER NAME' }
+    };
+
+    const jsonUploadDropdown  = document.getElementById('jsonUploadDropdown');
+    const jsonUploadToggle    = document.getElementById('jsonUploadToggle');
+    const jsonUploadMenu      = document.getElementById('jsonUploadMenu');
+    const jsonUploadInput     = document.getElementById('jsonUploadInput');
+    const jsonUploadFieldItem = document.getElementById('jsonUploadFieldItem');
+    const jsonUploadBoqItem   = document.getElementById('jsonUploadBoqItem');
+    let   jsonUploadTarget    = 'field';
+
+    function jsonEsc(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function openJsonMenu() {
+        if (!jsonUploadDropdown || !jsonUploadMenu) return;
+        jsonUploadDropdown.classList.add('open');
+        jsonUploadMenu.hidden = false;
+        if (jsonUploadToggle) jsonUploadToggle.setAttribute('aria-expanded', 'true');
+    }
+    function closeJsonMenu() {
+        if (!jsonUploadDropdown || !jsonUploadMenu) return;
+        jsonUploadDropdown.classList.remove('open');
+        jsonUploadMenu.hidden = true;
+        if (jsonUploadToggle) jsonUploadToggle.setAttribute('aria-expanded', 'false');
+    }
+    function toggleJsonMenu() {
+        if (jsonUploadMenu && jsonUploadMenu.hidden) openJsonMenu();
+        else closeJsonMenu();
+    }
+
+    // Reveal the control for administrators only. The Convex server enforces
+    // admin on every write, so this is a UX gate, not the security boundary.
+    // NOTE: toggle inline display (not the [hidden] attribute) because
+    // .template-dropdown sets `display:inline-flex`, which would override a bare
+    // [hidden] and leave the control visible to viewers.
+    function refreshJsonUploadVisibility() {
+        if (!jsonUploadDropdown) return;
+        const show = isAdminUser();
+        jsonUploadDropdown.style.display = show ? '' : 'none';
+        if (!show) closeJsonMenu();
+    }
+
+    if (jsonUploadToggle) {
+        jsonUploadToggle.addEventListener('click', (e) => { e.stopPropagation(); toggleJsonMenu(); });
+    }
+    document.addEventListener('click', (e) => {
+        if (jsonUploadDropdown && !jsonUploadDropdown.contains(e.target)) closeJsonMenu();
+    });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeJsonMenu(); });
+
+    function beginJsonUpload(target) {
+        jsonUploadTarget = (target === 'boq') ? 'boq' : 'field';
+        closeJsonMenu();
+        if (!isAdminUser()) {
+            showJsonResult({ error: 'Only administrators can update the dashboard data. Please sign in with an admin account.' });
+            return;
+        }
+        if (jsonUploadInput) { jsonUploadInput.value = ''; jsonUploadInput.click(); }
+    }
+    if (jsonUploadFieldItem) jsonUploadFieldItem.addEventListener('click', () => beginJsonUpload('field'));
+    if (jsonUploadBoqItem)   jsonUploadBoqItem.addEventListener('click', () => beginJsonUpload('boq'));
+    if (jsonUploadInput) {
+        jsonUploadInput.addEventListener('change', (e) => {
+            const file = e.target.files && e.target.files[0];
+            if (file) handleJsonDatasetUpload(file, jsonUploadTarget);
+        });
+    }
+
+    // Reveal for admins now (from the cached session) and again once the server
+    // confirms the role (covers a session whose cached role is stale).
+    refreshJsonUploadVisibility();
+    try {
+        if (window.IDB && IDB.auth && IDB.auth.me) {
+            IDB.auth.me().then(refreshJsonUploadVisibility).catch(() => {});
+        }
+    } catch (e) {}
+
+    // Read + validate a JSON dataset file, confirm with the admin, then publish.
+    function handleJsonDatasetUpload(file, targetKey) {
+        const asset = JSON_DATA_ASSETS[targetKey] || JSON_DATA_ASSETS.field;
+        if (!isAdminUser()) {
+            showJsonResult({ error: 'Only administrators can update the dashboard data.' });
+            return;
+        }
+        const token = (window.IDB && IDB.auth && IDB.auth.getToken && IDB.auth.getToken()) || null;
+        if (!token) {
+            showJsonResult({ error: 'Your session has expired. Please sign in again as an administrator.' });
+            return;
+        }
+        if (!/\.json$/i.test(file.name) && (!file.type || file.type.indexOf('json') === -1)) {
+            showJsonResult({ error: 'Please choose a .json file.' });
+            return;
+        }
+        const reader = new FileReader();
+        reader.onerror = () => showJsonResult({ error: 'Could not read the file. Please try again.' });
+        reader.onload = (ev) => {
+            const text = String((ev.target && ev.target.result) || '');
+            if (!text.trim()) { showJsonResult({ error: 'The file is empty.' }); return; }
+            let parsed;
+            try { parsed = JSON.parse(text); }
+            catch (err) { showJsonResult({ error: 'That file is not valid JSON. Export the data as a .json file and try again.' }); return; }
+            // Same unwrap the loader uses: bare array, or {"Sheet2":[...]} etc.
+            let records = Array.isArray(parsed) ? parsed
+                : (parsed && typeof parsed === 'object'
+                    ? (parsed.Sheet2 || parsed.Sheet1 || Object.values(parsed).find(Array.isArray) || [])
+                    : []);
+            if (!Array.isArray(records) || !records.length) {
+                showJsonResult({ error: 'No records found. The JSON should be an array of row objects (or an object whose value is such an array).' });
+                return;
+            }
+            // How many rows fall inside THIS dashboard's feeder scope ("the
+            // configuration")? Surface it so the admin sees how much of the file
+            // this particular dashboard will actually display.
+            const allowed = (window.IDB_CONFIG && window.IDB_CONFIG.allowedFeeders) || null;
+            const scoped = Array.isArray(allowed) && !!allowed.length;
+            let inScope = records.length;
+            if (scoped) {
+                const allowSet = new Set(allowed.map(f => String(f).trim().toLowerCase()));
+                inScope = records.filter(r => allowSet.has(String((r && r[asset.feederKey]) || '').trim().toLowerCase())).length;
+            }
+            confirmJsonUpload({ asset: asset, fileName: file.name, total: records.length, inScope: inScope, scoped: scoped }, () => {
+                publishJsonAsset(token, asset.name, text)
+                    .then(res => loadDashboardData({ reapplyFilters: true }).then(() => showJsonResult({
+                        ok: true, asset: asset, fileName: file.name,
+                        total: (res && res.records != null) ? res.records : records.length,
+                        inScope: inScope, scoped: scoped
+                    })))
+                    .catch(err => showJsonResult({ error: (err && err.message) || 'Could not update the dashboard data. Please try again.' }));
+            });
+        };
+        reader.readAsText(file);
+    }
+
+    // POST the raw JSON body to the admin-only Convex upload endpoint.
+    function publishJsonAsset(token, name, bodyText) {
+        const site = (window.IDB && IDB.SITE_URL) || '';
+        if (!site) return Promise.reject(new Error('The backend URL is unavailable, so the upload cannot be sent.'));
+        return fetch(site + '/admin/upload-asset?name=' + encodeURIComponent(name), {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: bodyText
+        }).then(r => r.json().catch(() => ({})).then(body => {
+            if (!r.ok || !body || body.ok === false) {
+                let msg = body && body.error;
+                if (!msg) {
+                    msg = (r.status === 404 || r.status === 405)
+                        ? 'The data-upload endpoint is not deployed yet. Deploy the Convex backend (npx convex deploy) to enable JSON uploads.'
+                        : ('Upload failed (HTTP ' + r.status + ').');
+                }
+                throw new Error(msg);
+            }
+            return body;
+        }));
+    }
+
+    // ── Self-contained confirm / result dialogs (no external CSS) ──
+    function ensureJsonDialogStyle() {
+        if (document.getElementById('json-dlg-style')) return;
+        const st = document.createElement('style');
+        st.id = 'json-dlg-style';
+        st.textContent =
+            "#json-dlg-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:100001;padding:1rem;font-family:'Inter',system-ui,-apple-system,sans-serif}" +
+            "#json-dlg{width:100%;max-width:440px;background:#161b22;color:#e6edf3;border:1px solid #2b3340;border-radius:14px;padding:1.4rem;box-shadow:0 25px 60px -20px rgba(0,0,0,.7)}" +
+            "#json-dlg h3{margin:0 0 .2rem;font-size:1.1rem;display:flex;align-items:center;gap:.5rem}" +
+            "#json-dlg p.sub{margin:.1rem 0 1rem;font-size:.82rem;color:#8b949e;word-break:break-word}" +
+            "#json-dlg ul{list-style:none;margin:0 0 .4rem;padding:0}" +
+            "#json-dlg li{display:flex;justify-content:space-between;gap:1rem;padding:.4rem .1rem;border-bottom:1px solid #21262d;font-size:.88rem}" +
+            "#json-dlg li:last-child{border-bottom:none}" +
+            "#json-dlg li .v{font-weight:700}" +
+            "#json-dlg li.pos .v{color:#7ee787}#json-dlg li.upd .v{color:#79c0ff}#json-dlg li.warn .v{color:#f0b849}" +
+            "#json-dlg .note{margin-top:.9rem;font-size:.76rem;color:#8b949e;line-height:1.5;background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:.6rem .7rem}" +
+            "#json-dlg .err{font-size:.9rem;color:#ffb3b3;line-height:1.55;margin:.2rem 0 .4rem}" +
+            "#json-dlg .tpl-actions{display:flex;justify-content:flex-end;gap:.6rem;margin-top:1.1rem}" +
+            "#json-dlg button{padding:.55rem 1.1rem;border-radius:8px;font-weight:600;font-size:.85rem;cursor:pointer;border:1px solid transparent}" +
+            "#json-dlg .json-cancel{background:#21262d;color:#e6edf3;border-color:#2b3340}" +
+            "#json-dlg .json-confirm,#json-dlg #jsonResultOk{background:#10b981;color:#fff}" +
+            "#json-dlg .json-confirm:hover,#json-dlg #jsonResultOk:hover{background:#0ea371}" +
+            "#json-dlg button:disabled{opacity:.6;cursor:not-allowed}";
+        document.head.appendChild(st);
+    }
+
+    function confirmJsonUpload(info, onConfirm) {
+        ensureJsonDialogStyle();
+        const existing = document.getElementById('json-dlg-overlay');
+        if (existing) existing.parentNode.removeChild(existing);
+        const a = info.asset || {};
+        const outOfScope = Math.max(0, (info.total || 0) - (info.inScope || 0));
+        const scopeRows = info.scoped
+            ? `<li class="pos"><span>Rows within this dashboard's scope</span><span class="v">${(info.inScope || 0).toLocaleString()}</span></li>` +
+              (outOfScope ? `<li class="warn"><span>Outside scope (won't display here)</span><span class="v">${outOfScope.toLocaleString()}</span></li>` : '')
+            : '';
+        const body =
+            '<h3>🗄️ Replace ' + jsonEsc(a.label || 'data') + '?</h3>' +
+            '<p class="sub">' + jsonEsc(info.fileName || '') + '</p>' +
+            '<ul>' +
+            '<li><span>Records in file</span><span class="v">' + (info.total || 0).toLocaleString() + '</span></li>' +
+            scopeRows +
+            '</ul>' +
+            '<div class="note">This replaces <strong>' + jsonEsc(a.label || 'the data') + '</strong> for <strong>every user</strong> of this dashboard and persists across refreshes. This dashboard’s feeder configuration is applied automatically on load. This cannot be undone — re-upload the previous file to revert.</div>';
+        const ov = document.createElement('div');
+        ov.id = 'json-dlg-overlay';
+        ov.innerHTML =
+            '<div id="json-dlg" role="dialog" aria-modal="true" aria-label="Confirm data upload">' +
+            body +
+            '<div class="tpl-actions" style="justify-content:space-between">' +
+            '<button type="button" class="json-cancel" id="jsonCancel">Cancel</button>' +
+            '<button type="button" class="json-confirm" id="jsonConfirm">Publish to everyone</button>' +
+            '</div></div>';
+        document.body.appendChild(ov);
+        const close = () => { if (ov.parentNode) ov.parentNode.removeChild(ov); };
+        document.getElementById('jsonCancel').addEventListener('click', close);
+        ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+        document.getElementById('jsonConfirm').addEventListener('click', () => {
+            const b = document.getElementById('jsonConfirm');
+            b.disabled = true; b.textContent = 'Publishing…';
+            close();
+            onConfirm();
+        });
+    }
+
+    function showJsonResult(r) {
+        ensureJsonDialogStyle();
+        const existing = document.getElementById('json-dlg-overlay');
+        if (existing) existing.parentNode.removeChild(existing);
+        let body;
+        if (r.error) {
+            body = '<h3>⚠️ Couldn’t update data</h3>' +
+                (r.fileName ? '<p class="sub">' + jsonEsc(r.fileName) + '</p>' : '') +
+                '<div class="err">' + jsonEsc(r.error) + '</div>';
+        } else {
+            const a = r.asset || {};
+            body =
+                '<h3>✅ Dashboard data updated</h3>' +
+                '<p class="sub">' + jsonEsc(r.fileName || '') + '</p>' +
+                '<ul>' +
+                '<li class="pos"><span>Records published</span><span class="v">' + Number(r.total || 0).toLocaleString() + '</span></li>' +
+                (r.scoped ? '<li class="upd"><span>Showing on this dashboard</span><span class="v">' + Number(r.inScope || 0).toLocaleString() + '</span></li>' : '') +
+                '</ul>' +
+                '<div class="note"><strong>Published to everyone.</strong> The dashboard has been refreshed with the new ' + jsonEsc(a.label || 'data') + '. All other users will see it on their next load.</div>';
+        }
+        const ov = document.createElement('div');
+        ov.id = 'json-dlg-overlay';
+        ov.innerHTML =
+            '<div id="json-dlg" role="dialog" aria-modal="true" aria-label="Data upload result">' +
+            body +
+            '<div class="tpl-actions"><button type="button" id="jsonResultOk">Done</button></div></div>';
+        document.body.appendChild(ov);
+        const close = () => { if (ov.parentNode) ov.parentNode.removeChild(ov); };
+        document.getElementById('jsonResultOk').addEventListener('click', close);
+        ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+    }
 
 
     // AI Assistant Logic
