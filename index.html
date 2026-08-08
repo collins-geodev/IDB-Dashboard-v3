@@ -299,6 +299,41 @@
                             </div>
                             <input type="file" id="templateUploadInput" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
                         </div>
+                        <!-- Admin-only: replace the dashboard's data files from a JSON upload.
+                             Hidden by default (inline display:none — .template-dropdown's
+                             own display would otherwise override the [hidden] attribute);
+                             script.js reveals it for administrators. -->
+                        <div class="template-dropdown" id="jsonUploadDropdown" style="display:none">
+                            <button type="button" class="upload-btn template-dropdown-toggle" id="jsonUploadToggle"
+                                aria-haspopup="true" aria-expanded="false"
+                                title="Admin only — upload a JSON file to update the dashboard data for everyone"
+                                style="background-color: #10b981; border: 1px solid #10b981; color: white;">
+                                <span aria-hidden="true">🗄️</span>
+                                <span class="template-dropdown-label">Update Data (JSON)</span>
+                                <svg class="template-dropdown-caret" width="12" height="12" viewBox="0 0 24 24"
+                                    fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"
+                                    stroke-linejoin="round" aria-hidden="true">
+                                    <polyline points="6 9 12 15 18 9"></polyline>
+                                </svg>
+                            </button>
+                            <div class="template-dropdown-menu" id="jsonUploadMenu" role="menu" hidden>
+                                <button type="button" class="template-dropdown-item" id="jsonUploadFieldItem" role="menuitem">
+                                    <span class="tdi-icon" aria-hidden="true">⬆️</span>
+                                    <span class="tdi-text">
+                                        <strong>Upload Field Data (JSON)</strong>
+                                        <small>Replaces the dashboard data for all users (admin)</small>
+                                    </span>
+                                </button>
+                                <button type="button" class="template-dropdown-item" id="jsonUploadBoqItem" role="menuitem">
+                                    <span class="tdi-icon" aria-hidden="true">🎯</span>
+                                    <span class="tdi-text">
+                                        <strong>Upload BOQ Targets (JSON)</strong>
+                                        <small>Replaces the BOQ targets for all users (admin)</small>
+                                    </span>
+                                </button>
+                            </div>
+                            <input type="file" id="jsonUploadInput" accept=".json,application/json" hidden>
+                        </div>
                         <div class="last-updated" id="lastUpdated">Last Updated: Now</div>
                     </div>
                 </header>
@@ -939,7 +974,7 @@
     <script src="convex-client.js?v=20260710a"></script>
     <script src="auth-footprint.js?v=20260705a"></script>
     <script src="dashboard-auth.js?v=20260707b"></script>
-    <script src="script.js?v=20260807c"></script>
+    <script src="script.js?v=20260808a"></script>
 </body>
 
 </html>
