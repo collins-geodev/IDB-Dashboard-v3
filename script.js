@@ -47,6 +47,16 @@ document.addEventListener('DOMContentLoaded', () => {
     let mapBases = {};              // { dark, light, satellite, hybrid } base tile layers
     let lastMapFilterSig = null;    // signature of the last filtered set drawn on the map
 
+    // ── Asset (SLRN) index ───────────────────────────────────────────────
+    // Pole SLRNs and Building SLRNs are identifiers, not categories — ~10k and
+    // ~15k distinct values — so they are looked up, never browsed in a dropdown.
+    // These two maps are built once per data load and make every lookup O(1)
+    // instead of re-scanning + re-splitting all 11k rows on each keystroke.
+    let poleIndex = new Map();      // poleSLRN     -> Set<buildingSLRN>
+    let buildingIndex = new Map();  // buildingSLRN -> Set<poleSLRN>
+    let assetLookupQuery = '';      // active "Asset SLRN" filter term (upper-case)
+    const expandedDTKeys = new Set(); // DT rows currently drilled down (feeder|dt)
+
     // Generate a visually distinct color for each UT via golden-angle HSL.
     // 54 UTs need 54 colors that are easy to tell apart at a glance.
     const utColorFor = (i) => `hsl(${((i * 137.508) % 360).toFixed(0)}, 72%, 52%)`;
@@ -521,6 +531,55 @@ document.addEventListener('DOMContentLoaded', () => {
         showDuplicateBanner();
     }
 
+    // Split an "Associated Buildings SLRN" cell into clean building SLRNs.
+    // The captured format is inconsistent — the delimiter is usually "; " but
+    // often " ;" with a trailing separator ("IESH023257 ;IESH023258 ;"), so the
+    // tokens must be trimmed and the phantom empty tail dropped. Values are
+    // de-duplicated because 2,216 rows repeat the same SLRN inside one cell
+    // (e.g. "IESH008706 ;IESH008706 ;IESH008706 ;"), which inflates the stored
+    // "No of Buildings Connected" count.
+    function parseBuildings(raw) {
+        return [...new Set(
+            String(raw || '')
+                .split(';')
+                .map(s => s.trim().toUpperCase())
+                .filter(Boolean)
+        )];
+    }
+
+    // Build the pole ↔ building lookup maps in a single pass over the dataset.
+    // ~21k pole/building pairs index in a few milliseconds, once per load.
+    function buildAssetIndex(data) {
+        poleIndex = new Map();
+        buildingIndex = new Map();
+
+        (data || []).forEach(item => {
+            const pole = String(item["Lt PoleSLRN"] || item["LT Pole No"] || '').trim().toUpperCase();
+            if (!pole) return;
+
+            if (!poleIndex.has(pole)) poleIndex.set(pole, new Set());
+            const bucket = poleIndex.get(pole);
+
+            parseBuildings(item["Associated Buildings SLRN"]).forEach(b => {
+                bucket.add(b);
+                if (!buildingIndex.has(b)) buildingIndex.set(b, new Set());
+                buildingIndex.get(b).add(pole);
+            });
+        });
+
+        const shared = [...buildingIndex.values()].filter(s => s.size > 1).length;
+        console.log(`[Asset Index] ${poleIndex.size} poles ↔ ${buildingIndex.size} buildings` +
+            (shared ? ` · ${shared} building(s) attached to more than one pole` : ''));
+    }
+
+    // Buildings for a single record, honouring the index so repeated captures of
+    // the same pole show the full unioned list rather than just this row's cell.
+    function buildingsForRecord(item) {
+        const pole = String(item["Lt PoleSLRN"] || item["LT Pole No"] || '').trim().toUpperCase();
+        const fromIndex = pole && poleIndex.get(pole);
+        return fromIndex ? [...fromIndex] : parseBuildings(item["Associated Buildings SLRN"]);
+    }
+
     // Show or hide the duplicate warning banner
     function showDuplicateBanner() {
         const banner = document.getElementById('duplicate-warning-banner');
@@ -696,6 +755,9 @@ document.addEventListener('DOMContentLoaded', () => {
             // Detect duplicate SLRNs before rendering
             detectDuplicateSLRNs(globalData);
 
+            // Index pole ↔ building SLRNs for the Asset lookup and DT drill-down
+            buildAssetIndex(globalData);
+
             // Process BOQ Data
             boqData = boq;
             console.log("Total Data Loaded:", boqData.length);
@@ -728,6 +790,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initialize multi-select filter dropdowns
     initMultiSelects();
+
+    // Initialize the Pole / Building SLRN identifier lookup + DT drill-down
+    initAssetLookup();
+    initDrillDown();
 
 
     document.getElementById('viewModeToggle').addEventListener('change', handleViewModeToggle);
@@ -1161,6 +1227,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function rerenderAfterDataChange(previewNote) {
         detectDuplicateSLRNs(globalData);
+        buildAssetIndex(globalData);   // uploaded poles bring their own SLRNs
         populateFilters();     // rebuild filter option lists (new feeders/DTs/users)
         applyFilters();        // recompute filteredData + updateDashboard()
         updateExecutiveSummary();
@@ -2919,8 +2986,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const matVals = multiSelects.materialFilter?.getValues();
         const dateVals = multiSelects.dateFilter?.getValues();
 
+        // Identifier lookup — matches an LT Pole SLRN, or any Building SLRN
+        // attached to the pole (so a building ID resolves back to its pole).
+        const assetQ = assetLookupQuery;
+
         filteredData = globalData.filter(item => {
             const poleType = (item["Type of Pole"] || '').trim().toUpperCase();
+
+            if (assetQ) {
+                const pole = String(item["Lt PoleSLRN"] || item["LT Pole No"] || '').toUpperCase();
+                if (!pole.includes(assetQ) &&
+                    !buildingsForRecord(item).some(b => b.includes(assetQ))) return false;
+            }
 
             return (!vendorVals || vendorVals.includes(item["Vendor_Name"])) &&
                 (!buVals || buVals.includes(item["Bussines Unit"])) &&
@@ -3561,158 +3638,6 @@ document.addEventListener('DOMContentLoaded', () => {
         themedPlot('vendorRunRateChart', [traceRunRate], layoutRunRate, { responsive: true });
     }
 
-
-    // 6. Detailed DT Analysis Table (Enhanced)
-    function renderDTTable() {
-        const tbody = document.querySelector('#dtTable tbody');
-        if (!tbody) return;
-
-        tbody.innerHTML = '';
-        const searchVal = (document.getElementById('dtSearchInput')?.value || '').toLowerCase();
-
-        // 1. Get Enhanced Data (Union of BOQ and Field)
-        const data = getEnhancedDTData();
-
-        // 2. Filter by Search Input
-        // 2. Filter by Search Input (Interactive)
-        const filtered = data.filter(item => {
-            if (!searchVal) return true;
-            return (
-                (item.dtName || '').toLowerCase().includes(searchVal) ||
-                (item.vendor || '').toLowerCase().includes(searchVal) ||
-                (item.feeder || '').toLowerCase().includes(searchVal) ||
-                (item.bu || '').toLowerCase().includes(searchVal) ||
-                (item.undertaking || '').toLowerCase().includes(searchVal) ||
-                item.users.some(u => String(getDisplayName(u) || '').toLowerCase().includes(searchVal))
-            );
-        });
-
-        // 3. Update Info Count
-        const infoEl = document.getElementById('tableInfo');
-        if (infoEl) infoEl.textContent = `Showing ${filtered.length} of ${data.length} DTs`;
-
-        // 4. Pagination Logic
-        const totalItems = filtered.length;
-        const totalPages = Math.ceil(totalItems / rowsPerPage);
-
-        // Adjust currentPage if out of bounds
-        if (currentPage > totalPages && totalPages > 0) currentPage = totalPages;
-        if (currentPage < 1 && totalPages > 0) currentPage = 1; // Should happen?
-        if (totalPages === 0) currentPage = 1; // If no items, reset to page 1
-
-        const startIndex = (currentPage - 1) * rowsPerPage;
-        const endIndex = startIndex + rowsPerPage;
-        const paginatedData = filtered.slice(startIndex, endIndex);
-
-        // 5. Render Rows
-        paginatedData.forEach((row, index) => {
-            const tr = document.createElement('tr');
-
-            // Vendor Tag
-            let vendorClass = '';
-            if (row.vendor === 'ETC Workforce') vendorClass = 'vendor-etc';
-            if (row.vendor === 'Jesom Technology') vendorClass = 'vendor-jesom';
-
-            // Progress Bar / Status Logic
-            const progress = row.boqTotal > 0 ? (row.actualTotal / row.boqTotal) * 100 : 0;
-            let status = 'In Progress';
-            let statusColor = '#f59e0b'; // Orange
-
-            if (row.actualTotal === 0) {
-                status = 'Not Started';
-                statusColor = '#ef4444'; // Red
-            } else if (progress >= 100) {
-                status = 'Completed';
-                statusColor = '#10b981'; // Green
-            } else if (progress > 90) {
-                status = 'Near Completion';
-                statusColor = '#3b82f6'; // Blue
-            }
-
-            // User Names
-            const userNames = row.users.map(u => getDisplayName(u)).join(', ');
-            // Absolute index for numbering
-            const absIndex = startIndex + index + 1;
-
-            tr.innerHTML = `
-                <td class="col-index" style="text-align: center;">${absIndex}</td>
-                <td class="col-dtName" style="font-weight: 500; color: #fff;">${row.dtName}</td>
-                <td class="col-feeder">${row.feeder}</td>
-                <td class="col-bu">${row.bu}</td>
-                <td class="col-undertaking">${row.undertaking}</td>
-                <td class="col-vendor"><span class="vendor-tag ${vendorClass}">${row.vendor}</span></td>
-                <td class="col-users" style="max-width: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${userNames}">${userNames}</td>
-                <td class="col-boqTotal" style="text-align: center; font-weight: bold; color: #0EA5E9;">${row.boqTotal}</td>
-                <td class="col-actualTotal" style="text-align: center;">${row.actualTotal}</td>
-                <td class="col-remaining" style="text-align: center; color: #a0a0a0;">${Math.max(0, row.boqTotal - row.actualTotal)}</td>
-                <td class="col-concrete" style="text-align: center;">${row.concrete}</td>
-                <td class="col-wooden" style="text-align: center;">${row.wooden}</td>
-                <td class="col-progress" style="width: 70px;">
-                    <div style="display: flex; align-items: center; gap: 4px;">
-                        <div style="flex-grow: 1; height: 4px; background: #333; border-radius: 2px; overflow: hidden;">
-                            <div style="width: ${Math.min(100, progress)}%; height: 100%; background: ${statusColor};"></div>
-                        </div>
-                        <span style="font-size: 0.8em; color: ${statusColor};">${progress.toFixed(0)}%</span>
-                    </div>
-                </td>
-                <td class="col-status"><span style="font-size: 0.8em; padding: 1px 6px; border-radius: 8px; background: ${statusColor}20; color: ${statusColor}; border: 1px solid ${statusColor}40; white-space: nowrap;">${status}</span></td>
-            `;
-            tbody.appendChild(tr);
-        });
-
-        // 6. Render Pagination Controls
-        renderPaginationControls(filtered.length);
-    }
-
-    function renderPaginationControls(totalItems) {
-        const container = document.getElementById('paginationControls');
-        if (!container) return;
-        container.innerHTML = '';
-
-        const totalPages = Math.ceil(totalItems / rowsPerPage);
-        if (totalPages <= 1) return;
-
-        const createBtn = (text, page, isActive = false, isDisabled = false) => {
-            const btn = document.createElement('button');
-            btn.className = `page-btn ${isActive ? 'active' : ''}`;
-            btn.textContent = text;
-            if (isDisabled) btn.disabled = true;
-            else {
-                btn.onclick = () => {
-                    currentPage = page;
-                    renderDTTable();
-                };
-            }
-            return btn;
-        };
-
-        // Prev Button
-        container.appendChild(createBtn('<', currentPage - 1, false, currentPage === 1));
-
-        // Page Range Logic (Show up to 6 pages)
-        const maxVisible = 6;
-        let startPage = 1;
-        let endPage = Math.min(totalPages, maxVisible);
-
-        if (currentPage > 3 && totalPages > maxVisible) {
-            // Center user in the window if possible
-            startPage = Math.max(1, currentPage - 2);
-            endPage = Math.min(totalPages, startPage + maxVisible - 1);
-
-            // Adjust start if end is capped
-            if (endPage === totalPages) {
-                startPage = Math.max(1, endPage - maxVisible + 1);
-            }
-        }
-
-        for (let i = startPage; i <= endPage; i++) {
-            container.appendChild(createBtn(i, i, i === currentPage));
-        }
-
-        // Next Button
-        container.appendChild(createBtn('>', currentPage + 1, false, currentPage === totalPages));
-    }
-
     function resetFilters() {
         // 1. Reset View Mode first
         viewMode = 'field';
@@ -3722,6 +3647,14 @@ document.addEventListener('DOMContentLoaded', () => {
         // 2. Clear Search Input
         const searchInput = document.getElementById('dtSearchInput');
         if (searchInput) searchInput.value = '';
+
+        // 2b. Clear the Asset SLRN lookup and collapse any open drill-downs
+        assetLookupQuery = '';
+        const assetInput = document.getElementById('assetLookupInput');
+        if (assetInput) { assetInput.value = ''; assetInput.classList.remove('has-value'); }
+        const assetClear = document.getElementById('assetLookupClear');
+        if (assetClear) assetClear.style.display = 'none';
+        expandedDTKeys.clear();
 
         // 3. Reset Pagination
         currentPage = 1;
@@ -3841,7 +3774,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     !multiSelects.buFilter?.isAll() ||
                     !multiSelects.utFilter?.isAll() ||
                     !multiSelects.userFilter?.isAll() ||
-                    !multiSelects.materialFilter?.isAll();
+                    !multiSelects.materialFilter?.isAll() ||
+                    // An Asset SLRN lookup is the most field-dependent filter of
+                    // all — padding in every BOQ-only DT would bury the one pole
+                    // the user searched for under hundreds of empty rows.
+                    !!assetLookupQuery;
 
                 if (!hasFieldFilter) {
                     map[key] = {
@@ -3867,6 +3804,169 @@ document.addEventListener('DOMContentLoaded', () => {
             ...item,
             users: Array.from(item.users)
         }));
+    }
+
+    // ── DT Drill-Down: Pole Register ─────────────────────────────────────
+    // Expanding a DT row reveals its individual poles — the level at which
+    // "Lt PoleSLRN" and "Associated Buildings SLRN" actually live. The table
+    // above is a DT *aggregate*, so a pole identifier cannot belong in it: one
+    // DT row spans hundreds of poles.
+    //
+    // Repeat captures of the same pole are merged the same way the export does
+    // (see mergeDuplicatesBySLRN): building lists are UNIONed so no captured
+    // building is ever dropped, and the distinct count is recomputed.
+    function getPoleRegister(dtKey) {
+        const byPole = new Map();
+        let unkeyed = 0;
+
+        filteredData.forEach(d => {
+            const feeder = (d["Feeder"] || "Unknown Feeder").trim();
+            const dtName = (d["DT Name"] || "Unknown DT").trim();
+            if (`${feeder}|${dtName}`.toUpperCase() !== dtKey) return;
+
+            const slrn = String(d["Lt PoleSLRN"] || d["LT Pole No"] || '').trim().toUpperCase();
+            const id = slrn || `__unkeyed_${unkeyed++}`;
+
+            let rec = byPole.get(id);
+            if (!rec) {
+                rec = {
+                    slrn: slrn || '—',
+                    poleNo: d["LT Pole No"] || '—',
+                    // A single pole can carry more than one upriser, so this is
+                    // a set rather than a scalar (e.g. IESHLT002500 on 1 and 2).
+                    uprisers: new Set(),
+                    material: d["Type of Pole"] || '—',
+                    status: d["Status"] || '—',
+                    user: getDisplayName(d["User"]) || '—',
+                    date: d["Date/timestamp"] || '—',
+                    declared: 0,
+                    buildings: new Set(),
+                    captures: 0
+                };
+                byPole.set(id, rec);
+            }
+
+            rec.captures++;
+            const up = (d["UpriserNo"] ?? '').toString().trim();
+            if (up) rec.uprisers.add(up);
+            rec.declared = Math.max(rec.declared, parseInt(d["No of Buildings Connected to the Pole"]) || 0);
+            parseBuildings(d["Associated Buildings SLRN"]).forEach(b => rec.buildings.add(b));
+        });
+
+        // Ordered by upriser then pole sequence — the order crews walk the line.
+        const num = (a, b) => String(a).localeCompare(String(b), undefined, { numeric: true });
+        return [...byPole.values()]
+            .map(r => {
+                const ups = [...r.uprisers].sort((a, b) => num(a, b));
+                return { ...r, buildings: [...r.buildings], uprisers: ups, upriser: ups.join(', ') || '—' };
+            })
+            .sort((a, b) => num(a.uprisers[0] ?? '', b.uprisers[0] ?? '')
+                || num(a.poleNo, b.poleNo) || num(a.slrn, b.slrn));
+    }
+
+    // Building SLRNs render as chips, collapsed past the third. The widest cell
+    // in the dataset holds 31 SLRNs — rendering those raw destroys the row.
+    const DRILL_CHIP_LIMIT = 3;
+
+    function buildingChipsHTML(buildings) {
+        if (!buildings.length) return '<span class="pole-drill-none">No buildings captured</span>';
+        const chip = b => `<button type="button" class="bldg-chip" data-slrn="${b}" title="Filter the dashboard to ${b}">${b}</button>`;
+        const shown = buildings.slice(0, DRILL_CHIP_LIMIT);
+        const rest = buildings.slice(DRILL_CHIP_LIMIT);
+        let html = shown.map(chip).join('');
+        if (rest.length) {
+            html += `<span class="bldg-chip-rest" hidden>${rest.map(chip).join('')}</span>`;
+            html += `<button type="button" class="bldg-chip-more" data-count="${rest.length}">+${rest.length} more</button>`;
+        }
+        return html;
+    }
+
+    function buildPoleRegisterRow(dtRow) {
+        const poles = getPoleRegister(dtRow.key);
+        const colCount = document.querySelectorAll('#dtTable thead th').length || 15;
+        const totalBuildings = poles.reduce((n, p) => n + p.buildings.length, 0);
+        // Stored count vs distinct SLRNs — they disagree wherever a cell repeats
+        // the same building, which silently inflates "No of Buildings Connected".
+        const mismatched = poles.filter(p => p.declared !== p.buildings.length).length;
+
+        const body = poles.length ? poles.map(p => {
+            const mismatch = p.declared !== p.buildings.length;
+            const warnTitle = mismatch
+                ? ` title="Captured count says ${p.declared}, but ${p.buildings.length} distinct SLRN(s) were recorded — the cell repeats a building."`
+                : '';
+            return `
+                <tr>
+                    <td><button type="button" class="bldg-chip pole-chip" data-slrn="${p.slrn}" title="Filter the dashboard to ${p.slrn}">${p.slrn}</button>${p.captures > 1 ? `<span class="pr-captures" title="${p.captures} captures of this pole were merged">×${p.captures}</span>` : ''}</td>
+                    <td>${p.poleNo}</td>
+                    <td style="text-align:center;"${p.uprisers.length > 1 ? ` title="This pole carries ${p.uprisers.length} uprisers"` : ''}>${p.upriser}</td>
+                    <td>${p.material}</td>
+                    <td style="text-align:center;"><span class="pr-count${mismatch ? ' pr-count-warn' : ''}"${warnTitle}>${p.buildings.length}</span></td>
+                    <td class="pr-buildings">${buildingChipsHTML(p.buildings)}</td>
+                    <td>${p.status}</td>
+                    <td>${p.user}</td>
+                    <td class="pr-date">${p.date}</td>
+                </tr>`;
+        }).join('') : '<tr><td colspan="9" class="pole-drill-none">No pole captures match the current filters.</td></tr>';
+
+        const tr = document.createElement('tr');
+        tr.className = 'pole-drill-row';
+        tr.dataset.dtkey = dtRow.key;
+        tr.innerHTML = `
+            <td colspan="${colCount}" class="pole-drill-cell">
+                <div class="pole-drill-panel">
+                    <div class="pole-drill-head">
+                        <span class="pole-drill-title">Pole Register — ${dtRow.dtName}</span>
+                        <span class="pole-drill-stats">${poles.length} pole${poles.length === 1 ? '' : 's'} · ${totalBuildings} building${totalBuildings === 1 ? '' : 's'}${mismatched ? ` · <span class="pr-count-warn">${mismatched} count mismatch${mismatched === 1 ? '' : 'es'}</span>` : ''}</span>
+                    </div>
+                    <div class="pole-drill-scroll">
+                        <table class="pole-drill-table">
+                            <thead>
+                                <tr>
+                                    <th>Pole SLRN</th><th>Pole No</th><th>Upriser</th><th>Material</th>
+                                    <th>Bldgs</th><th>Associated Buildings SLRN</th>
+                                    <th>Status</th><th>Field Officer</th><th>Captured</th>
+                                </tr>
+                            </thead>
+                            <tbody>${body}</tbody>
+                        </table>
+                    </div>
+                </div>
+            </td>`;
+        return tr;
+    }
+
+    // One delegated listener for every drill-down interaction. Bound once —
+    // renderDTTable only replaces the tbody's children, never the table itself.
+    function initDrillDown() {
+        const table = document.getElementById('dtTable');
+        if (!table || table.dataset.drillBound) return;
+        table.dataset.drillBound = '1';
+
+        table.addEventListener('click', (e) => {
+            const toggle = e.target.closest('.dt-drill-toggle');
+            if (toggle) {
+                const key = toggle.closest('tr')?.dataset.dtkey;
+                if (!key) return;
+                if (expandedDTKeys.has(key)) expandedDTKeys.delete(key);
+                else expandedDTKeys.add(key);
+                renderDTTable();
+                return;
+            }
+
+            const more = e.target.closest('.bldg-chip-more');
+            if (more) {
+                const rest = more.previousElementSibling;
+                if (rest && rest.classList.contains('bldg-chip-rest')) {
+                    const reveal = rest.hidden;
+                    rest.hidden = !reveal;
+                    more.textContent = reveal ? 'show less' : `+${more.dataset.count} more`;
+                }
+                return;
+            }
+
+            const chip = e.target.closest('.bldg-chip');
+            if (chip && chip.dataset.slrn && chip.dataset.slrn !== '—') applyAssetLookup(chip.dataset.slrn);
+        });
     }
 
     // 6. Detailed DT Analysis Table (Enhanced)
@@ -3936,10 +4036,20 @@ document.addEventListener('DOMContentLoaded', () => {
             // User Names
             const userNames = row.users.map(u => getDisplayName(u)).join(', ');
 
+            // Drill-down state for this DT (survives re-renders via expandedDTKeys)
+            const isOpen = expandedDTKeys.has(row.key);
+            tr.className = isOpen ? 'dt-row dt-row-open' : 'dt-row';
+            tr.dataset.dtkey = row.key;
+
             // Add classes for column visibility
             tr.innerHTML = `
                 <td class="col-index" style="text-align: center;">${globalIndex}</td>
-                <td class="col-dtName" style="font-weight: 500; color: #fff;">${row.dtName}</td>
+                <td class="col-dtName" style="font-weight: 500; color: hsl(var(--foreground));">
+                    <button type="button" class="dt-drill-toggle" aria-expanded="${isOpen}"
+                        title="${isOpen ? 'Hide' : 'Show'} the pole register for this DT">
+                        <span class="dt-drill-caret">${isOpen ? '&#9662;' : '&#9656;'}</span><span>${row.dtName}</span>
+                    </button>
+                </td>
                 <td class="col-feeder">${row.feeder}</td>
                 <td class="col-bu">${row.bu}</td>
                 <td class="col-undertaking">${row.undertaking}</td>
@@ -3962,6 +4072,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td class="col-status"><span style="font-size: 0.8em; padding: 1px 6px; border-radius: 8px; background: ${statusColor}20; color: ${statusColor}; border: 1px solid ${statusColor}40; white-space: nowrap;">${status}</span></td>
             `;
             tbody.appendChild(tr);
+            if (isOpen) tbody.appendChild(buildPoleRegisterRow(row));
         });
 
         // 5. Update Info & Render Pagination Controls
@@ -5740,6 +5851,130 @@ document.addEventListener('DOMContentLoaded', () => {
             const list = document.getElementById('searchSuggestions');
             if (list) list.style.display = 'none';
         }
+    }
+
+    // ── Asset SLRN Lookup ────────────────────────────────────────────────
+    // A typeahead over the pole/building index. Unlike the nine slicers beside
+    // it this is an *identifier* lookup — ~25k distinct IDs cannot be browsed in
+    // a dropdown — so the user types and we resolve. Entering a Building SLRN
+    // filters the dashboard to the LT pole that building is connected to, which
+    // is the reverse direction the dashboard could not answer before.
+    //
+    // The filter commits on Enter or on picking a suggestion (not on every
+    // keystroke) because each commit re-filters 11k rows and redraws every
+    // chart and the map.
+    function initAssetLookup() {
+        const input = document.getElementById('assetLookupInput');
+        const clearBtn = document.getElementById('assetLookupClear');
+        const list = document.getElementById('assetLookupSuggestions');
+        if (!input || !list || !clearBtn) return;
+
+        let debounceTimer = null;
+        let focusIndex = -1;
+
+        const closeList = () => { list.style.display = 'none'; focusIndex = -1; };
+
+        const commit = (value) => {
+            const q = String(value ?? input.value).trim().toUpperCase();
+            assetLookupQuery = q;
+            input.value = q;
+            input.classList.toggle('has-value', !!q);
+            clearBtn.style.display = q ? 'flex' : 'none';
+            closeList();
+            currentPage = 1;
+            applyFilters();
+        };
+
+        // Rank exact match first, then prefix, then substring. Every SLRN shares
+        // the "IESH" prefix, so a short query matches everything — hence the cap.
+        const scan = (index, type, metaFor, q) => {
+            const exact = [], prefix = [], sub = [];
+            for (const id of index.keys()) {
+                if (id === q) exact.push(id);
+                else if (id.startsWith(q)) { if (prefix.length < 50) prefix.push(id); }
+                else if (id.includes(q)) { if (sub.length < 50) sub.push(id); }
+            }
+            return [...exact, ...prefix.sort(), ...sub.sort()]
+                .slice(0, 6)
+                .map(id => ({ id, type, meta: metaFor(id) }));
+        };
+
+        const suggest = (q) => [
+            ...scan(poleIndex, 'Pole', id => {
+                const n = poleIndex.get(id).size;
+                return n ? `${n} building${n > 1 ? 's' : ''}` : 'no buildings';
+            }, q),
+            ...scan(buildingIndex, 'Building', id => {
+                const poles = [...buildingIndex.get(id)];
+                return poles.length === 1 ? `on ${poles[0]}` : `on ${poles.length} poles`;
+            }, q)
+        ].slice(0, 12);
+
+        const render = (items, q) => {
+            if (!items.length) { closeList(); return; }
+            list.innerHTML = '<div class="asset-lookup-header">Matching assets</div>';
+            items.forEach((it, i) => {
+                const div = document.createElement('div');
+                div.className = 'asset-lookup-item';
+                div.dataset.index = i;
+                div.innerHTML = `
+                    <span class="asset-lookup-id">${highlightMatch(it.id, q)}</span>
+                    <span class="asset-lookup-meta">${it.meta}</span>
+                    <span class="asset-lookup-badge badge-${it.type.toLowerCase()}">${it.type}</span>`;
+                div.addEventListener('mousedown', e => { e.preventDefault(); commit(it.id); });
+                list.appendChild(div);
+            });
+            list.style.display = 'flex';
+        };
+
+        input.addEventListener('input', () => {
+            const q = input.value.trim().toUpperCase();
+            clearBtn.style.display = q ? 'flex' : 'none';
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                // Emptying the box clears the filter immediately.
+                if (!q) { closeList(); if (assetLookupQuery) commit(''); return; }
+                if (q.length < 3) { closeList(); return; }
+                render(suggest(q), q);
+            }, 150);
+        });
+
+        input.addEventListener('keydown', e => {
+            const items = list.querySelectorAll('.asset-lookup-item');
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const picked = focusIndex >= 0 && items[focusIndex]
+                    ? items[focusIndex].querySelector('.asset-lookup-id').textContent
+                    : undefined;
+                commit(picked);
+                return;
+            }
+            if (e.key === 'Escape') { closeList(); return; }
+            if (!items.length || list.style.display === 'none') return;
+            if (e.key === 'ArrowDown') { e.preventDefault(); focusIndex = Math.min(focusIndex + 1, items.length - 1); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); focusIndex = Math.max(focusIndex - 1, 0); }
+            else return;
+            items.forEach((el, i) => el.classList.toggle('active', i === focusIndex));
+            items[focusIndex]?.scrollIntoView({ block: 'nearest' });
+        });
+
+        input.addEventListener('blur', () => setTimeout(closeList, 120));
+        clearBtn.addEventListener('click', () => { commit(''); input.focus(); });
+        clearBtn.style.display = 'none';
+    }
+
+    // Push a SLRN into the lookup box and apply it — used by the building chips
+    // in the DT drill-down so a chip click becomes a filter.
+    function applyAssetLookup(slrn) {
+        const input = document.getElementById('assetLookupInput');
+        const clearBtn = document.getElementById('assetLookupClear');
+        const q = String(slrn || '').trim().toUpperCase();
+        if (input) { input.value = q; input.classList.toggle('has-value', !!q); }
+        if (clearBtn) clearBtn.style.display = q ? 'flex' : 'none';
+        assetLookupQuery = q;
+        currentPage = 1;
+        applyFilters();
+        document.getElementById('filters')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
     // --- Column Visibility Logic ---

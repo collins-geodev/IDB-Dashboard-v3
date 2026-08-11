@@ -43,7 +43,7 @@
     <!-- ApexCharts -->
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <!-- Custom CSS -->
-    <link rel="stylesheet" href="style.css?v=20260807a">
+    <link rel="stylesheet" href="style.css?v=20260811a">
     <link rel="stylesheet" href="sidebar.css?v=20260531a">
     <link rel="stylesheet" href="insights.css?v=20260405w">
     <link rel="stylesheet" href="ai-styles.css?v=20260405w">
@@ -456,6 +456,19 @@
                         <select id="dateFilter">
                             <option value="All">All Dates</option>
                         </select>
+                    </div>
+                    <!-- Identifier lookup (not a slicer): resolves a Pole SLRN, or
+                         reverse-resolves a Building SLRN back to its LT pole. -->
+                    <div class="filter-group asset-lookup-group">
+                        <label for="assetLookupInput">Asset SLRN</label>
+                        <div class="asset-lookup-wrapper">
+                            <input type="text" id="assetLookupInput" class="asset-lookup-input"
+                                placeholder="Pole or Building…" autocomplete="off" spellcheck="false"
+                                title="Search an LT Pole SLRN, or a Building SLRN to find the pole it is connected to">
+                            <button type="button" id="assetLookupClear" class="asset-lookup-clear"
+                                title="Clear" aria-label="Clear asset lookup">&times;</button>
+                        </div>
+                        <div id="assetLookupSuggestions" class="asset-lookup-suggestions"></div>
                     </div>
                 </section> <!-- Date Filter could be added here -->
 
@@ -974,7 +987,7 @@
     <script src="convex-client.js?v=20260710a"></script>
     <script src="auth-footprint.js?v=20260705a"></script>
     <script src="dashboard-auth.js?v=20260707b"></script>
-    <script src="script.js?v=20260808a"></script>
+    <script src="script.js?v=20260811a"></script>
 </body>
 
 </html>

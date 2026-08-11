@@ -3352,3 +3352,355 @@ header.exec-header img.exec-header-logo,
         animation: none !important;
     }
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   Asset SLRN Lookup  +  DT Drill-Down (Pole Register)
+   Pole/Building SLRNs are identifiers, not categories — they get a
+   typeahead and a drill-down, not a slicer dropdown.
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ── Asset SLRN lookup (filter bar) ──────────────────────────────────── */
+.asset-lookup-group {
+    min-width: 150px;
+    flex: 1.3;
+}
+
+.asset-lookup-wrapper {
+    position: relative;
+    width: 100%;
+}
+
+.asset-lookup-input {
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    padding: 0.3rem 1.5rem 0.3rem 0.4rem;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 0.85rem;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.asset-lookup-input::placeholder {
+    color: var(--text-secondary);
+    opacity: 0.7;
+}
+
+.asset-lookup-input:focus {
+    outline: none;
+    border-color: hsl(var(--ring));
+    box-shadow: 0 0 0 2px hsl(var(--ring) / 0.25);
+}
+
+.asset-lookup-input.has-value {
+    border-color: hsl(var(--primary));
+    color: hsl(var(--primary));
+    font-weight: 600;
+}
+
+.asset-lookup-clear {
+    position: absolute;
+    top: 50%;
+    right: 4px;
+    transform: translateY(-50%);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: hsl(var(--muted));
+    color: hsl(var(--muted-foreground));
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.asset-lookup-clear:hover {
+    background: hsl(var(--primary) / 0.25);
+    color: hsl(var(--primary));
+}
+
+.asset-lookup-suggestions {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    min-width: 260px;
+    max-width: 340px;
+    max-height: 300px;
+    overflow-y: auto;
+    background-color: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
+    border-radius: 6px;
+    z-index: 1200;
+    margin-top: 4px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    display: none;
+    flex-direction: column;
+}
+
+.asset-lookup-header {
+    padding: 6px 10px;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: hsl(var(--muted-foreground));
+    border-bottom: 1px solid hsl(var(--border));
+    background: hsl(var(--muted) / 0.4);
+}
+
+.asset-lookup-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    cursor: pointer;
+    border-bottom: 1px solid hsl(var(--border) / 0.5);
+}
+
+.asset-lookup-item:last-child { border-bottom: none; }
+
+.asset-lookup-item:hover,
+.asset-lookup-item.active {
+    background-color: hsl(var(--primary) / 0.14);
+}
+
+.asset-lookup-id {
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 0.78rem;
+    color: hsl(var(--foreground));
+    white-space: nowrap;
+}
+
+.asset-lookup-id mark {
+    background: hsl(var(--primary) / 0.35);
+    color: inherit;
+    border-radius: 2px;
+    padding: 0 1px;
+}
+
+.asset-lookup-meta {
+    flex: 1;
+    font-size: 0.7rem;
+    color: hsl(var(--muted-foreground));
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.asset-lookup-badge {
+    font-size: 0.62rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    white-space: nowrap;
+}
+
+.badge-pole {
+    background: hsl(var(--primary) / 0.2);
+    color: hsl(var(--primary));
+}
+
+.badge-building {
+    background: hsl(var(--accent) / 0.2);
+    color: hsl(var(--accent));
+}
+
+/* ── DT row expand toggle ────────────────────────────────────────────── */
+.dt-drill-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.dt-drill-toggle:hover { color: hsl(var(--primary)); }
+
+.dt-drill-caret {
+    display: inline-block;
+    width: 10px;
+    flex-shrink: 0;
+    color: hsl(var(--primary));
+    font-size: 0.8em;
+}
+
+#dtTable tr.dt-row-open {
+    background-color: hsl(var(--primary) / 0.08);
+}
+
+/* ── Pole Register drill-down panel ──────────────────────────────────── */
+#dtTable tr.pole-drill-row:hover { background: none; }
+
+#dtTable td.pole-drill-cell {
+    padding: 0 !important;
+    border-bottom: 1px solid hsl(var(--border));
+    background: hsl(var(--muted) / 0.28);
+}
+
+.pole-drill-panel {
+    padding: 8px 10px 10px;
+    border-left: 3px solid hsl(var(--primary));
+}
+
+.pole-drill-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+}
+
+.pole-drill-title {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: hsl(var(--foreground));
+}
+
+.pole-drill-stats {
+    font-size: 0.7rem;
+    color: hsl(var(--muted-foreground));
+}
+
+.pole-drill-scroll {
+    max-height: 340px;
+    overflow: auto;
+    border: 1px solid hsl(var(--border));
+    border-radius: 6px;
+    background: hsl(var(--card));
+}
+
+.pole-drill-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.68rem;
+}
+
+.pole-drill-table th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: hsl(var(--muted));
+    color: hsl(var(--foreground));
+    font-weight: 600;
+    text-align: left;
+    white-space: nowrap;
+    padding: 5px 8px;
+    border-bottom: 1px solid hsl(var(--border));
+}
+
+.pole-drill-table td {
+    padding: 4px 8px;
+    color: hsl(var(--muted-foreground));
+    border-bottom: 1px solid hsl(var(--border) / 0.55);
+    vertical-align: top;
+}
+
+.pole-drill-table tr:last-child td { border-bottom: none; }
+.pole-drill-table tbody tr:hover { background: hsl(var(--primary) / 0.07); }
+
+.pole-drill-none {
+    color: hsl(var(--muted-foreground));
+    font-style: italic;
+    font-size: 0.68rem;
+}
+
+.pr-date { white-space: nowrap; }
+
+.pr-buildings {
+    min-width: 240px;
+    max-width: 420px;
+}
+
+.pr-count {
+    display: inline-block;
+    min-width: 20px;
+    padding: 1px 5px;
+    border-radius: 8px;
+    background: hsl(var(--muted));
+    color: hsl(var(--foreground));
+    font-weight: 600;
+}
+
+.pr-count-warn {
+    background: hsl(38 92% 50% / 0.18);
+    color: hsl(38 92% 55%);
+    border: 1px solid hsl(38 92% 50% / 0.4);
+    cursor: help;
+}
+
+.pr-captures {
+    margin-left: 5px;
+    font-size: 0.62rem;
+    font-weight: 700;
+    color: hsl(38 92% 55%);
+    cursor: help;
+}
+
+/* ── Building / Pole SLRN chips ──────────────────────────────────────── */
+.bldg-chip {
+    display: inline-block;
+    margin: 1px 3px 1px 0;
+    padding: 1px 6px;
+    border-radius: 10px;
+    border: 1px solid hsl(var(--accent) / 0.4);
+    background: hsl(var(--accent) / 0.14);
+    color: hsl(var(--accent));
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 0.65rem;
+    line-height: 1.5;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.bldg-chip:hover {
+    background: hsl(var(--accent) / 0.3);
+    border-color: hsl(var(--accent));
+}
+
+.pole-chip {
+    border-color: hsl(var(--primary) / 0.45);
+    background: hsl(var(--primary) / 0.14);
+    color: hsl(var(--primary));
+    font-weight: 600;
+}
+
+.pole-chip:hover {
+    background: hsl(var(--primary) / 0.3);
+    border-color: hsl(var(--primary));
+}
+
+.bldg-chip-more {
+    display: inline-block;
+    margin-left: 2px;
+    padding: 1px 6px;
+    border: 1px dashed hsl(var(--border));
+    border-radius: 10px;
+    background: none;
+    color: hsl(var(--muted-foreground));
+    font-size: 0.63rem;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.bldg-chip-more:hover {
+    color: hsl(var(--primary));
+    border-color: hsl(var(--primary));
+}
+
+@media (max-width: 768px) {
+    .asset-lookup-suggestions { min-width: 200px; max-width: 88vw; }
+    .pr-buildings { min-width: 160px; }
+}
