@@ -3041,7 +3041,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function applyFilters() {
+    // Recompute filteredData from the current slicers + Asset SLRN lookup,
+    // WITHOUT redrawing anything. Split out from applyFilters() so the
+    // as-you-type lookup can refresh just the table: a full updateDashboard()
+    // (eight Plotly charts, the Leaflet map, KPIs, insights and the executive
+    // summary) blocks the main thread for ~600ms, which makes typing stutter.
+    function computeFilteredData() {
         const vendorVals = multiSelects.vendorFilter?.getValues();
         const buVals = multiSelects.buFilter?.getValues();
         const utVals = multiSelects.utFilter?.getValues();
@@ -3069,7 +3074,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 (!matVals || matVals.includes(poleType)) &&
                 (!dateVals || (item["Date/timestamp"] && dateVals.some(d => item["Date/timestamp"].startsWith(d))));
         });
+    }
 
+    function applyFilters() {
+        computeFilteredData();
         updateDashboard();
     }
 
@@ -5947,23 +5955,59 @@ document.addEventListener('DOMContentLoaded', () => {
         const list = document.getElementById('assetLookupSuggestions');
         if (!input || !list || !clearBtn) return;
 
-        let debounceTimer = null;
+        let liveTimer = null;      // as-you-type filter (table only)
+        let settleTimer = null;    // full redraw + jump, once typing stops
+        let lastScrolledFor = null;
+        let lastFullQuery = null;  // query the heavy redraw last ran for
         let focusIndex = -1;
+
+        // Every SLRN starts "IESH", so anything shorter than this matches the
+        // whole dataset — filtering on it is a full re-render that changes
+        // nothing. Below the threshold we treat the box as empty.
+        const MIN_LIVE_CHARS = 4;
 
         const closeList = () => { list.style.display = 'none'; focusIndex = -1; };
 
-        const commit = (value) => {
-            const q = String(value ?? input.value).trim().toUpperCase();
+        // Push a value at the dashboard. Split out from commit() so the live
+        // as-you-type path can filter WITHOUT scrolling — the filter bar is not
+        // sticky, so jumping to the table mid-keystroke would pull this very
+        // input off-screen while the user is still typing into it.
+        // opts.light: refresh only the table. Used while typing — the charts,
+        // map and KPIs are off-screen anyway and cost ~600ms of blocked main
+        // thread per pass, which would make the box feel frozen. The full
+        // redraw (and the slicer cascade) runs once typing stops.
+        const applyAssetQuery = (q, opts = {}) => {
+            if (q === assetLookupQuery) return;
             assetLookupQuery = q;
-            input.value = q;
             input.classList.toggle('has-value', !!q);
-            clearBtn.style.display = q ? 'flex' : 'none';
-            closeList();
             currentPage = 1;
             collapsedDTKeys.clear();   // every new search starts fully open
+            if (opts.light) {
+                computeFilteredData();
+                renderDTTable();
+                return;
+            }
             cascadeAssetLookupOptions();
             applyFilters();
-            if (q) revealPoleRegister();
+            if (opts.scroll && q) revealPoleRegister();
+        };
+
+        // Explicit commit — Enter, or picking a suggestion. Normalises the box
+        // to the chosen value, closes the list and jumps to the table.
+        const commit = (value) => {
+            const q = String(value ?? input.value).trim().toUpperCase();
+            clearTimeout(liveTimer);
+            clearTimeout(settleTimer);
+            input.value = q;
+            clearBtn.style.display = q ? 'flex' : 'none';
+            closeList();
+            lastScrolledFor = q;
+            lastFullQuery = q;
+            const changed = q !== assetLookupQuery;
+            applyAssetQuery(q, { scroll: true });
+            // Re-committing the same value (Enter twice) should still re-focus
+            // the table rather than doing nothing.
+            if (!changed && q) revealPoleRegister();
         };
 
         // Rank exact match first, then prefix, then substring. Every SLRN shares
@@ -6011,13 +6055,31 @@ document.addEventListener('DOMContentLoaded', () => {
         input.addEventListener('input', () => {
             const q = input.value.trim().toUpperCase();
             clearBtn.style.display = q ? 'flex' : 'none';
-            clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(() => {
-                // Emptying the box clears the filter immediately.
-                if (!q) { closeList(); if (assetLookupQuery) commit(''); return; }
-                if (q.length < 3) { closeList(); return; }
-                render(suggest(q), q);
-            }, 150);
+            clearTimeout(liveTimer);
+            clearTimeout(settleTimer);
+
+            // Filter as you type / paste — table only, so it stays responsive.
+            liveTimer = setTimeout(() => {
+                if (q.length >= 3) render(suggest(q), q);
+                else closeList();
+                applyAssetQuery(q.length >= MIN_LIVE_CHARS ? q : '', { light: true });
+            }, 200);
+
+            // Typing stopped: catch the rest of the dashboard up (charts, map,
+            // KPIs, slicer cascade), then take them to the table. Deferred so
+            // the page doesn't lurch — and the filter bar is not sticky, so
+            // scrolling mid-keystroke would pull this input off-screen.
+            settleTimer = setTimeout(() => {
+                if (lastFullQuery !== assetLookupQuery) {
+                    lastFullQuery = assetLookupQuery;
+                    cascadeAssetLookupOptions();
+                    applyFilters();
+                }
+                if (!assetLookupQuery || !autoExpandActive) return;
+                if (lastScrolledFor === assetLookupQuery) return;
+                lastScrolledFor = assetLookupQuery;
+                revealPoleRegister();
+            }, 850);
         });
 
         input.addEventListener('keydown', e => {
