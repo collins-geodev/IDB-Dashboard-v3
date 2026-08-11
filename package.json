@@ -5,7 +5,7 @@
   "description": "IDB Assets Tracking Dashboard - static frontend with Convex backend",
   "dependencies": {
     "bcryptjs": "^2.4.3",
-    "convex": "^1.42.1"
+    "convex": "^1.43.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
