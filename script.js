@@ -4799,16 +4799,42 @@ document.addEventListener('DOMContentLoaded', () => {
             // (theme toggle / view-mode re-render) to avoid gratuitous panning.
             if (filterSig !== lastMapFilterSig) {
                 lastMapFilterSig = filterSig;
-                const filtersActive = ['vendorFilter', 'buFilter', 'utFilter', 'userFilter', 'feederFilter', 'dtFilter', 'upriserFilter', 'materialFilter', 'dateFilter']
-                    .some(id => multiSelects[id] && !multiSelects[id].isAll());
+                // The Asset SLRN lookup counts as an active filter. Without it a
+                // search selects none of the nine slicers, so this fell through
+                // to the overview branch and zoomed OUT to the whole of Lagos —
+                // the opposite of finding the pole you just searched for.
+                const filtersActive = !!assetLookupQuery ||
+                    ['vendorFilter', 'buFilter', 'utFilter', 'userFilter', 'feederFilter', 'dtFilter', 'upriserFilter', 'materialFilter', 'dateFilter']
+                        .some(id => multiSelects[id] && !multiSelects[id].isAll());
                 try {
                     map.invalidateSize(); // ensure the container size is current before framing
-                    if (filtersActive && dataLatLngs.length) {
+                    if (assetLookupQuery && dataLatLngs.length) {
+                        // A SLRN search resolves to one pole (or the few sharing
+                        // a building), so go right to it and mark it — the same
+                        // pulsing halo the map's own search box uses for a hit.
+                        const b = L.latLngBounds(dataLatLngs);
+                        // Repeat captures of one pole sit metres apart, so a tiny
+                        // bounding box still means "one pole".
+                        const spanM = b.getNorthEast().distanceTo(b.getSouthWest());
+                        if (dataLatLngs.length === 1 || spanM < 60) {
+                            const c = b.getCenter();
+                            // Frame synchronously first — an animated flyTo can
+                            // be cancelled inside the render cycle, which is why
+                            // the branch below uses fitBounds. The halo (which
+                            // does fly) is started just after, out of the cycle.
+                            map.setView([c.lat, c.lng], 18);
+                            setTimeout(() => highlightSearchTarget(c.lat, c.lng), 0);
+                        } else {
+                            map.fitBounds(b, { padding: [60, 60], maxZoom: 18 });
+                        }
+                    } else if (filtersActive && dataLatLngs.length) {
                         // Snap to the filtered points (synchronous fitBounds is reliable
                         // inside the render cycle; an animated flyTo can get cancelled).
+                        clearSearchHighlight();
                         map.fitBounds(L.latLngBounds(dataLatLngs), { padding: [40, 40], maxZoom: 16 });
                     } else if (!filtersActive) {
                         // No filters -> return to the wide regional overview.
+                        clearSearchHighlight();
                         map.setView([6.55, 3.55], 8);
                     }
                 } catch (e) { console.warn('map reframe failed', e); }
@@ -4840,12 +4866,19 @@ document.addEventListener('DOMContentLoaded', () => {
     let searchHighlightLayer = null;
     let searchHighlightInterval = null;
     let searchHighlightTimeout = null;
-    function highlightSearchTarget(lat, lon) {
-        if (!map) return;
-        // Clean up any prior highlight
-        if (searchHighlightLayer) { map.removeLayer(searchHighlightLayer); searchHighlightLayer = null; }
+    // Remove the pulsing halo and stop its zoom oscillation. Called before
+    // starting a new highlight, and when a search is cleared — otherwise the
+    // halo keeps pulsing over an empty map for the rest of its 20s life.
+    function clearSearchHighlight() {
+        if (searchHighlightLayer && map) { map.removeLayer(searchHighlightLayer); }
+        searchHighlightLayer = null;
         if (searchHighlightInterval) { clearInterval(searchHighlightInterval); searchHighlightInterval = null; }
         if (searchHighlightTimeout) { clearTimeout(searchHighlightTimeout); searchHighlightTimeout = null; }
+    }
+
+    function highlightSearchTarget(lat, lon) {
+        if (!map) return;
+        clearSearchHighlight();
 
         // Drop a pulsating halo marker at the target
         const icon = L.divIcon({
