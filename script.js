@@ -55,7 +55,13 @@ document.addEventListener('DOMContentLoaded', () => {
     let poleIndex = new Map();      // poleSLRN     -> Set<buildingSLRN>
     let buildingIndex = new Map();  // buildingSLRN -> Set<poleSLRN>
     let assetLookupQuery = '';      // active "Asset SLRN" filter term (upper-case)
-    const expandedDTKeys = new Set(); // DT rows currently drilled down (feeder|dt)
+    const expandedDTKeys = new Set();  // DT rows the user drilled into (feeder|dt)
+    const collapsedDTKeys = new Set(); // DT rows closed *while* a lookup auto-opens them
+    let autoExpandActive = false;      // set by renderDTTable; read by the toggle handler
+    // With an Asset SLRN lookup active the matching DT rows open themselves, but
+    // only when the search actually narrowed things down — a broad prefix that
+    // still matches hundreds of DTs should not expand a whole page of registers.
+    const AUTO_EXPAND_MAX_DTS = 10;
 
     // Generate a visually distinct color for each UT via golden-angle HSL.
     // 54 UTs need 54 colors that are easy to tell apart at a glance.
@@ -3655,6 +3661,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const assetClear = document.getElementById('assetLookupClear');
         if (assetClear) assetClear.style.display = 'none';
         expandedDTKeys.clear();
+        collapsedDTKeys.clear();
+        autoExpandActive = false;
 
         // 3. Reset Pagination
         currentPage = 1;
@@ -3947,8 +3955,16 @@ document.addEventListener('DOMContentLoaded', () => {
             if (toggle) {
                 const key = toggle.closest('tr')?.dataset.dtkey;
                 if (!key) return;
-                if (expandedDTKeys.has(key)) expandedDTKeys.delete(key);
-                else expandedDTKeys.add(key);
+                // While a lookup is auto-opening rows, a click records the
+                // exception rather than fighting the auto-expand.
+                if (autoExpandActive) {
+                    if (collapsedDTKeys.has(key)) collapsedDTKeys.delete(key);
+                    else collapsedDTKeys.add(key);
+                } else if (expandedDTKeys.has(key)) {
+                    expandedDTKeys.delete(key);
+                } else {
+                    expandedDTKeys.add(key);
+                }
                 renderDTTable();
                 return;
             }
@@ -4007,6 +4023,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const paginatedRows = filtered.slice(startIndex, endIndex);
 
+        // A focused Asset SLRN lookup opens its DT rows automatically — the user
+        // searched for one pole/building, so the register IS the answer. While
+        // that is on, closing a row records it in collapsedDTKeys instead.
+        autoExpandActive = !!assetLookupQuery && totalRows <= AUTO_EXPAND_MAX_DTS;
+        const isRowOpen = key => autoExpandActive
+            ? !collapsedDTKeys.has(key)
+            : expandedDTKeys.has(key);
+
         // 4b. Render Rows
         paginatedRows.forEach((row, index) => {
             const tr = document.createElement('tr');
@@ -4036,8 +4060,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // User Names
             const userNames = row.users.map(u => getDisplayName(u)).join(', ');
 
-            // Drill-down state for this DT (survives re-renders via expandedDTKeys)
-            const isOpen = expandedDTKeys.has(row.key);
+            // Drill-down state for this DT (survives re-renders via the key sets)
+            const isOpen = isRowOpen(row.key);
             tr.className = isOpen ? 'dt-row dt-row-open' : 'dt-row';
             tr.dataset.dtkey = row.key;
 
@@ -5882,7 +5906,9 @@ document.addEventListener('DOMContentLoaded', () => {
             clearBtn.style.display = q ? 'flex' : 'none';
             closeList();
             currentPage = 1;
+            collapsedDTKeys.clear();   // every new search starts fully open
             applyFilters();
+            if (q) revealPoleRegister();
         };
 
         // Rank exact match first, then prefix, then substring. Every SLRN shares
@@ -5973,8 +5999,28 @@ document.addEventListener('DOMContentLoaded', () => {
         if (clearBtn) clearBtn.style.display = q ? 'flex' : 'none';
         assetLookupQuery = q;
         currentPage = 1;
+        collapsedDTKeys.clear();
         applyFilters();
-        document.getElementById('filters')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        if (q) revealPoleRegister();
+    }
+
+    // Bring the (now auto-expanded) Pole Register into view after a lookup.
+    // Deferred briefly because applyFilters() redraws the charts and map above
+    // the table, so scrolling synchronously would target a stale offset. Uses a
+    // timer rather than requestAnimationFrame, which never fires in a
+    // background/unrendered tab and would silently skip the scroll.
+    function revealPoleRegister() {
+        setTimeout(() => {
+            // Aim at the table SECTION, not the drill row: this lands the
+            // heading and column headers at the top of the viewport with the
+            // matched DT row and its register directly beneath.
+            const target = document.getElementById('dt-analysis');
+            if (!target) return;
+            // The dashboard view must be showing, otherwise the table has no
+            // layout box and scrolling to it is a no-op.
+            if (!target.getClientRects().length) return;
+            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 60);
     }
 
     // --- Column Visibility Logic ---
