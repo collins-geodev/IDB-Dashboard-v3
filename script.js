@@ -586,6 +586,17 @@ document.addEventListener('DOMContentLoaded', () => {
         return fromIndex ? [...fromIndex] : parseBuildings(item["Associated Buildings SLRN"]);
     }
 
+    // Does a record match the Asset SLRN lookup? Matches the LT Pole SLRN, or
+    // any Building SLRN attached to that pole (so a building ID resolves back to
+    // the pole it hangs on). Shared by applyFilters() and the filter cascade so
+    // both agree on exactly what "matched" means.
+    function matchesAssetLookup(item, q) {
+        if (!q) return true;
+        const pole = String(item["Lt PoleSLRN"] || item["LT Pole No"] || '').toUpperCase();
+        if (pole.includes(q)) return true;
+        return buildingsForRecord(item).some(b => b.includes(q));
+    }
+
     // Show or hide the duplicate warning banner
     function showDuplicateBanner() {
         const banner = document.getElementById('duplicate-warning-banner');
@@ -2719,8 +2730,11 @@ document.addEventListener('DOMContentLoaded', () => {
         // dropdown must list ONLY the people who actually worked in that scope — so
         // skip the roster padding and fall back to the users present in the
         // (already filtered) data, matching the Active Users count.
-        const narrowingActive = ['dateFilter', 'feederFilter', 'dtFilter', 'buFilter', 'utFilter', 'upriserFilter']
-            .some(id => { const v = multiSelects[id]?.getValues(); return Array.isArray(v) && v.length > 0; });
+        // An Asset SLRN lookup resolves to one pole, so it narrows harder than
+        // any of these — the User list must be just whoever captured that pole.
+        const narrowingActive = !!assetLookupQuery ||
+            ['dateFilter', 'feederFilter', 'dtFilter', 'buFilter', 'utFilter', 'upriserFilter']
+                .some(id => { const v = multiSelects[id]?.getValues(); return Array.isArray(v) && v.length > 0; });
         if (!narrowingActive && (!vendorVals || vendorVals.includes('Ikeja Electric'))) {
             // Add Ikeja Electric system usernames to the user filter
             [
@@ -2806,6 +2820,20 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Rebuild the Feeder <select> options from a data subset (keeps "All Feeders").
+    // The feeder cascade deliberately never rebuilds this list, so anything that
+    // DOES narrow it (the Asset SLRN lookup) must be able to restore it.
+    function rebuildFeederOptions(data) {
+        const sel = document.getElementById('feederFilter');
+        if (!sel) return;
+        const feeders = [...new Set(data.map(d => d["Feeder"]).filter(Boolean))].sort();
+        sel.innerHTML = '<option value="All">All Feeders</option>';
+        feeders.forEach(f => {
+            const o = document.createElement('option');
+            o.value = f; o.textContent = f; sel.appendChild(o);
+        });
+    }
+
     // Rebuild the Date <select> options from a data subset (keeps "All Dates").
     function rebuildDateOptions(data) {
         const sel = document.getElementById('dateFilter');
@@ -2847,6 +2875,38 @@ document.addEventListener('DOMContentLoaded', () => {
         const toRefresh = ['buFilter', 'utFilter', 'userFilter', 'dtFilter', 'upriserFilter', 'materialFilter', 'dateFilter'];
         if (rebuildVendor) toRefresh.push('vendorFilter');
         toRefresh.forEach(id => multiSelects[id]?.refresh());
+    }
+
+    // An Asset SLRN lookup is the narrowest filter there is — it resolves to a
+    // single pole (or the handful sharing a building). So every other dropdown
+    // is rebuilt from just the matched records: after searching a pole, opening
+    // Feeder / DT / User / Date shows only that pole's own context instead of
+    // the whole dataset. Clearing the lookup restores the lists from whatever
+    // ordinary selections remain.
+    function cascadeAssetLookupOptions() {
+        if (!assetLookupQuery) {
+            // Restore the full lists. Vendor and Feeder must be rebuilt
+            // explicitly: cascadeDependentOptions() skips both, so the
+            // single-value lists left by the lookup would otherwise stick.
+            rebuildVendorOptions(globalData);
+            rebuildFeederOptions(globalData);
+            cascadeDependentOptions({ rebuildVendor: false });
+            multiSelects.feederFilter?.refresh();
+            return;
+        }
+
+        const matched = globalData.filter(d => matchesAssetLookup(d, assetLookupQuery));
+        if (!matched.length) return;   // no match: leave the lists as they are
+
+        rebuildVendorOptions(matched);
+        rebuildDateOptions(matched);
+        // Feeder and Date are rebuilt here too — unlike the feeder cascade there
+        // is no "add another feeder" case to preserve, the scope IS the match.
+        populateDependentFilters(matched, { skipDate: true });
+
+        ['vendorFilter', 'buFilter', 'utFilter', 'userFilter', 'feederFilter',
+         'dtFilter', 'upriserFilter', 'materialFilter', 'dateFilter']
+            .forEach(id => multiSelects[id]?.refresh());
     }
 
     // Selecting a feeder narrows Vendor, User and Date (and DT/Upriser/etc.) to
@@ -2992,18 +3052,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const matVals = multiSelects.materialFilter?.getValues();
         const dateVals = multiSelects.dateFilter?.getValues();
 
-        // Identifier lookup — matches an LT Pole SLRN, or any Building SLRN
-        // attached to the pole (so a building ID resolves back to its pole).
         const assetQ = assetLookupQuery;
 
         filteredData = globalData.filter(item => {
             const poleType = (item["Type of Pole"] || '').trim().toUpperCase();
 
-            if (assetQ) {
-                const pole = String(item["Lt PoleSLRN"] || item["LT Pole No"] || '').toUpperCase();
-                if (!pole.includes(assetQ) &&
-                    !buildingsForRecord(item).some(b => b.includes(assetQ))) return false;
-            }
+            if (!matchesAssetLookup(item, assetQ)) return false;
 
             return (!vendorVals || vendorVals.includes(item["Vendor_Name"])) &&
                 (!buVals || buVals.includes(item["Bussines Unit"])) &&
@@ -5907,6 +5961,7 @@ document.addEventListener('DOMContentLoaded', () => {
             closeList();
             currentPage = 1;
             collapsedDTKeys.clear();   // every new search starts fully open
+            cascadeAssetLookupOptions();
             applyFilters();
             if (q) revealPoleRegister();
         };
@@ -6000,6 +6055,7 @@ document.addEventListener('DOMContentLoaded', () => {
         assetLookupQuery = q;
         currentPage = 1;
         collapsedDTKeys.clear();
+        cascadeAssetLookupOptions();
         applyFilters();
         if (q) revealPoleRegister();
     }
@@ -6010,17 +6066,29 @@ document.addEventListener('DOMContentLoaded', () => {
     // timer rather than requestAnimationFrame, which never fires in a
     // background/unrendered tab and would silently skip the scroll.
     function revealPoleRegister() {
-        setTimeout(() => {
-            // Aim at the table SECTION, not the drill row: this lands the
-            // heading and column headers at the top of the viewport with the
-            // matched DT row and its register directly beneath.
+        // Aim at the table SECTION, not the drill row: this lands the heading
+        // and column headers at the top of the viewport with the matched DT row
+        // and its register directly beneath. Returns the distance still to go,
+        // or null when there is nothing to scroll to.
+        const jump = (behavior) => {
             const target = document.getElementById('dt-analysis');
-            if (!target) return;
-            // The dashboard view must be showing, otherwise the table has no
-            // layout box and scrolling to it is a no-op.
-            if (!target.getClientRects().length) return;
-            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }, 60);
+            // The dashboard view must be showing — on the executive-summary
+            // view the table has no layout box and scrolling to it is a no-op.
+            if (!target || !target.getClientRects().length) return null;
+            target.scrollIntoView({ behavior, block: 'start' });
+            return Math.round(target.getBoundingClientRect().top);
+        };
+
+        // First pass, once the table itself has re-rendered.
+        setTimeout(() => jump('smooth'), 60);
+        // Plotly and Leaflet finish drawing AFTER the table and sit above it, so
+        // they shift the page under us and the first jump lands short. Correct
+        // it once they settle, but only if we actually drifted.
+        setTimeout(() => {
+            const target = document.getElementById('dt-analysis');
+            if (!target || !target.getClientRects().length) return;
+            if (Math.abs(target.getBoundingClientRect().top) > 80) jump('auto');
+        }, 700);
     }
 
     // --- Column Visibility Logic ---
