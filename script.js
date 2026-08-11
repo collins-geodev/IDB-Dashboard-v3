@@ -6022,7 +6022,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             cascadeAssetLookupOptions();
             applyFilters();
-            if (opts.scroll && q) revealPoleRegister();
+            if (opts.scroll && q) revealSearchResult();
         };
 
         // Explicit commit — Enter, or picking a suggestion. Normalises the box
@@ -6040,7 +6040,7 @@ document.addEventListener('DOMContentLoaded', () => {
             applyAssetQuery(q, { scroll: true });
             // Re-committing the same value (Enter twice) should still re-focus
             // the table rather than doing nothing.
-            if (!changed && q) revealPoleRegister();
+            if (!changed && q) revealSearchResult();
         };
 
         // Rank exact match first, then prefix, then substring. Every SLRN shares
@@ -6111,7 +6111,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!assetLookupQuery || !autoExpandActive) return;
                 if (lastScrolledFor === assetLookupQuery) return;
                 lastScrolledFor = assetLookupQuery;
-                revealPoleRegister();
+                revealSearchResult();
             }, 850);
         });
 
@@ -6152,7 +6152,7 @@ document.addEventListener('DOMContentLoaded', () => {
         collapsedDTKeys.clear();
         cascadeAssetLookupOptions();
         applyFilters();
-        if (q) revealPoleRegister();
+        if (q) revealSearchResult();
     }
 
     // Bring the (now auto-expanded) Pole Register into view after a lookup.
@@ -6160,27 +6160,26 @@ document.addEventListener('DOMContentLoaded', () => {
     // the table, so scrolling synchronously would target a stale offset. Uses a
     // timer rather than requestAnimationFrame, which never fires in a
     // background/unrendered tab and would silently skip the scroll.
-    function revealPoleRegister() {
-        // Aim at the table SECTION, not the drill row: this lands the heading
-        // and column headers at the top of the viewport with the matched DT row
-        // and its register directly beneath. Returns the distance still to go,
-        // or null when there is nothing to scroll to.
+    // Bring the search result into view: the map, framed on the pole. The Pole
+    // Register still auto-expands below — the user scrolls down to it — but the
+    // map is what a SLRN search is really asking to see.
+    function revealSearchResult() {
+        const TARGET_ID = 'map-section';
         const jump = (behavior) => {
-            const target = document.getElementById('dt-analysis');
+            const target = document.getElementById(TARGET_ID);
             // The dashboard view must be showing — on the executive-summary
-            // view the table has no layout box and scrolling to it is a no-op.
-            if (!target || !target.getClientRects().length) return null;
+            // view this has no layout box and scrolling to it is a no-op.
+            if (!target || !target.getClientRects().length) return;
             target.scrollIntoView({ behavior, block: 'start' });
-            return Math.round(target.getBoundingClientRect().top);
         };
 
-        // First pass, once the table itself has re-rendered.
+        // First pass, once the re-render has landed.
         setTimeout(() => jump('smooth'), 60);
-        // Plotly and Leaflet finish drawing AFTER the table and sit above it, so
-        // they shift the page under us and the first jump lands short. Correct
-        // it once they settle, but only if we actually drifted.
+        // Plotly charts above the map finish drawing later and shift the page
+        // under us, so the first jump lands short. Correct once they settle,
+        // but only if we actually drifted.
         setTimeout(() => {
-            const target = document.getElementById('dt-analysis');
+            const target = document.getElementById(TARGET_ID);
             if (!target || !target.getClientRects().length) return;
             if (Math.abs(target.getBoundingClientRect().top) > 80) jump('auto');
         }, 700);
