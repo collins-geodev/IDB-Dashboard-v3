@@ -1887,8 +1887,8 @@ document.addEventListener('DOMContentLoaded', () => {
         inputEl.addEventListener('keypress', (e) => { if (e.key === 'Enter') ask(); });
 
         // Clickable example chips — one tap fills the box and runs the query.
-        const CHIPS = ['Summary', 'Top 5 field officers', 'Run rate by vendor',
-            'Concrete vs wooden', 'Buildings connected', 'Activity last 7 days',
+        const CHIPS = ['Scorecard', 'Summary', 'Top 5 field officers', 'Run rate by vendor',
+            'Concrete vs wooden', 'New poles installed', 'Activity last 7 days',
             'Feeders behind on BOQ', 'Building-SLRN linkage'];
         if (chipsEl) {
             chipsEl.innerHTML = CHIPS.map(c => '<button type="button" class="ai-chip">' + esc(c) + '</button>').join('');
@@ -1921,6 +1921,53 @@ document.addEventListener('DOMContentLoaded', () => {
             thinkTimer = setTimeout(() => { responseEl.innerHTML = html; }, 380);
         }
 
+        // ---------- visual render helpers (self-contained, theme-aware) ----------
+        // NOTE: callers pass pre-escaped label HTML (via esc()/bold()); numbers go
+        // through fmt(). These builders never receive raw user/data strings unescaped.
+        function barChart(rows, unit) {
+            const max = Math.max(1, ...rows.map(r => r.value));
+            return '<div class="ai-chart">' + rows.map((r, i) =>
+                '<div class="row"><span class="lbl"><span class="rank">' + (i + 1) + '.</span> ' + r.label + '</span>' +
+                '<span class="track"><span style="width:' + Math.max(2, Math.round(r.value / max * 100)) + '%"></span></span>' +
+                '<span class="num">' + fmt(r.value) + (unit ? ' ' + esc(unit) : '') + '</span></div>'
+            ).join('') + '</div>';
+        }
+        function meter(pct, capLeft, capRight) {
+            // Cap the shown % (and the bar) at 100 to match the dashboard's completion
+            // card; the "of X target" caption still conveys any over-achievement.
+            const p = Math.max(0, Math.min(100, isFinite(pct) ? pct : 0));
+            return '<div class="ai-meter"><div class="cap"><span>' + (capLeft || '') + '</span>' +
+                '<span class="pct">' + p.toFixed(1) + '%</span></div>' +
+                '<div class="ai-bar"><span style="width:' + p + '%"></span></div>' +
+                (capRight ? '<div class="cap" style="margin-top:.25rem"><span>' + capRight + '</span><span></span></div>' : '') + '</div>';
+        }
+        function tiles(items) {
+            return '<div class="ai-tiles">' + items.map(t =>
+                '<div class="ai-tile"><div class="t-val">' + t.val + '</div><div class="t-lbl">' + esc(t.label) + '</div></div>'
+            ).join('') + '</div>';
+        }
+        function kpiCards(cards) {
+            return '<div class="ai-kpis">' + cards.map(c => {
+                const of = (c.of != null) ? ' <span class="of">/ ' + fmt(c.of) + '</span>' : '';
+                const bar = (c.of != null && c.of > 0)
+                    ? '<div class="ai-bar" style="margin-top:.4rem"><span style="width:' + Math.min(100, c.val / c.of * 100) + '%"></span></div>' : '';
+                return '<div class="ai-kpi"><span class="k-title">' + esc(c.title) +
+                    (c.tag ? ' <span class="k-tag">' + esc(c.tag) + '</span>' : '') + '</span>' +
+                    '<div class="k-val">' + fmt(c.val) + of + '</div>' + bar +
+                    (c.sub ? '<div class="k-sub">' + c.sub + '</div>' : '') + '</div>';
+            }).join('') + '</div>';
+        }
+        const PROP_COLORS = ['hsl(var(--primary))', 'hsl(var(--accent))', 'hsl(38 92% 55%)', 'hsl(280 60% 62%)', 'hsl(var(--muted-foreground))'];
+        function propBar(segments) {
+            const total = segments.reduce((s, x) => s + x.value, 0) || 1;
+            const bar = segments.map((s, i) => '<span style="width:' + (s.value / total * 100) + '%;background:' +
+                (s.color || PROP_COLORS[i % PROP_COLORS.length]) + '"></span>').join('');
+            const legend = segments.map((s, i) => '<span><span class="dot" style="background:' +
+                (s.color || PROP_COLORS[i % PROP_COLORS.length]) + '"></span>' + esc(s.label) +
+                ' <b>' + pct1(s.value, total) + '</b> (' + fmt(s.value) + ')</span>').join('');
+            return '<div class="ai-prop">' + bar + '</div><div class="ai-legend">' + legend + '</div>';
+        }
+
         // ---------- metric helpers (real fields only) ----------
         const dayOf = (d) => (d['Date/timestamp'] || '').split(' ')[0];
         const activeDates = (ds) => [...new Set(ds.map(dayOf).filter(Boolean))];
@@ -1946,6 +1993,10 @@ document.addEventListener('DOMContentLoaded', () => {
             return { linked, unlinked: ds.length - linked, n: ds.length };
         }
         const uniqCount = (ds, field) => new Set(ds.map(d => d[field]).filter(Boolean)).size;
+        // A "pole" is a unique SLRN (a pole tagged twice is one pole) — this is how the
+        // dashboard KPI cards count, so headline pole tallies here use it for parity.
+        const slrnOf = d => String(d['Lt PoleSLRN'] || d['LT Pole No'] || '').trim();
+        const poleCount = (ds) => { const s = new Set(); ds.forEach(d => { const x = slrnOf(d); if (x) s.add(x); }); return s.size; };
         function groupCount(ds, keyFn) {
             const c = {};
             ds.forEach(d => { const k = keyFn(d); if (k != null && k !== '') c[k] = (c[k] || 0) + 1; });
@@ -1955,23 +2006,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const rankEntries = (obj, asc) => Object.entries(obj).sort((a, b) => asc ? a[1] - b[1] : b[1] - a[1]);
 
         // BOQ target per feeder (normalised feeder key -> target poles).
-        function boqByFeeder() {
-            const m = {};
-            (boqData || []).forEach(d => {
-                const f = norm(d['FEEDER NAME']); if (!f) return;
-                m[f] = (m[f] || 0) + (parseInt(d['POLES Grand Total']) || 0);
-            });
-            return m;
-        }
         const boqTotal = () => (boqData || []).reduce((s, d) => s + (parseInt(d['POLES Grand Total']) || 0), 0);
-        // BOQ target for a filtered scope: sum the per-DT BOQ rows whose DT is present
-        // in the scoped data (BOQ is per-DT, so this works for any geographic filter —
-        // feeder / DT / undertaking / BU). Falls back to the whole program when unfiltered.
-        function boqTargetForScope(ctx) {
-            if (!ctx.filters.length) return boqTotal();
-            const dts = new Set(ctx.data.map(d => norm(d['DT Name'])).filter(Boolean));
-            return (boqData || []).reduce((s, d) => dts.has(norm(d['DT NAME'])) ? s + (parseInt(d['POLES Grand Total']) || 0) : s, 0);
+        // BOQ rows in scope for a (possibly filtered) dataset `ds`. `ds` already
+        // reflects BOTH the dashboard's feeder/DT multiselects (via filteredData) AND
+        // any AI entity filter, so scope is derived from it directly. Like the
+        // dashboard's updateKPIs, we scope by FEEDER NAME — so a feeder's not-yet-
+        // tagged DTs still count toward the target — and tighten to DT NAME only when
+        // a single DT is in scope. Unfiltered → the whole (already allowlisted) BOQ.
+        function boqScopeRows(ds) {
+            if (!ds || ds.length >= globalData.length) return boqData || [];
+            const feeders = new Set(ds.map(d => norm(d.Feeder)).filter(Boolean));
+            let rows = (boqData || []).filter(d => feeders.has(norm(d['FEEDER NAME'])));
+            const dts = new Set(ds.map(d => norm(d['DT Name'])).filter(Boolean));
+            if (dts.size === 1) rows = rows.filter(d => dts.has(norm(d['DT NAME'])));
+            return rows;
         }
+        const boqTargetForScope = (ctx) => boqScopeRows(ctx.data).reduce((s, d) => s + (parseInt(d['POLES Grand Total']) || 0), 0);
 
         // ---------- fuzzy matching (Levenshtein) ----------
         function lev(a, b) {
@@ -2112,24 +2162,80 @@ document.addEventListener('DOMContentLoaded', () => {
         function summaryAnswer(ctx) {
             const ds = ctx.data;
             const rr = runRate(ds), bs = buildingsStats(ds), lk = linkage(ds), pt = poleTypes(ds);
-            const users = uniqCount(ds, 'User'), feeders = uniqCount(ds, 'Feeder'),
-                dtc = uniqCount(ds, 'DT Name'), uts = uniqCount(ds, 'Undertaking');
             const typeStr = rankEntries(pt).map(([k, v]) => esc(titleCase(k)) + ' ' + pct1(v, ds.length)).join(' · ');
-            // BOQ targets are geographic, so "completion" is only meaningful for a
-            // geographic scope — and it must divide by the target for THAT scope, not
-            // the whole programme. Suppressed for vendor/officer scopes.
+            // BOQ targets are geographic, so "completion" divides by the target for
+            // THIS scope, and is suppressed for vendor/officer scopes.
             const geoScope = !ctx.filters.some(f => f.dim === 'vendor' || f.dim === 'user');
             const bt = geoScope ? boqTargetForScope(ctx) : 0;
-            const comp = (bt > 0) ? ' · Completion ' + bold(pct1(ds.length, bt)) : '';
-            return '<div class="ai-head">📊 ' + esc(titleCase(ctx.label)) + ' — snapshot</div>' +
-                'Poles tagged: ' + bold(fmt(ds.length)) + comp + '<br>' +
-                'Field officers: ' + bold(users) + ' · Run rate: ' + bold(rr.rate + '/day') + ' over ' + bold(rr.days) + ' active days<br>' +
-                'Coverage: ' + bold(feeders) + ' feeders · ' + bold(dtc) + ' DTs · ' + bold(uts) + ' undertakings<br>' +
-                'Pole types: ' + typeStr + '<br>' +
-                'Buildings connected: ' + bold(fmt(bs.total)) + ' (avg ' + bold(bs.avg) + '/pole)<br>' +
-                'Building-SLRN linkage: ' + bold(pct1(lk.linked, lk.n)) + ' of poles linked' +
-                '<br><br><small>💡 Try "top 5 feeders", "run rate by vendor", or "feeders behind on BOQ".</small>' +
-                contextNote(ctx);
+            const nPoles = poleCount(ds); // unique SLRN, matching the dashboard KPI
+            let out = '<div class="ai-head">📊 ' + esc(titleCase(ctx.label)) + ' — snapshot</div>';
+            if (bt > 0) out += meter(pctOf(nPoles, bt), 'BOQ completion', 'Poles tagged ' + bold(fmt(nPoles)) + ' of ' + bold(fmt(bt)) + ' target');
+            out += tiles([
+                { val: bold(fmt(nPoles)), label: 'Poles tagged' },
+                { val: bold(uniqCount(ds, 'User')), label: 'Field officers' },
+                { val: bold(rr.rate), label: 'Poles / day' },
+                { val: bold(uniqCount(ds, 'Feeder')), label: 'Feeders' },
+                { val: bold(uniqCount(ds, 'DT Name')), label: 'DTs' },
+                { val: bold(fmt(bs.total)), label: 'Buildings' },
+            ]);
+            out += '<div class="ai-row">Pole types: ' + typeStr + ' · Building-SLRN linkage: ' + bold(pct1(lk.linked, lk.n)) + '</div>';
+            out += '<small>💡 Try "scorecard", "top 5 feeders", or "feeders behind on BOQ".</small>';
+            return out + contextNote(ctx);
+        }
+
+        // ---------- dashboard KPI scorecard (mirrors updateKPIs) ----------
+        function kpiStats(ctx) {
+            const ds = ctx.data;
+            const slrnOf = d => String(d['Lt PoleSLRN'] || d['LT Pole No'] || '').trim();
+            const poleSet = new Set(), newSet = new Set(), bldgSet = new Set();
+            const isNew = (typeof isNewInstallPole === 'function') ? isNewInstallPole : () => false;
+            ds.forEach(d => {
+                const s = slrnOf(d); if (s) poleSet.add(s);
+                if (s && isNew(d)) newSet.add(s);
+                String(d['Associated Buildings SLRN'] || '').split(';').forEach(b => { const t = b.trim(); if (t) bldgSet.add(t); });
+            });
+            const captured = ds.filter(d => d.__gisCaptured !== false);
+            // BOQ subset scoped to whatever narrowed ds (dashboard filter AND/OR AI
+            // entity filter), mirroring the dashboard's activeBoqData.
+            const boqScope = boqScopeRows(ds);
+            const sum = k => boqScope.reduce((s, d) => s + (parseInt(d[k]) || 0), 0);
+            const boqTot = sum('POLES Grand Total'), boqNew = sum('NEW POLE');
+            const actPoles = poleSet.size, actNew = newSet.size;
+            return {
+                actPoles, actNew, actExNew: Math.max(0, actPoles - actNew),
+                actUsers: new Set(captured.map(d => d.User).filter(Boolean)).size,
+                actFeeders: new Set(captured.map(d => d.Feeder).filter(Boolean)).size,
+                actDTs: new Set(captured.map(d => d['DT Name']).filter(Boolean)).size,
+                actBuildings: bldgSet.size,
+                boqTot, boqNew, boqExNew: Math.max(0, boqTot - boqNew),
+                boqFeeders: new Set(boqScope.map(d => d['FEEDER NAME']).filter(Boolean)).size,
+                boqDTs: new Set(boqScope.map(d => d['DT NAME']).filter(Boolean)).size,
+            };
+        }
+
+        function kpiAnswer(ctx) {
+            const k = kpiStats(ctx);
+            const geo = !ctx.filters.some(f => f.dim === 'vendor' || f.dim === 'user');
+            const t = (title, val, of, remaining) => ({
+                title, val, of: (geo && of) ? of : null,
+                sub: (geo && of) ? 'Remaining ' + bold(fmt(Math.max(0, of - val))) : ''
+            });
+            let out = '<div class="ai-head">📊 Dashboard scorecard — ' + esc(titleCase(ctx.label)) + '</div>';
+            if (geo && k.boqTot > 0) {
+                out += meter(pctOf(k.actPoles, k.boqTot), 'Overall completion',
+                    'Poles tagged ' + bold(fmt(k.actPoles)) + ' of ' + bold(fmt(k.boqTot)) + ' BOQ target');
+            }
+            out += kpiCards([
+                t('Total Poles (incl. new)', k.actPoles, k.boqTot),
+                t('Poles excl. new', k.actExNew, k.boqExNew),
+                t('New Poles (install)', k.actNew, k.boqNew),
+                t('Feeders', k.actFeeders, k.boqFeeders),
+                t('DTs', k.actDTs, k.boqDTs),
+                { title: 'Buildings', val: k.actBuildings },
+                { title: 'Active officers', val: k.actUsers },
+            ]);
+            out += '<small>Actuals are unique by pole SLRN, matching the dashboard KPI cards. Condition (good/bad) split isn\'t field-measured, so it\'s left out.</small>';
+            return out + contextNote(ctx);
         }
 
         // Rank a dimension by a chosen metric.
@@ -2158,43 +2264,35 @@ document.addEventListener('DOMContentLoaded', () => {
                 : (k => esc(k));
             const dimLabel = dimKey === 'area' ? 'Areas' : (spec[dimKey].label + 's');
 
-            let rows;
             if (byRate && dimKey !== 'area') {
                 // metric = poles / active days for that group
                 const groups = {};
                 ds.forEach(d => { const k = keyFn(d); if (k) (groups[k] = groups[k] || []).push(d); });
-                const arr = Object.entries(groups).map(([k, g]) => [k, runRate(g).rate]);
-                rows = arr.sort((a, b) => asc ? a[1] - b[1] : b[1] - a[1]).slice(0, limit)
-                    .map((r, i) => (i + 1) + '. ' + dispFn(r[0]) + ' — ' + bold(r[1] + '/day'));
-                return '<div class="ai-head">🏁 ' + dir + ' ' + limit + ' ' + esc(dimLabel) + ' by run rate</div>' +
-                    rows.join('<br>') + contextNote(ctx);
+                const rows = Object.entries(groups).map(([k, g]) => ({ label: dispFn(k), value: runRate(g).rate }))
+                    .sort((a, b) => asc ? a.value - b.value : b.value - a.value).slice(0, limit);
+                return '<div class="ai-head">🏁 ' + dir + ' ' + rows.length + ' ' + esc(dimLabel) + ' by run rate</div>' +
+                    barChart(rows, '/day') + contextNote(ctx);
             }
             if (byBuildings) {
                 const groups = {};
                 ds.forEach(d => { const k = keyFn(d); if (k) groups[k] = (groups[k] || 0) + (parseInt(d['No of Buildings Connected to the Pole']) || 0); });
-                rows = rankEntries(groups, asc).slice(0, limit)
-                    .map((r, i) => (i + 1) + '. ' + dispFn(r[0]) + ' — ' + bold(fmt(r[1]) + ' buildings'));
-                return '<div class="ai-head">🏢 ' + dir + ' ' + limit + ' ' + esc(dimLabel) + ' by buildings connected</div>' +
-                    rows.join('<br>') + contextNote(ctx);
+                const rows = rankEntries(groups, asc).slice(0, limit).map(r => ({ label: dispFn(r[0]), value: r[1] }));
+                return '<div class="ai-head">🏢 ' + dir + ' ' + rows.length + ' ' + esc(dimLabel) + ' by buildings connected</div>' +
+                    barChart(rows, 'buildings') + contextNote(ctx);
             }
             // default metric = pole count
-            const counts = groupCount(ds, keyFn);
-            rows = rankEntries(counts, asc).slice(0, limit)
-                .map((r, i) => (i + 1) + '. ' + dispFn(r[0]) + ' — ' + bold(fmt(r[1]) + ' poles'));
+            const rows = rankEntries(groupCount(ds, keyFn), asc).slice(0, limit).map(r => ({ label: dispFn(r[0]), value: r[1] }));
             const noun = dimKey === 'user' ? '👷' : dimKey === 'feeder' ? '🔌' : dimKey === 'vendor' ? '🏗️' : '📍';
-            return '<div class="ai-head">' + noun + ' ' + dir + ' ' + limit + ' ' + esc(dimLabel) + ' by poles tagged</div>' +
-                rows.join('<br>') + contextNote(ctx);
+            return '<div class="ai-head">' + noun + ' ' + dir + ' ' + rows.length + ' ' + esc(dimLabel) + ' by poles tagged</div>' +
+                barChart(rows, 'poles') + contextNote(ctx);
         }
 
         function compareAnswer(q, ctx) {
             const data = ctx.data, spec = ctx.spec;
-            const rowFor = (field, val, disp) => {
-                const vd = data.filter(d => d[field] === val);
-                if (!vd.length) return null;
-                const rr = runRate(vd), bs = buildingsStats(vd);
-                return '<div class="ai-row">' + bold(disp) + ' — ' + fmt(vd.length) + ' poles · ' +
-                    rr.rate + '/day · ' + fmt(bs.total) + ' buildings</div>';
-            };
+            const build = (field, vals, dispFn) => vals.map(v => {
+                const vd = data.filter(d => d[field] === v);
+                return vd.length ? { name: dispFn(v), poles: vd.length, rate: runRate(vd).rate, bldg: buildingsStats(vd).total } : null;
+            }).filter(Boolean);
             // Which dimension does the user want to compare? Explicit word wins; else vendors.
             let dimKey = 'vendor';
             if (has(q, /\bfeeder/)) dimKey = 'feeder';
@@ -2203,21 +2301,24 @@ document.addEventListener('DOMContentLoaded', () => {
             else if (has(q, /\buser\b/)) dimKey = 'user';
             else if (has(q, /\bbusinessunit\b/)) dimKey = 'businessunit';
 
+            let items, head;
             if (dimKey === 'vendor') {
                 let targets = ctx.vendorsHit.slice();
                 if (targets.length < 2) targets = ctx.vendorsAll;
-                const rows = targets.map(v => rowFor('Vendor_Name', v, v)).filter(Boolean);
-                if (!rows.length) return 'I could not find those vendors to compare. Try "compare ETC vs Jesom".';
-                return '<div class="ai-head">⚖️ Vendor comparison</div>' + rows.join('') + contextNote(ctx);
+                items = build('Vendor_Name', targets, v => v);
+                if (!items.length) return 'I could not find those vendors to compare. Try "compare ETC vs Jesom".';
+                head = '⚖️ Vendor comparison';
+            } else {
+                const field = spec[dimKey].field;
+                const dispFn = dimKey === 'user' ? getDisplayName : (v => v);
+                const top = rankEntries(groupCount(data, d => d[field])).slice(0, 6).map(e => e[0]);
+                items = build(field, top, dispFn);
+                if (items.length < 2) return null; // nothing meaningful to compare → let router fall through
+                head = '⚖️ ' + spec[dimKey].label + ' comparison (top ' + items.length + ')';
             }
-            // Non-vendor: compare the top values of that dimension (by poles), capped at 6.
-            const field = spec[dimKey].field;
-            const dispFn = dimKey === 'user' ? getDisplayName : (v => v);
-            const top = rankEntries(groupCount(data, d => d[field])).slice(0, 6).map(e => e[0]);
-            const rows = top.map(v => rowFor(field, v, dispFn(v))).filter(Boolean);
-            if (rows.length < 2) return null; // nothing meaningful to compare → let router fall through
-            return '<div class="ai-head">⚖️ ' + esc(spec[dimKey].label) + ' comparison (top ' + rows.length + ')</div>' +
-                rows.join('') + contextNote(ctx);
+            const bars = barChart(items.map(x => ({ label: esc(x.name), value: x.poles })), 'poles');
+            const detail = items.map(x => '<div class="ai-row">' + bold(x.name) + ' — ' + x.rate + '/day · ' + fmt(x.bldg) + ' buildings</div>').join('');
+            return '<div class="ai-head">' + esc(head) + '</div>' + bars + detail + contextNote(ctx);
         }
 
         function runRateAnswer(ctx) {
@@ -2275,64 +2376,85 @@ document.addEventListener('DOMContentLoaded', () => {
 
         function poleTypeAnswer(ctx) {
             const ds = ctx.data, pt = poleTypes(ds);
-            const list = rankEntries(pt).map(([k, v]) => bold(titleCase(k)) + ': ' + fmt(v) + ' (' + pct1(v, ds.length) + ')').join('<br>');
-            return '<div class="ai-head">🪵 Pole types — ' + esc(titleCase(ctx.label)) + '</div>' + list +
-                '<br><br>Total: ' + bold(fmt(ds.length)) + ' poles' + contextNote(ctx);
+            const segs = rankEntries(pt).map(([k, v]) => ({ label: titleCase(k), value: v }));
+            return '<div class="ai-head">🪵 Pole types — ' + esc(titleCase(ctx.label)) + '</div>' +
+                propBar(segs) + contextNote(ctx);
         }
 
         function buildingsAnswer(ctx) {
             const bs = buildingsStats(ctx.data);
             return '<div class="ai-head">🏢 Buildings connected — ' + esc(titleCase(ctx.label)) + '</div>' +
-                'Total buildings served: ' + bold(fmt(bs.total)) + '<br>' +
-                'Poles carrying buildings: ' + bold(fmt(bs.withB)) + ' of ' + fmt(bs.n) + ' (' + pct1(bs.withB, bs.n) + ')<br>' +
-                'Average: ' + bold(bs.avg + ' buildings/pole') + ' · busiest pole: ' + bold(bs.max) + contextNote(ctx);
+                tiles([
+                    { val: bold(fmt(bs.total)), label: 'Total served' },
+                    { val: bold(bs.avg), label: 'Avg / pole' },
+                    { val: bold(fmt(bs.max)), label: 'Busiest pole' },
+                    { val: bold(pct1(bs.withB, bs.n)), label: 'Poles w/ bldg' },
+                ]) +
+                meter(pctOf(bs.withB, bs.n), 'Poles carrying at least one building',
+                    bold(fmt(bs.withB)) + ' of ' + bold(fmt(bs.n)) + ' poles') + contextNote(ctx);
         }
 
         function linkageAnswer(ctx) {
             const lk = linkage(ctx.data);
             return '<div class="ai-head">🔗 Building-SLRN linkage — ' + esc(titleCase(ctx.label)) + '</div>' +
-                'Poles with an associated building SLRN: ' + bold(fmt(lk.linked)) + ' (' + pct1(lk.linked, lk.n) + ')<br>' +
-                'Poles without one: ' + bold(fmt(lk.unlinked)) + ' (' + pct1(lk.unlinked, lk.n) + ')<br>' +
+                propBar([
+                    { label: 'Linked', value: lk.linked, color: 'hsl(var(--accent))' },
+                    { label: 'Not linked', value: lk.unlinked, color: 'hsl(var(--muted-foreground))' },
+                ]) +
                 '<small>💡 Unlinked poles are candidates for building-tagging follow-up.</small>' + contextNote(ctx);
         }
 
         function boqAnswer(q, ctx) {
             if (!boqData || !boqData.length) return 'No BOQ (Bill of Quantities) targets are loaded.';
-            const actual = ctx.data.length;
+            const actual = poleCount(ctx.data); // unique SLRN, matching the dashboard KPI
             // Feeders behind / completion per feeder.
             if (has(q, /\bfeeder\b/) || BEHIND_RE.test(q)) {
-                const targetByF = boqByFeeder();
-                const actualByF = {}, dispByF = {};
-                ctx.data.forEach(d => { const f = norm(d.Feeder); if (!f) return; actualByF[f] = (actualByF[f] || 0) + 1; if (!dispByF[f]) dispByF[f] = d.Feeder; });
+                // Targets scoped to the feeders actually in scope (so a dashboard/AI
+                // filter doesn't pin every out-of-scope feeder at 0% and dominate).
+                const targetByF = {}, dispByF = {};
+                boqScopeRows(ctx.data).forEach(d => {
+                    const f = norm(d['FEEDER NAME']); if (!f) return;
+                    targetByF[f] = (targetByF[f] || 0) + (parseInt(d['POLES Grand Total']) || 0);
+                    if (!dispByF[f]) dispByF[f] = d['FEEDER NAME'];
+                });
+                const actualByF = {};
+                ctx.data.forEach(d => { const f = norm(d.Feeder); if (!f) return; const s = slrnOf(d); if (!s) return; (actualByF[f] = actualByF[f] || new Set()).add(s); if (!dispByF[f]) dispByF[f] = d.Feeder; });
                 const rows = Object.keys(targetByF)
-                    .map(f => ({ f, t: targetByF[f], a: actualByF[f] || 0, disp: dispByF[f] || f }))
+                    .map(f => ({ f, t: targetByF[f], a: actualByF[f] ? actualByF[f].size : 0, disp: dispByF[f] || f }))
                     .filter(r => r.t > 0);
                 const behind = BEHIND_RE.test(q) || has(q, /\bbottom|worst|lowest\b/);
                 rows.sort((a, b) => behind ? (a.a / a.t) - (b.a / b.t) : (b.a / b.t) - (a.a / a.t));
                 const limit = limitFrom(q, 8);
-                const list = rows.slice(0, limit).map((r, i) => {
-                    const remaining = Math.max(0, r.t - r.a);
-                    return (i + 1) + '. ' + bold(titleCase(r.disp)) + ' — ' + pct1(r.a, r.t) +
-                        ' (' + fmt(r.a) + '/' + fmt(r.t) + (remaining ? ', ' + fmt(remaining) + ' to go' : '') + ')';
-                }).join('<br>');
+                // Each feeder as a 0–100% completion bar with "tagged/target".
+                const chart = '<div class="ai-chart">' + rows.slice(0, limit).map((r, i) => {
+                    const p = pctOf(r.a, r.t);
+                    return '<div class="row"><span class="lbl"><span class="rank">' + (i + 1) + '.</span> ' + esc(titleCase(r.disp)) + '</span>' +
+                        '<span class="track"><span style="width:' + Math.min(100, p) + '%"></span></span>' +
+                        '<span class="num">' + p.toFixed(0) + '% <small>(' + fmt(r.a) + '/' + fmt(r.t) + ')</small></span></div>';
+                }).join('') + '</div>';
                 const head = behind ? '🚧 Feeders furthest behind BOQ' : '✅ Feeders closest to BOQ target';
-                return '<div class="ai-head">' + head + '</div>' + list +
-                    '<br><br><small>Completion = poles tagged ÷ BOQ target.</small>' + contextNote(ctx);
+                return '<div class="ai-head">' + head + '</div>' + chart +
+                    '<small>Completion = poles tagged ÷ BOQ target.</small>' + contextNote(ctx);
             }
             // Overview — target scoped to the current filter (whole programme if none).
             const target = boqTargetForScope(ctx);
-            let out = '<div class="ai-head">📋 BOQ overview — ' + esc(titleCase(ctx.label)) + '</div>' +
-                'BOQ target: ' + bold(fmt(target) + ' poles') + '<br>';
+            let out = '<div class="ai-head">📋 BOQ overview — ' + esc(titleCase(ctx.label)) + '</div>';
+            if (target > 0) out += meter(pctOf(actual, target), 'Completion',
+                'Poles tagged ' + bold(fmt(actual)) + ' of ' + bold(fmt(target)) + ' target · Remaining ' + bold(fmt(Math.max(0, target - actual))));
+            else out += '<div class="ai-row"><em>No BOQ target for this scope.</em> Poles tagged: ' + bold(fmt(actual)) + '</div>';
             if (!ctx.filters.length) {
-                // Good/Bad/New are whole-programme figures, only meaningful unfiltered.
+                // Good/Bad/New are whole-programme BOQ figures, only meaningful unfiltered.
                 const good = boqData.reduce((s, d) => s + (parseInt(d['GOOD']) || 0), 0);
                 const bad = boqData.reduce((s, d) => s + (parseInt(d['BAD']) || 0), 0);
                 const nw = boqData.reduce((s, d) => s + (parseInt(d['NEW POLE']) || 0), 0);
-                out += 'Breakdown — Good: ' + bold(fmt(good)) + ' · Bad: ' + bold(fmt(bad)) + ' · New: ' + bold(fmt(nw)) + '<br>';
+                out += tiles([
+                    { val: bold(fmt(target)), label: 'BOQ target' },
+                    { val: bold(fmt(good)), label: 'Good (BOQ)' },
+                    { val: bold(fmt(bad)), label: 'Bad (BOQ)' },
+                    { val: bold(fmt(nw)), label: 'New (BOQ)' },
+                ]);
             }
-            out += 'Poles tagged so far: ' + bold(fmt(actual)) + '<br>' +
-                'Completion: ' + (target > 0 ? bold(pct1(actual, target)) : '<em>no BOQ target for this scope</em>') +
-                '<br><br><small>💡 Ask "feeders behind on BOQ" for the gap by feeder.</small>' + contextNote(ctx);
+            out += '<small>💡 Ask "feeders behind on BOQ" for the gap by feeder.</small>' + contextNote(ctx);
             return out;
         }
 
@@ -2350,17 +2472,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 const list = rankEntries(groupCount(ds, d => d.Vendor_Name)).map(([v, c]) => bold(v) + ': ' + fmt(c)).join('<br>');
                 return '<div class="ai-head">Vendor breakdown — ' + esc(titleCase(ctx.label)) + '</div>' + list + '<br>Total: ' + bold(fmt(ds.length)) + contextNote(ctx);
             }
-            return 'Poles in ' + esc(ctx.label) + ': ' + bold(fmt(ds.length)) +
-                (ctx.filters.length ? ' (of ' + fmt(globalData.length) + ' total).' : '.') + contextNote(ctx);
+            return 'Poles in ' + esc(ctx.label) + ': ' + bold(fmt(poleCount(ds))) +
+                (ctx.filters.length ? ' (of ' + fmt(poleCount(globalData)) + ' total).' : '.') + contextNote(ctx);
         }
 
         function shareAnswer(q, ctx) {
             // "what percentage/share of poles are wooden / linked / carry buildings"
-            const ds = ctx.data;
-            if (has(q, /\bwooden\b/)) { const n = ds.filter(d => norm(d['Type of Pole']).includes('wood')).length; return bold(pct1(n, ds.length)) + ' of poles in ' + esc(ctx.label) + ' are wooden (' + fmt(n) + ' of ' + fmt(ds.length) + ').' + contextNote(ctx); }
-            if (has(q, /\bconcrete\b/)) { const n = ds.filter(d => norm(d['Type of Pole']).includes('concrete')).length; return bold(pct1(n, ds.length)) + ' of poles in ' + esc(ctx.label) + ' are concrete (' + fmt(n) + ' of ' + fmt(ds.length) + ').' + contextNote(ctx); }
-            if (has(q, /\blink|associated|building slrn\b/)) { const lk = linkage(ds); return bold(pct1(lk.linked, lk.n)) + ' of poles in ' + esc(ctx.label) + ' have an associated building SLRN.' + contextNote(ctx); }
-            if (has(q, /\bbuildings\b/)) { const bs = buildingsStats(ds); return bold(pct1(bs.withB, bs.n)) + ' of poles in ' + esc(ctx.label) + ' carry at least one building.' + contextNote(ctx); }
+            const ds = ctx.data, n = ds.length;
+            const share = (count, what) => '<div class="ai-head">📐 ' + esc(what) + ' — ' + esc(titleCase(ctx.label)) + '</div>' +
+                meter(pctOf(count, n), what, bold(fmt(count)) + ' of ' + bold(fmt(n)) + ' poles') + contextNote(ctx);
+            if (has(q, /\bwooden\b/)) return share(ds.filter(d => norm(d['Type of Pole']).includes('wood')).length, 'Wooden poles');
+            if (has(q, /\bconcrete\b/)) return share(ds.filter(d => norm(d['Type of Pole']).includes('concrete')).length, 'Concrete poles');
+            if (has(q, /\blink|associated|building slrn\b/)) return share(linkage(ds).linked, 'Poles with a building SLRN');
+            if (has(q, /\bbuildings\b/)) return share(buildingsStats(ds).withB, 'Poles carrying a building');
             return null;
         }
 
@@ -2494,6 +2618,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (slrn) { show(slrn); return; }
 
             const ctx = detectContext(q, qTokens, data);
+            if (!ctx.data.length) {
+                show('<div class="ai-head">🔍 No records in that scope</div>Nothing matches ' + bold(ctx.label) +
+                    ' in the current view. Try clearing a dashboard filter, or ask about a different feeder / officer.');
+                return;
+            }
             let out = null;
 
             if (has(q, /\bissue\b/)) out = issueHonestAnswer(ctx);
@@ -2502,6 +2631,10 @@ document.addEventListener('DOMContentLoaded', () => {
             else if (has(q, /\bpole ?type|material|concrete|wooden\b/) && !has(q, /\bhow many|count|number of|percent|percentage|share|proportion\b/)) out = poleTypeAnswer(ctx);
             else if (has(q, /\bcompare\b|\bvs\b|\bversus\b|\bdifference\b/)) out = compareAnswer(q, ctx);
             else if (has(q, /\bpercent|percentage|share|proportion|what fraction\b/)) out = shareAnswer(q, ctx);
+            // Dashboard vocabulary → the KPI scorecard (mirrors the dashboard cards).
+            else if (has(q, /\bkpis?\b|scorecard|score ?card|dashboard\b/)
+                || has(q, /\bhow (are|is) (we|things|it) (doing|going)\b/)
+                || has(q, /\bnew poles?\b|\bactive users?\b|\btotal poles\b|\boverall (progress|completion|status|score)\b|\bcompletion rate\b/)) out = kpiAnswer(ctx);
             // "behind" (and its kin) only routes to BOQ alongside real BOQ/feeder context,
             // so "which officers are lagging" isn't answered with a feeder-BOQ ranking.
             else if (has(q, /\bboq|target|bill of quant|completion|complete\b/) || (BEHIND_RE.test(q) && has(q, /\bfeeder\b/))) out = boqAnswer(q, ctx);

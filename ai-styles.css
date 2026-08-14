@@ -95,7 +95,7 @@
     opacity: 0;
     transform: translateY(10px);
     transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-    white-space: pre-wrap;
+    white-space: normal;
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
     min-height: 60px;
 }
@@ -213,4 +213,184 @@
 .ai-response em {
     color: hsl(var(--muted-foreground));
     font-style: italic;
+}
+
+/* ============ Visual answer components (charts, meters, tiles) ============ */
+
+/* Horizontal bar chart (rankings, comparisons) */
+.ai-response .ai-chart {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin: 0.55rem 0;
+}
+.ai-response .ai-chart .row {
+    display: grid;
+    grid-template-columns: minmax(0, 42%) 1fr auto;
+    gap: 0.55rem;
+    align-items: center;
+    font-size: 0.85rem;
+}
+.ai-response .ai-chart .lbl {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: hsl(var(--foreground));
+}
+.ai-response .ai-chart .lbl .rank {
+    color: hsl(var(--muted-foreground));
+    font-variant-numeric: tabular-nums;
+}
+.ai-response .ai-chart .track {
+    background: hsl(var(--muted) / 0.5);
+    border-radius: 6px;
+    height: 15px;
+    overflow: hidden;
+}
+.ai-response .ai-chart .track > span {
+    display: block;
+    height: 100%;
+    border-radius: 6px;
+    background: linear-gradient(90deg, hsl(var(--primary)), hsl(var(--accent)));
+    transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.ai-response .ai-chart .num {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: hsl(var(--foreground));
+    white-space: nowrap;
+}
+
+/* Labelled progress meter (completion, BOQ, single share) */
+.ai-response .ai-meter {
+    margin: 0.5rem 0;
+}
+.ai-response .ai-meter .cap {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.82rem;
+    margin-bottom: 0.25rem;
+}
+.ai-response .ai-meter .cap .pct {
+    font-weight: 700;
+    color: hsl(var(--primary));
+}
+.ai-response .ai-bar {
+    background: hsl(var(--muted) / 0.55);
+    border-radius: 999px;
+    height: 9px;
+    overflow: hidden;
+}
+.ai-response .ai-bar > span {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: hsl(var(--primary));
+    transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Stat tiles (summary, buildings, quick facts) */
+.ai-response .ai-tiles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 0.5rem 0;
+}
+.ai-response .ai-tile {
+    flex: 1 1 90px;
+    background: hsl(var(--secondary) / 0.5);
+    border: 1px solid hsl(var(--border));
+    border-radius: 10px;
+    padding: 0.5rem 0.7rem;
+}
+.ai-response .ai-tile .t-val {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: hsl(var(--foreground));
+}
+.ai-response .ai-tile .t-lbl {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: hsl(var(--muted-foreground));
+}
+
+/* KPI scorecard cards */
+.ai-response .ai-kpis {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+    gap: 0.55rem;
+    margin: 0.5rem 0;
+}
+.ai-response .ai-kpi {
+    background: hsl(var(--secondary) / 0.5);
+    border: 1px solid hsl(var(--border));
+    border-radius: 10px;
+    padding: 0.6rem 0.7rem;
+}
+.ai-response .ai-kpi .k-title {
+    font-size: 0.66rem;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: hsl(var(--muted-foreground));
+    display: block;
+}
+.ai-response .ai-kpi .k-val {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: hsl(var(--foreground));
+}
+.ai-response .ai-kpi .k-val .of {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: hsl(var(--muted-foreground));
+}
+.ai-response .ai-kpi .k-sub {
+    font-size: 0.7rem;
+    color: hsl(var(--muted-foreground));
+    margin-top: 0.15rem;
+}
+.ai-response .ai-kpi .k-tag {
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    color: hsl(38 92% 45%);
+    font-weight: 700;
+}
+
+/* Proportion (stacked) bar for splits — pole type, linkage */
+.ai-response .ai-prop {
+    display: flex;
+    height: 16px;
+    border-radius: 6px;
+    overflow: hidden;
+    margin: 0.45rem 0 0.35rem;
+    background: hsl(var(--muted) / 0.4);
+}
+.ai-response .ai-prop > span {
+    display: block;
+    height: 100%;
+    transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.ai-response .ai-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.8rem;
+    font-size: 0.78rem;
+    color: hsl(var(--muted-foreground));
+}
+.ai-response .ai-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+.ai-response .ai-legend .dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 2px;
+    display: inline-block;
+}
+.ai-response .ai-legend b {
+    color: hsl(var(--foreground));
+    font-weight: 600;
 }
