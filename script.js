@@ -45,6 +45,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let dtHighlightLayer = null;    // animated "connected poles" highlight for a clicked DT
     let dtHighlightControl = null;  // vendor legend shown while a DT is highlighted
     let highlightedDtName = null;   // which DT is currently highlighted (toggle state)
+    let dtHlPoles = [];             // cached connected poles [{lat,lon,key}] for the active DT
+    let dtHlCounts = null;          // per-vendor pole counts for the active DT
+    let dtHlSelected = null;        // Set of vendor keys currently shown (legend selection)
+    let dtHlLegendDiv = null;       // legend DOM node, updated in place as vendors are toggled
     let boundariesLoaded = false;   // one-time load guard
     let utBoundsCache = null;       // UT-only bounds (fallback when no data)
     let mapInitiallyFitted = false; // first-render fit guard
@@ -5239,6 +5243,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function clearDtHighlight() {
         if (dtHighlightLayer) dtHighlightLayer.clearLayers();
         highlightedDtName = null;
+        dtHlPoles = []; dtHlCounts = null; dtHlSelected = null; dtHlLegendDiv = null;
         if (dtHighlightControl && map) { map.removeControl(dtHighlightControl); dtHighlightControl = null; }
     }
 
@@ -5249,17 +5254,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderDtHighlight(dtName) {
         if (!dtHighlightLayer) return;
-        dtHighlightLayer.clearLayers();
 
         // Collect the DT's poles from the filtered set, deduped by SLRN and
         // gated on valid coordinates — EXACTLY how the DT badge counts them —
         // so the legend total can never diverge from the badge you clicked.
         const seen = new Set();
         const counts = { blue: 0, black: 0, white: 0, other: 0 };
-        let total = 0;
+        const poles = [];
         const HL_LIMIT = 2000; // safety cap on animated markers (never hit in practice)
         (filteredData || []).forEach(d => {
-            if (total >= HL_LIMIT) return;
+            if (poles.length >= HL_LIMIT) return;
             if (String(d['DT Name'] || '').trim() !== dtName) return;
             const lat = parseFloat(d.Latitude), lon = parseFloat(d.Longitude);
             if (isNaN(lat) || isNaN(lon)) return;
@@ -5269,11 +5273,30 @@ document.addEventListener('DOMContentLoaded', () => {
             seen.add(pid);
             const info = VENDOR_HL[d.Vendor_Name];
             const key = info ? info.key : 'other';
-            counts[key]++; total++;
-            const marker = L.marker([lat, lon], {
+            counts[key]++;
+            poles.push({ lat, lon, key });
+        });
+
+        highlightedDtName = dtName;
+        dtHlPoles = poles;
+        dtHlCounts = counts;
+        // Default selection: every vendor that has at least one pole here.
+        dtHlSelected = new Set(Object.keys(counts).filter(k => counts[k] > 0));
+        drawDtHighlightMarkers();
+        showDtHighlightLegend(dtName);
+    }
+
+    // (Re)draw the animated markers for the currently-selected vendors only.
+    function drawDtHighlightMarkers() {
+        if (!dtHighlightLayer) return 0;
+        dtHighlightLayer.clearLayers();
+        let shown = 0;
+        dtHlPoles.forEach(p => {
+            if (!dtHlSelected || !dtHlSelected.has(p.key)) return;
+            const marker = L.marker([p.lat, p.lon], {
                 icon: L.divIcon({
                     className: 'dt-hl-wrapper',
-                    html: `<span class="dt-hl dt-hl-${key}"><span class="dt-hl-ring"></span><span class="dt-hl-core"></span></span>`,
+                    html: `<span class="dt-hl dt-hl-${p.key}"><span class="dt-hl-ring"></span><span class="dt-hl-core"></span></span>`,
                     iconSize: [22, 22],
                     iconAnchor: [11, 11]
                 }),
@@ -5282,34 +5305,75 @@ document.addEventListener('DOMContentLoaded', () => {
                 keyboard: false
             });
             dtHighlightLayer.addLayer(marker);
+            shown++;
         });
-
-        highlightedDtName = dtName;
-        showDtHighlightLegend(dtName, counts, total);
+        return shown;
     }
 
-    function showDtHighlightLegend(dtName, counts, total) {
+    // Click a vendor row to show/hide its poles — independent toggles, so any
+    // single vendor or any combination can be shown. Vendors with no poles
+    // under this DT are inert.
+    function toggleVendorSelection(key) {
+        if (!dtHlSelected || !dtHlCounts || !dtHlCounts[key]) return;
+        if (dtHlSelected.has(key)) dtHlSelected.delete(key);
+        else dtHlSelected.add(key);
+        drawDtHighlightMarkers();
+        if (dtHlLegendDiv) renderDtHighlightLegendBody(dtHlLegendDiv, highlightedDtName);
+    }
+
+    // Render/refresh the legend contents from the current selection state.
+    function renderDtHighlightLegendBody(div, dtName) {
+        const rowHtml = (label, key) => {
+            const c = (dtHlCounts && dtHlCounts[key]) || 0;
+            const selected = dtHlSelected && dtHlSelected.has(key);
+            const cls = 'dt-hl-legend-row' + (c === 0 ? ' disabled' : '') + (selected ? '' : ' deselected');
+            const attrs = c === 0 ? '' : ` role="button" tabindex="0" aria-pressed="${selected ? 'true' : 'false'}"`;
+            return `<div class="${cls}" data-key="${key}"${attrs}>
+                <span class="dt-hl-swatch dt-hl-swatch-${key}"></span>
+                <span class="dt-hl-legend-name">${hlEsc(label)}</span>
+                <span class="dt-hl-legend-count">${c.toLocaleString()}</span>
+            </div>`;
+        };
+        // Preserve keyboard focus across the innerHTML rebuild so a keyboard user
+        // toggling vendors doesn't get bounced back to <body> each time.
+        const focusedKey = div.contains(document.activeElement) ? document.activeElement.dataset.key : null;
+        let rows = VENDOR_HL_ORDER.map(v => rowHtml(v, VENDOR_HL[v].key)).join('');
+        if (dtHlCounts && dtHlCounts.other) rows += rowHtml('Other vendor', 'other');
+        const shown = dtHlPoles.reduce((n, p) => n + (dtHlSelected && dtHlSelected.has(p.key) ? 1 : 0), 0);
+        div.innerHTML = `
+            <div class="dt-hl-legend-head">
+                <span class="dt-hl-legend-title">Connected poles by vendor</span>
+                <button class="dt-hl-legend-close" type="button" title="Clear highlight" aria-label="Clear highlight">&times;</button>
+            </div>
+            <div class="dt-hl-legend-dt">${hlEsc(dtName)}</div>
+            <div class="dt-hl-legend-hint">Click a vendor to show / hide its poles</div>
+            ${rows}
+            <div class="dt-hl-legend-total"><span class="dt-hl-legend-total-num">${shown.toLocaleString()}</span> of ${dtHlPoles.length.toLocaleString()} pole${dtHlPoles.length === 1 ? '' : 's'} shown</div>
+        `;
+        div.querySelector('.dt-hl-legend-close').addEventListener('click', clearDtHighlight);
+        div.querySelectorAll('.dt-hl-legend-row[role="button"]').forEach(row => {
+            const act = () => toggleVendorSelection(row.dataset.key);
+            row.addEventListener('click', act);
+            row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); act(); } });
+        });
+        if (focusedKey) div.querySelector(`.dt-hl-legend-row[data-key="${focusedKey}"]`)?.focus();
+    }
+
+    function showDtHighlightLegend(dtName) {
         if (dtHighlightControl && map) { map.removeControl(dtHighlightControl); dtHighlightControl = null; }
         const Ctrl = L.Control.extend({
             options: { position: 'bottomleft' },
             onAdd: function () {
                 const div = L.DomUtil.create('div', 'dt-hl-legend');
-                const rows = VENDOR_HL_ORDER.map(v => {
-                    const key = VENDOR_HL[v].key;
-                    return `<div class="dt-hl-legend-row"><span class="dt-hl-swatch dt-hl-swatch-${key}"></span><span class="dt-hl-legend-name">${hlEsc(v)}</span><span class="dt-hl-legend-count">${counts[key].toLocaleString()}</span></div>`;
-                }).join('');
-                const otherRow = counts.other ? `<div class="dt-hl-legend-row"><span class="dt-hl-swatch dt-hl-swatch-other"></span><span class="dt-hl-legend-name">Other vendor</span><span class="dt-hl-legend-count">${counts.other.toLocaleString()}</span></div>` : '';
-                div.innerHTML = `
-                    <div class="dt-hl-legend-head">
-                        <span class="dt-hl-legend-title">Connected poles by vendor</span>
-                        <button class="dt-hl-legend-close" type="button" title="Clear highlight" aria-label="Clear highlight">&times;</button>
-                    </div>
-                    <div class="dt-hl-legend-dt">${hlEsc(dtName)}</div>
-                    ${rows}${otherRow}
-                    <div class="dt-hl-legend-total">${total.toLocaleString()} pole${total === 1 ? '' : 's'} highlighted</div>
-                `;
+                dtHlLegendDiv = div;
+                renderDtHighlightLegendBody(div, dtName);
+                // Clicks/scroll on the legend must not reach the map (which would
+                // clear the highlight or pan) — the rows handle their own clicks.
+                // disableClickPropagation only stops mousedown/dblclick, so also
+                // stop the 'click' itself, or a row click bubbles to map.on('click').
                 L.DomEvent.disableClickPropagation(div);
-                div.querySelector('.dt-hl-legend-close').addEventListener('click', clearDtHighlight);
+                L.DomEvent.disableScrollPropagation(div);
+                L.DomEvent.on(div, 'click', L.DomEvent.stopPropagation);
                 return div;
             }
         });
@@ -5509,7 +5573,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const g = dtList[i];
                 const clat = g.sumLat / g.n;
                 const clon = g.sumLon / g.n;
-                const poleCount = g.poles.size || g.n;
+                // Count unique pole SLRNs only — the SAME basis the highlight
+                // legend uses — so the badge and legend totals can never diverge.
+                const poleCount = g.poles.size;
                 const badge = poleCount > 999 ? '999+' : String(poleCount);
 
                 const marker = L.marker([clat, clon], {
