@@ -3009,7 +3009,7 @@ document.addEventListener('DOMContentLoaded', () => {
             buFilter: () => rebuildFacetOptions('buFilter', d => d["Bussines Unit"], dataMatchingFacetsExcept('buFilter'), 'All Business Units'),
             utFilter: () => rebuildFacetOptions('utFilter', d => d["Undertaking"], dataMatchingFacetsExcept('utFilter'), 'All Undertakings'),
             dtFilter: () => rebuildFacetOptions('dtFilter', d => d["DT Name"], dataMatchingFacetsExcept('dtFilter'), 'All DTs'),
-            upriserFilter: () => rebuildFacetOptions('upriserFilter', d => d["UpriserNo"], dataMatchingFacetsExcept('upriserFilter'), 'All Uprisers', { numeric: true }),
+            upriserFilter: () => rebuildFacetOptions('upriserFilter', d => String(d["UpriserNo"]), dataMatchingFacetsExcept('upriserFilter'), 'All Uprisers', { numeric: true }),
             materialFilter: () => rebuildFacetOptions('materialFilter', d => (d["Type of Pole"] || '').trim().toUpperCase(), dataMatchingFacetsExcept('materialFilter'), 'All Materials', { allValue: '', titleCase: true }),
             userFilter: () => populateUserSelect(dataMatchingFacetsExcept('userFilter')),
         };
@@ -3080,52 +3080,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const bus = [...new Set(data.map(item => item["Bussines Unit"]))].filter(Boolean).sort();
         const uts = [...new Set(data.map(item => item["Undertaking"]))].filter(Boolean).sort();
 
-        const userSet = new Set(data.map(item => item["User"]));
-        const vendorVals = multiSelects.vendorFilter?.getValues();
-        // The hardcoded Ikeja Electric roster lets you browse/pick any IE staff
-        // when nothing narrows the scope. But once any "where / when" filter is
-        // active (date, feeder, DT, business unit, undertaking, upriser), the User
-        // dropdown must list ONLY the people who actually worked in that scope — so
-        // skip the roster padding and fall back to the users present in the
-        // (already filtered) data, matching the Active Users count.
-        // An Asset SLRN lookup resolves to one pole, so it narrows harder than
-        // any of these — the User list must be just whoever captured that pole.
-        const narrowingActive = !!assetLookupQuery ||
-            ['dateFilter', 'feederFilter', 'dtFilter', 'buFilter', 'utFilter', 'upriserFilter']
-                .some(id => { const v = multiSelects[id]?.getValues(); return Array.isArray(v) && v.length > 0; });
-        if (!narrowingActive && (!vendorVals || vendorVals.includes('Ikeja Electric'))) {
-            // Add Ikeja Electric system usernames to the user filter
-            IKEJA_USER_ROSTER.forEach(n => userSet.add(n));
-        }
-
-        // Build set of usernames that actually have data records in this dataset
-        const usersWithData = new Set(data.map(item => item['User']).filter(Boolean));
-
-        // Map all raw ids to their resolved display names, then deduplicate.
-        // For each unique display name we keep ONE entry — preferring the id that has
-        // actual data records (so the filter works when the user selects a name).
-        const seenDisplayNames = new Map(); // displayName → best {id, name, hasData}
-
-        [...userSet].filter(Boolean).forEach(username => {
-            const displayName = getDisplayName(username);
-            if (!displayName) return;
-
-            const hasData = usersWithData.has(username);
-            const existing = seenDisplayNames.get(displayName);
-
-            if (!existing) {
-                seenDisplayNames.set(displayName, { id: username, name: displayName, hasData });
-            } else if (!existing.hasData && hasData) {
-                // Prefer the entry that actually has records in the dataset
-                seenDisplayNames.set(displayName, { id: username, name: displayName, hasData });
-            }
-        });
-
-        const users = [...seenDisplayNames.values()]
-            .sort((a, b) => a.name.localeCompare(b.name));
-
         const dts = [...new Set(data.map(item => item["DT Name"]))].filter(Boolean).sort();
-        const uprisers = [...new Set(data.map(item => item["UpriserNo"]))].filter(Boolean).sort((a, b) => a - b);
+        const uprisers = [...new Set(data.map(item => String(item["UpriserNo"] ?? '')).filter(Boolean))].sort((a, b) => a - b);
         const feeders = [...new Set(data.map(item => item["Feeder"]))].filter(Boolean).sort();
         const dates = [...new Set(data.map(item => item["Date/timestamp"] ? item["Date/timestamp"].split(' ')[0] : ''))].filter(Boolean).sort((a, b) => new Date(b) - new Date(a));
 
@@ -3140,14 +3096,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         populateSelect(buSelect, bus);
         populateSelect(utSelect, uts);
-
-        users.forEach(u => {
-            const opt = document.createElement('option');
-            opt.value = u.id;
-            opt.textContent = u.name;
-            userSelect.appendChild(opt);
-        });
-
+        populateUserSelect(data); // single source of truth for the User dropdown
         populateSelect(dtSelect, dts);
         populateSelect(upriserSelect, uprisers);
         if (!skipFeeder) populateSelect(feederSelect, feeders);
