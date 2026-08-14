@@ -5274,7 +5274,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const info = VENDOR_HL[d.Vendor_Name];
             const key = info ? info.key : 'other';
             counts[key]++;
-            poles.push({ lat, lon, key });
+            poles.push({ lat, lon, key, d }); // keep the record so the marker owns the pole popup
         });
 
         highlightedDtName = dtName;
@@ -5301,8 +5301,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     iconAnchor: [11, 11]
                 }),
                 zIndexOffset: 1000,
-                interactive: false,
-                keyboard: false
+                keyboard: false,
+                // The marker is INTERACTIVE and owns the pole popup, so clicking a
+                // glowing pole always opens that pole's details (a bigger, reliable
+                // target) instead of falling through to the undertaking polygon.
+                // bubblingMouseEvents:false keeps the click from clearing the highlight.
+                bubblingMouseEvents: false,
+                riseOnHover: true
+            });
+            if (p.d) marker.bindPopup(polePopupHtml(p.d, p.lat, p.lon), {
+                className: 'asset-popup-wrapper', maxWidth: 320, minWidth: 260, closeButton: true, autoPan: true
             });
             dtHighlightLayer.addLayer(marker);
             shown++;
@@ -5403,6 +5411,36 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         dtHighlightControl = new Ctrl();
         map.addControl(dtHighlightControl);
+    }
+
+    // Shared pole popup — used by the base pole markers AND the DT-highlight
+    // markers, so a highlighted pole shows the same details when clicked.
+    function polePopupHtml(d, lat, lon) {
+        const val = (v) => (v === undefined || v === null || v === '') ? 'N/A' : hlEsc(String(v));
+        const poleSLRN = val(d["Lt PoleSLRN"]);
+        const poleID = val(d["LT Pole ID"] || d["LT Pole No"]);
+        const officer = val(getDisplayName(d["User"]) || d["User"]);
+        const latStr = (typeof lat === 'number' && !isNaN(lat)) ? lat.toFixed(6) : val(d["Latitude"]);
+        const lonStr = (typeof lon === 'number' && !isNaN(lon)) ? lon.toFixed(6) : val(d["Longitude"]);
+        return `
+            <div class="asset-popup">
+                <div class="asset-popup-title">${poleSLRN}</div>
+                <div class="asset-popup-subtitle">TAGGED POLE</div>
+                <div class="asset-popup-divider"></div>
+                <div class="asset-popup-table">
+                    <div class="asset-popup-row"><div class="asset-popup-label">Business Unit</div><div class="asset-popup-value">${val(d["Bussines Unit"])}</div></div>
+                    <div class="asset-popup-row"><div class="asset-popup-label">Feeder Name</div><div class="asset-popup-value">${val(d["Feeder"])}</div></div>
+                    <div class="asset-popup-row"><div class="asset-popup-label">DT Name</div><div class="asset-popup-value">${val(d["DT Name"])}</div></div>
+                    <div class="asset-popup-row"><div class="asset-popup-label">Pole SLRN</div><div class="asset-popup-value">${poleSLRN}</div></div>
+                    <div class="asset-popup-row"><div class="asset-popup-label">Pole ID</div><div class="asset-popup-value">${poleID}</div></div>
+                    <div class="asset-popup-row"><div class="asset-popup-label">Field Officer</div><div class="asset-popup-value">${officer}</div></div>
+                    <div class="asset-popup-row"><div class="asset-popup-label">Vendor</div><div class="asset-popup-value">${val(d["Vendor_Name"])}</div></div>
+                    <div class="asset-popup-row"><div class="asset-popup-label">Address</div><div class="asset-popup-value">${val(d["Location address"])}</div></div>
+                    <div class="asset-popup-row"><div class="asset-popup-label">Latitude</div><div class="asset-popup-value">${latStr}</div></div>
+                    <div class="asset-popup-row asset-popup-row-last"><div class="asset-popup-label">Longitude</div><div class="asset-popup-value">${lonStr}</div></div>
+                </div>
+            </div>
+        `;
     }
 
     function renderMap() {
@@ -5515,30 +5553,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     bubblingMouseEvents: false     // a pole click must not reach the map 'click' (which clears a DT highlight)
                 });
 
-                const val = (v) => (v === undefined || v === null || v === '') ? 'N/A' : hlEsc(String(v));
-                const poleSLRN = val(d["Lt PoleSLRN"]);
-                const poleID = val(d["LT Pole ID"] || d["LT Pole No"]);
-                const officer = val(getDisplayName(d["User"]) || d["User"]);
-                const popupContent = `
-                    <div class="asset-popup">
-                        <div class="asset-popup-title">${poleSLRN}</div>
-                        <div class="asset-popup-subtitle">TAGGED POLE</div>
-                        <div class="asset-popup-divider"></div>
-                        <div class="asset-popup-table">
-                            <div class="asset-popup-row"><div class="asset-popup-label">Business Unit</div><div class="asset-popup-value">${val(d["Bussines Unit"])}</div></div>
-                            <div class="asset-popup-row"><div class="asset-popup-label">Feeder Name</div><div class="asset-popup-value">${val(d["Feeder"])}</div></div>
-                            <div class="asset-popup-row"><div class="asset-popup-label">DT Name</div><div class="asset-popup-value">${val(d["DT Name"])}</div></div>
-                            <div class="asset-popup-row"><div class="asset-popup-label">Pole SLRN</div><div class="asset-popup-value">${poleSLRN}</div></div>
-                            <div class="asset-popup-row"><div class="asset-popup-label">Pole ID</div><div class="asset-popup-value">${poleID}</div></div>
-                            <div class="asset-popup-row"><div class="asset-popup-label">Field Officer</div><div class="asset-popup-value">${officer}</div></div>
-                            <div class="asset-popup-row"><div class="asset-popup-label">Vendor</div><div class="asset-popup-value">${val(d["Vendor_Name"])}</div></div>
-                            <div class="asset-popup-row"><div class="asset-popup-label">Address</div><div class="asset-popup-value">${val(d["Location address"])}</div></div>
-                            <div class="asset-popup-row"><div class="asset-popup-label">Latitude</div><div class="asset-popup-value">${lat.toFixed(6)}</div></div>
-                            <div class="asset-popup-row asset-popup-row-last"><div class="asset-popup-label">Longitude</div><div class="asset-popup-value">${lon.toFixed(6)}</div></div>
-                        </div>
-                    </div>
-                `;
-                marker.bindPopup(popupContent, {
+                marker.bindPopup(polePopupHtml(d, lat, lon), {
                     className: 'asset-popup-wrapper',
                     maxWidth: 320,
                     minWidth: 260,
