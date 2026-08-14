@@ -5429,6 +5429,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="asset-popup-divider"></div>
                 <div class="asset-popup-table">
                     <div class="asset-popup-row"><div class="asset-popup-label">Business Unit</div><div class="asset-popup-value">${val(d["Bussines Unit"])}</div></div>
+                    <div class="asset-popup-row"><div class="asset-popup-label">Undertaking</div><div class="asset-popup-value">${val(d["Undertaking"])}</div></div>
+                    <div class="asset-popup-row"><div class="asset-popup-label">Upriser No</div><div class="asset-popup-value">${val(d["UpriserNo"])}</div></div>
                     <div class="asset-popup-row"><div class="asset-popup-label">Feeder Name</div><div class="asset-popup-value">${val(d["Feeder"])}</div></div>
                     <div class="asset-popup-row"><div class="asset-popup-label">DT Name</div><div class="asset-popup-value">${val(d["DT Name"])}</div></div>
                     <div class="asset-popup-row"><div class="asset-popup-label">Pole SLRN</div><div class="asset-popup-value">${poleSLRN}</div></div>
