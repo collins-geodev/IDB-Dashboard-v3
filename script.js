@@ -1092,34 +1092,522 @@ document.addEventListener('DOMContentLoaded', () => {
         return cleaned;
     }
 
-    function downloadExcel() {
-        if (!filteredData || filteredData.length === 0) {
-            alert("No data available to download.");
-            return;
-        }
+    // ══════════════════════════════════════════════════════════════════════
+    //  EXPORTS — professional Excel / CSV / PDF
+    //  Every export draws from ONE analytics engine (computeReportStats) and
+    //  ONE column schema (REGISTER_COLUMNS), so the workbook, the CSV and the
+    //  PDF can never disagree with each other or with the on-screen KPIs.
+    //  Simulated fields (Issue_Type) are deliberately never surfaced.
+    // ══════════════════════════════════════════════════════════════════════
 
-        const cleaned = getCleanExportData();
-        const ws = XLSX.utils.json_to_sheet(cleaned);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Assets");
-        XLSX.writeFile(wb, "IDB_Monitor_Data.xlsx");
+    // Curated, human-friendly column order for the pole register. Simulated
+    // fields are excluded; two derived columns (Building Linked, Field Officer)
+    // are added for quick filtering. `type: 'n'` cells are exported as real
+    // numbers so Excel can sort/aggregate them.
+    const REGISTER_COLUMNS = [
+        { header: 'LT Pole SLRN', key: 'Lt PoleSLRN', type: 's', width: 16 },
+        { header: 'LT Pole No', key: 'LT Pole No', type: 's', width: 11 },
+        { header: 'LT Pole ID', key: 'LT Pole ID', type: 's', width: 11 },
+        { header: 'Business Unit', key: 'Bussines Unit', type: 's', width: 14 },
+        { header: 'Undertaking', key: 'Undertaking', type: 's', width: 15 },
+        { header: 'Feeder', key: 'Feeder', type: 's', width: 26 },
+        { header: 'DT Name', key: 'DT Name', type: 's', width: 34 },
+        { header: 'DT Number', key: 'DT Number', type: 's', width: 13 },
+        { header: 'Upriser No', key: 'UpriserNo', type: 'n', width: 10, fmt: '0' },
+        { header: 'Pole Type', key: 'Type of Pole', type: 's', width: 12 },
+        { header: 'Buildings Connected', key: 'No of Buildings Connected to the Pole', type: 'n', width: 13, fmt: '0' },
+        { header: 'Building Linked', key: '__linked', type: 's', width: 12 },
+        { header: 'Associated Building SLRN', key: 'Associated Buildings SLRN', type: 's', width: 22 },
+        { header: 'Location / Landmark', key: 'Location address', type: 's', width: 30 },
+        { header: 'Vendor', key: 'Vendor_Name', type: 's', width: 18 },
+        { header: 'Field Officer', key: '__officer', type: 's', width: 20 },
+        { header: 'Status', key: 'Status', type: 's', width: 12 },
+        { header: 'Capture Date', key: 'Date/timestamp', type: 's', width: 16 },
+        { header: 'Latitude', key: 'Latitude', type: 'n', width: 13, fmt: '0.000000' },
+        { header: 'Longitude', key: 'Longitude', type: 'n', width: 13, fmt: '0.000000' },
+    ];
+
+    function registerCellValue(col, d) {
+        if (col.key === '__linked') return String(d['Associated Buildings SLRN'] || '').trim() ? 'Yes' : 'No';
+        if (col.key === '__officer') return getDisplayName(d['User']) || d['User'] || '';
+        const v = d[col.key];
+        return v == null ? '' : v;
+    }
+
+    // Cleaned (de-duplicated, sequence-sorted) register as {headers, rows[][]}.
+    function buildRegisterMatrix() {
+        const rows = getCleanExportData();
+        const headers = REGISTER_COLUMNS.map(c => c.header);
+        const matrix = rows.map(d => REGISTER_COLUMNS.map(c => registerCellValue(c, d)));
+        return { headers, rows: matrix, columns: REGISTER_COLUMNS };
+    }
+
+    // Single source of truth for a DT's completion % and status bucket — used
+    // by dtStats, the Excel DT sheet AND the PDF DT table so all three agree.
+    // progress is null when the DT has no BOQ target (can't compute completion).
+    function dtClassify(r) {
+        const hasTarget = r.boqTotal > 0;
+        const ratio = hasTarget ? r.actualTotal / r.boqTotal : 0;
+        const progress = hasTarget ? +(ratio * 100).toFixed(1) : null;
+        let status;
+        if (r.actualTotal === 0) status = 'Not Started';
+        else if (hasTarget && ratio >= 1) status = 'Completed';
+        else if (hasTarget && ratio >= 0.9) status = 'Near Complete';
+        else status = 'In Progress';
+        return { progress, status, hasTarget };
+    }
+
+    // ── Report analytics — single source of truth for every headline number ──
+    function computeReportStats() {
+        const data = filteredData || [];
+        const totalUnique = countUniquePoles(data);
+        const rawCount = data.length;
+
+        const vendorCounts = uniquePolesByGroupExclusive(data, d => d.Vendor_Name || 'Other');
+        const vendors = Object.entries(vendorCounts).sort((a, b) => b[1] - a[1])
+            .map(([name, count]) => ({ name, count, pct: totalUnique ? (count / totalUnique) * 100 : 0 }));
+
+        const userCounts = uniquePolesByGroup(data, d => d.User);
+        const officers = Object.entries(userCounts).sort((a, b) => b[1] - a[1])
+            .map(([user, count]) => ({ user, name: getDisplayName(user) || user, count, pct: totalUnique ? (count / totalUnique) * 100 : 0 }));
+
+        const linkage = buildingLinkage(data);
+        const buildings = uniqueBuildings(data);
+
+        // Exclusive assignment so the type counts sum to totalUnique — keeps the
+        // donut wedges consistent with the printed share %.
+        const poleTypeCounts = uniquePolesByGroupExclusive(data, d => (d['Type of Pole'] || 'Unknown').toUpperCase());
+        const poleTypes = Object.entries(poleTypeCounts).sort((a, b) => b[1] - a[1])
+            .map(([type, count]) => ({ type: type.charAt(0) + type.slice(1).toLowerCase(), count, pct: totalUnique ? (count / totalUnique) * 100 : 0 }));
+        const dominantPole = poleTypes[0] || null;
+
+        const coverage = {
+            feeders: new Set(data.map(d => d.Feeder).filter(Boolean)).size,
+            dts: new Set(data.map(d => d['DT Name']).filter(Boolean)).size,
+            uts: new Set(data.map(d => d.Undertaking).filter(Boolean)).size,
+            bus: new Set(data.map(d => d['Bussines Unit']).filter(Boolean)).size,
+            officers: officers.length
+        };
+
+        // Unique poles per capture-day. Capture date is MM/DD/YYYY.
+        const parseDay = (s) => { const m = String(s).split('/'); return m.length === 3 ? new Date(+m[2], +m[0] - 1, +m[1]).getTime() : 0; };
+        const dayMap = {};
+        data.forEach(d => {
+            const day = String(d['Date/timestamp'] || '').split(' ')[0];
+            if (!day) return;
+            const s = poleSlrn(d); if (!s) return;
+            (dayMap[day] = dayMap[day] || new Set()).add(s);
+        });
+        const dailyCounts = Object.entries(dayMap)
+            .map(([date, set]) => ({ date, count: set.size, ts: parseDay(date) }))
+            .sort((a, b) => a.ts - b.ts);
+        // Run rate uses the SAME population as the denominator: dated unique
+        // poles ÷ active dated days. Undated captures must not inflate it.
+        const activeDays = dailyCounts.length;
+        const datedTotal = dailyCounts.reduce((s, x) => s + x.count, 0);
+        const runRate = activeDays ? datedTotal / activeDays : 0;
+        const firstDate = dailyCounts[0]?.date || 'N/A';
+        const lastDate = dailyCounts[dailyCounts.length - 1]?.date || 'N/A';
+        const recent3 = dailyCounts.slice(-3), prev3 = dailyCounts.slice(-6, -3);
+        const recentRate = recent3.length ? Math.round(recent3.reduce((s, x) => s + x.count, 0) / recent3.length) : 0;
+        const prevRate = prev3.length ? Math.round(prev3.reduce((s, x) => s + x.count, 0) / prev3.length) : 0;
+        const trendPct = prevRate > 0 ? Math.round(((recentRate - prevRate) / prevRate) * 100) : 0;
+        const trending = trendPct > 5 ? 'accelerating' : trendPct < -5 ? 'decelerating' : 'holding steady';
+        const TARGET_RATE = 50;
+        const verdict = runRate >= TARGET_RATE ? 'on target' : runRate >= TARGET_RATE * 0.7 ? 'approaching target' : 'below target';
+
+        // BOQ target scoped by the active feeder/DT filter (matches KPI cards).
+        let scopedBoq = boqData || [];
+        const fv = multiSelects.feederFilter?.getValues();
+        if (fv && fv.length) scopedBoq = scopedBoq.filter(d => fv.includes(d['FEEDER NAME']));
+        const dv = multiSelects.dtFilter?.getValues();
+        if (dv && dv.length) scopedBoq = scopedBoq.filter(d => dv.includes(d['DT NAME']));
+        const boqTarget = scopedBoq.reduce((s, d) => s + (parseInt(d['POLES Grand Total']) || 0), 0);
+        // Uncapped so it matches the on-screen KPI card (which shows >100% on
+        // over-capture); the visual gauge clamps its own bar width.
+        const completionPct = boqTarget > 0 ? (totalUnique / boqTarget) * 100 : null;
+
+        const dtRows = getEnhancedDTData().sort((a, b) => b.actualTotal - a.actualTotal);
+        // Bucket via the shared classifier so the bars/summary/tables never disagree.
+        const dtStats = {
+            total: dtRows.length,
+            completed: dtRows.filter(r => dtClassify(r).status === 'Completed').length,
+            nearComplete: dtRows.filter(r => dtClassify(r).status === 'Near Complete').length,
+            inProgress: dtRows.filter(r => dtClassify(r).status === 'In Progress').length,
+            notStarted: dtRows.filter(r => dtClassify(r).status === 'Not Started').length
+        };
+
+        const activeFilterList = [];
+        [['Vendor', 'vendorFilter'], ['Business Unit', 'buFilter'], ['Undertaking', 'utFilter'], ['Feeder', 'feederFilter'], ['DT', 'dtFilter'], ['Officer', 'userFilter'], ['Upriser', 'upriserFilter'], ['Pole Type', 'materialFilter'], ['Date', 'dateFilter']].forEach(([label, id]) => {
+            const vals = multiSelects[id]?.getValues();
+            if (vals && vals.length) activeFilterList.push({ label, value: vals.length > 3 ? `${vals.length} selected` : vals.join(', ') });
+        });
+        const filterText = activeFilterList.length ? activeFilterList.map(f => `${f.label}: ${f.value}`).join('   |   ') : 'No filters applied (all data)';
+
+        const now = new Date();
+        const dateStr = now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+        const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+        const kpiGet = (id) => (document.getElementById(id)?.textContent || '--').trim();
+        const kpiCards = [
+            ['Total Poles', kpiGet('kpi-boq-records'), kpiGet('kpi-act-records'), kpiGet('kpi-prog-records'), kpiGet('kpi-rem-records')],
+            ['New Poles (Install)', kpiGet('kpi-boq-users'), kpiGet('kpi-act-users'), kpiGet('kpi-prog-users'), kpiGet('kpi-rem-users')],
+            ['Feeders', kpiGet('kpi-boq-feeders'), kpiGet('kpi-act-feeders'), kpiGet('kpi-prog-feeders'), '—'],
+            ['DTs', kpiGet('kpi-boq-dts'), kpiGet('kpi-act-dts'), kpiGet('kpi-prog-dts'), '—'],
+            ['Building Linkage', '100%', linkage.pct.toFixed(1) + '%', linkage.pct.toFixed(1) + '%', linkage.unlinked.toLocaleString() + ' to tag'],
+            ['Buildings Connected', '—', buildings.toLocaleString(), '—', '—']
+        ];
+
+        return {
+            generatedAt: { dateStr, timeStr }, filterText, activeFilterList,
+            totalUnique, rawCount, vendors, officers, linkage, buildings,
+            poleTypes, dominantPole, coverage,
+            velocity: { runRate, activeDays, firstDate, lastDate, recentRate, prevRate, trendPct, trending, verdict, targetRate: TARGET_RATE, dailyCounts },
+            boq: { target: boqTarget, completionPct }, dtStats, dtRows, kpiCards
+        };
+    }
+
+    // ── Excel styling toolkit (xlsx-js-style) ───────────────────────────────
+    const XLC = {
+        blue: '1E40AF', blueDk: '1E3A8A', blueLt: 'DBEAFE', white: 'FFFFFF',
+        slate: '475569', ink: '1F2937', band: 'F1F5F9', bandBlue: 'EFF6FF',
+        line: 'E2E8F0', headBorder: 'CBD5E1', green: '059669', amber: 'B45309', red: 'B91C1C'
+    };
+    const xlThin = (rgb) => ({ style: 'thin', color: { rgb: rgb || XLC.line } });
+    const xlBorder = (rgb) => ({ top: xlThin(rgb), bottom: xlThin(rgb), left: xlThin(rgb), right: xlThin(rgb) });
+    function xlStyle({ sz = 10, bold = false, italic = false, color = XLC.ink, align = 'left', fill, border = true, wrap = false } = {}) {
+        const s = { font: { name: 'Calibri', sz, bold, italic, color: { rgb: color } }, alignment: { horizontal: align, vertical: 'center', wrapText: wrap } };
+        if (fill) s.fill = { patternType: 'solid', fgColor: { rgb: fill } };
+        if (border) s.border = xlBorder();
+        return s;
+    }
+    const XLS = {
+        title: { font: { name: 'Calibri', sz: 18, bold: true, color: { rgb: XLC.white } }, fill: { patternType: 'solid', fgColor: { rgb: XLC.blue } }, alignment: { horizontal: 'left', vertical: 'center' } },
+        sub: { font: { name: 'Calibri', sz: 10, color: { rgb: XLC.blueLt } }, fill: { patternType: 'solid', fgColor: { rgb: XLC.blue } }, alignment: { horizontal: 'left', vertical: 'center' } },
+        section: { font: { name: 'Calibri', sz: 11, bold: true, color: { rgb: XLC.white } }, fill: { patternType: 'solid', fgColor: { rgb: XLC.blueDk } }, alignment: { horizontal: 'left', vertical: 'center' } },
+        th: { font: { name: 'Calibri', sz: 10, bold: true, color: { rgb: XLC.white } }, fill: { patternType: 'solid', fgColor: { rgb: XLC.blue } }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, border: xlBorder(XLC.headBorder) }
+    };
+
+    // Build a styled worksheet from a matrix of primitives / {v,t,z,s} cells.
+    function buildStyledSheet(XL, cells, opts = {}) {
+        const aoa = cells.map(row => row.map(c => (c && typeof c === 'object') ? (c.v ?? '') : c));
+        const ws = XL.utils.aoa_to_sheet(aoa);
+        for (let r = 0; r < cells.length; r++) {
+            for (let c = 0; c < cells[r].length; c++) {
+                const cell = cells[r][c];
+                if (cell && typeof cell === 'object') {
+                    const ref = XL.utils.encode_cell({ r, c });
+                    const o = ws[ref] || (ws[ref] = { t: 's', v: '' });
+                    if (cell.v !== undefined) o.v = cell.v;
+                    if (cell.t) o.t = cell.t;
+                    if (cell.z) o.z = cell.z;
+                    if (cell.s) o.s = cell.s;
+                }
+            }
+        }
+        if (opts.cols) ws['!cols'] = opts.cols;
+        if (opts.merges) ws['!merges'] = opts.merges;
+        if (opts.rows) ws['!rows'] = opts.rows;
+        if (opts.autofilter) ws['!autofilter'] = { ref: opts.autofilter };
+        return ws;
+    }
+
+    // A data sheet: title band + meta line + styled header + banded rows +
+    // autofilter + tuned column widths. `columns` carry type/format/width.
+    function makeDataSheet(XL, { sheetTitle, subtitle, columns, rows, totalRow }) {
+        const ncol = columns.length;
+        const cells = [];
+        const bandRow = (v, s) => { const row = [{ v, t: 's', s }]; for (let i = 1; i < ncol; i++) row.push({ v: '', t: 's', s }); return row; };
+        cells.push(bandRow(sheetTitle, XLS.title));
+        cells.push(bandRow(subtitle, XLS.sub));
+        cells.push(columns.map(c => ({ v: c.header, t: 's', s: XLS.th })));
+        rows.forEach((row, ri) => {
+            const band = ri % 2 === 1;
+            cells.push(row.map((val, ci) => {
+                const col = columns[ci];
+                // Trim before the numeric test so a whitespace-only source cell
+                // (Number(' ') === 0) stays blank instead of coercing to 0.
+                const trimmed = val == null ? '' : String(val).trim();
+                const isNum = col.type === 'n' && trimmed !== '' && isFinite(Number(trimmed));
+                if (isNum) return { v: Number(trimmed), t: 'n', z: col.fmt || '#,##0', s: xlStyle({ align: 'right', fill: band ? XLC.band : undefined }) };
+                return { v: val == null ? '' : String(val), t: 's', s: xlStyle({ align: col.align || 'left', fill: band ? XLC.band : undefined }) };
+            }));
+        });
+        if (totalRow) {
+            cells.push(totalRow.map((val, ci) => {
+                const col = columns[ci];
+                const trimmed = val == null ? '' : String(val).trim();
+                const isNum = col.type === 'n' && trimmed !== '' && isFinite(Number(trimmed));
+                const base = { bold: true, color: XLC.blueDk, fill: XLC.bandBlue };
+                if (isNum) return { v: Number(trimmed), t: 'n', z: col.fmt || '#,##0', s: xlStyle({ ...base, align: 'right' }) };
+                return { v: val == null ? '' : String(val), t: 's', s: xlStyle({ ...base, align: col.align || 'left' }) };
+            }));
+        }
+        const headerRowIdx = 2;
+        const lastRow = cells.length - 1;
+        const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: ncol - 1 } }, { s: { r: 1, c: 0 }, e: { r: 1, c: ncol - 1 } }];
+        const autofilter = XL.utils.encode_range({ s: { r: headerRowIdx, c: 0 }, e: { r: lastRow, c: ncol - 1 } });
+        const rowHeights = [{ hpt: 26 }, { hpt: 16 }, { hpt: 22 }];
+        // (Freeze panes are not written by the xlsx-js-style build — verified —
+        // so we rely on the autofilter for column navigation instead.)
+        return buildStyledSheet(XL, cells, { cols: columns.map(c => ({ wch: c.width || 14 })), merges, autofilter, rows: rowHeights });
+    }
+
+    function saveWorkbook(XL, wb, filename) {
+        // xlsx-js-style writes an ArrayBuffer we hand to a Blob (works across
+        // browsers and keeps our cell styles, unlike XLSX.writeFile on the
+        // plain community build).
+        const wbout = XL.write(wb, { bookType: 'xlsx', type: 'array', cellStyles: true });
+        const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    function downloadExcel() {
+        if (!filteredData || filteredData.length === 0) { alert('No data available to download.'); return; }
+        // Prefer the styling-capable build; fall back to the plain community
+        // build (styles are silently ignored, but the data still exports).
+        const XL = window.XLSXStyle || window.XLSX;
+        const styled = !!window.XLSXStyle;
+        const stats = computeReportStats();
+        const reg = buildRegisterMatrix();
+        const wb = XL.utils.book_new();
+        wb.Props = {
+            Title: 'IDB 2.0 Assets Tagging — Management Report',
+            Subject: 'Asset Enumeration Programme',
+            Author: 'IDB 2.0 Monitoring System',
+            Company: 'Ikeja Electric',
+            CreatedDate: new Date()
+        };
+
+        // ── Sheet 1: Executive Summary ──────────────────────────────────────
+        const SUMMARY_COLS = 6;
+        const sc = [];
+        const rowN = (v, s) => { const r = [{ v, t: 's', s }]; for (let i = 1; i < SUMMARY_COLS; i++) r.push({ v: '', t: 's', s }); return r; };
+        sc.push(rowN('IDB 2.0 ASSETS TAGGING — MANAGEMENT REPORT', XLS.title));
+        sc.push(rowN('Ikeja Electric  ·  Asset Enumeration Programme', XLS.sub));
+        sc.push(rowN(`Generated ${stats.generatedAt.dateStr} at ${stats.generatedAt.timeStr}`, xlStyle({ italic: true, color: XLC.slate, border: false })));
+        sc.push(rowN(`Scope: ${stats.filterText}`, xlStyle({ italic: true, color: XLC.slate, border: false, wrap: true })));
+        sc.push(rowN('', xlStyle({ border: false })));
+
+        const secRow = (label) => sc.push(rowN(label, XLS.section));
+        const th = (arr) => sc.push(arr.map((h, i) => ({ v: h, t: 's', s: XLS.th })).concat(Array.from({ length: SUMMARY_COLS - arr.length }, () => ({ v: '', t: 's', s: XLS.th }))));
+        const bodyRow = (arr, opts = {}) => sc.push(arr.map((v, i) => {
+            const isNum = typeof v === 'number';
+            const st = xlStyle({ align: i === 0 ? 'left' : 'right', bold: opts.bold, fill: opts.fill, color: opts.color });
+            return isNum ? { v, t: 'n', z: opts.fmt || '#,##0', s: st } : { v: v == null ? '' : String(v), t: 's', s: st };
+        }).concat(Array.from({ length: SUMMARY_COLS - arr.length }, () => ({ v: '', t: 's', s: xlStyle({ fill: opts.fill }) }))));
+
+        // KPI table
+        secRow('KEY PERFORMANCE INDICATORS');
+        th(['Metric', 'Expected', 'Actual', 'Progress', 'Remaining', '']);
+        stats.kpiCards.forEach((r, i) => bodyRow([r[0], r[1], r[2], r[3], r[4], ''], { fill: i % 2 ? XLC.band : undefined }));
+        sc.push(rowN('', xlStyle({ border: false })));
+
+        // Vendor performance
+        secRow('VENDOR PERFORMANCE');
+        th(['Vendor', 'Assets Tagged', 'Share', '', '', '']);
+        stats.vendors.forEach((v, i) => bodyRow([v.name, v.count, v.pct.toFixed(1) + '%', '', '', ''], { fill: i % 2 ? XLC.band : undefined }));
+        bodyRow(['TOTAL', stats.totalUnique, '100%', '', '', ''], { bold: true, fill: XLC.bandBlue, color: XLC.blueDk });
+        sc.push(rowN('', xlStyle({ border: false })));
+
+        // DT status & coverage side matter
+        secRow('DT STATUS & NETWORK COVERAGE');
+        th(['Measure', 'Value', 'Measure', 'Value', '', '']);
+        const dv2 = [
+            ['DTs Completed', stats.dtStats.completed, 'Feeders Covered', stats.coverage.feeders],
+            ['DTs Near Complete', stats.dtStats.nearComplete, 'DTs Covered', stats.coverage.dts],
+            ['DTs In Progress', stats.dtStats.inProgress, 'Undertakings', stats.coverage.uts],
+            ['DTs Not Started', stats.dtStats.notStarted, 'Business Units', stats.coverage.bus],
+            ['DTs Tracked', stats.dtStats.total, 'Active Field Officers', stats.coverage.officers]
+        ];
+        dv2.forEach((r, i) => bodyRow([r[0], r[1], r[2], r[3], '', ''], { fill: i % 2 ? XLC.band : undefined }));
+        sc.push(rowN('', xlStyle({ border: false })));
+
+        // Data quality & velocity
+        secRow('DATA QUALITY & DELIVERY');
+        th(['Measure', 'Value', 'Measure', 'Value', '', '']);
+        const qv = [
+            ['Poles Captured (unique)', stats.totalUnique, 'Run Rate (poles/day)', Math.round(stats.velocity.runRate)],
+            ['Building Linkage', stats.linkage.pct.toFixed(1) + '%', 'Rate Benchmark', stats.velocity.targetRate],
+            ['Buildings Connected', stats.buildings, 'Delivery Status', stats.velocity.verdict],
+            ['Poles Unlinked', stats.linkage.unlinked, 'Active Working Days', stats.velocity.activeDays],
+            ['BOQ Completion', stats.boq.completionPct != null ? stats.boq.completionPct.toFixed(1) + '%' : 'N/A', 'Capture Window', `${stats.velocity.firstDate} → ${stats.velocity.lastDate}`]
+        ];
+        qv.forEach((r, i) => bodyRow([r[0], r[1], r[2], r[3], '', ''], { fill: i % 2 ? XLC.band : undefined }));
+        sc.push(rowN('', xlStyle({ border: false })));
+
+        // Key insights (narrative)
+        secRow('KEY INSIGHTS');
+        buildInsightLines(stats).forEach(line => {
+            const r = [{ v: '•  ' + line, t: 's', s: xlStyle({ color: XLC.ink, border: false, wrap: true }) }];
+            for (let i = 1; i < SUMMARY_COLS; i++) r.push({ v: '', t: 's', s: xlStyle({ border: false }) });
+            sc.push(r);
+        });
+        sc.push(rowN('', xlStyle({ border: false })));
+
+        // Notes & methodology — states the counting basis so the figures reconcile
+        secRow('NOTES & METHODOLOGY');
+        methodologyLines().forEach(line => {
+            const r = [{ v: '•  ' + line, t: 's', s: xlStyle({ color: XLC.slate, border: false, wrap: true }) }];
+            for (let i = 1; i < SUMMARY_COLS; i++) r.push({ v: '', t: 's', s: xlStyle({ border: false }) });
+            sc.push(r);
+        });
+
+        const summaryWs = buildStyledSheet(XL, sc, {
+            cols: [{ wch: 30 }, { wch: 18 }, { wch: 26 }, { wch: 18 }, { wch: 4 }, { wch: 4 }],
+            merges: computeSummaryMerges(sc, SUMMARY_COLS),
+            rows: [{ hpt: 30 }, { hpt: 16 }, { hpt: 14 }, { hpt: 16 }]
+        });
+        XL.utils.book_append_sheet(wb, summaryWs, 'Executive Summary');
+
+        // ── Sheet 2: Pole Register ──────────────────────────────────────────
+        const registerWs = makeDataSheet(XL, {
+            sheetTitle: `POLE REGISTER  —  ${reg.rows.length.toLocaleString()} unique poles`,
+            subtitle: `Generated ${stats.generatedAt.dateStr} ${stats.generatedAt.timeStr}   ·   ${stats.filterText}`,
+            columns: REGISTER_COLUMNS,
+            rows: reg.rows
+        });
+        XL.utils.book_append_sheet(wb, registerWs, 'Pole Register');
+
+        // ── Sheet 3: Vendor Breakdown ───────────────────────────────────────
+        const vendorWs = makeDataSheet(XL, {
+            sheetTitle: 'VENDOR PERFORMANCE BREAKDOWN',
+            subtitle: `${stats.vendors.length} vendors   ·   ${stats.totalUnique.toLocaleString()} unique poles`,
+            columns: [
+                { header: 'Vendor', type: 's', width: 26 },
+                { header: 'Assets Tagged', type: 'n', width: 16, fmt: '#,##0' },
+                { header: 'Share', type: 'n', width: 12, fmt: '0.0%' }
+            ],
+            rows: stats.vendors.map(v => [v.name, v.count, +(v.pct / 100).toFixed(4)]),
+            totalRow: ['TOTAL', stats.totalUnique, 1]
+        });
+        XL.utils.book_append_sheet(wb, vendorWs, 'Vendor Breakdown');
+
+        // ── Sheet 4: Field Officers ─────────────────────────────────────────
+        const officersTotal = stats.officers.reduce((s, o) => s + o.count, 0);
+        const officerWs = makeDataSheet(XL, {
+            sheetTitle: 'FIELD OFFICER LEAGUE TABLE',
+            subtitle: `${stats.officers.length} active officers   ·   ranked by unique poles tagged`,
+            columns: [
+                { header: 'Rank', type: 'n', width: 7, fmt: '0' },
+                { header: 'Field Officer', type: 's', width: 24 },
+                { header: 'Username', type: 's', width: 18 },
+                { header: 'Assets Tagged', type: 'n', width: 15, fmt: '#,##0' },
+                { header: 'Share', type: 'n', width: 11, fmt: '0.0%' }
+            ],
+            rows: stats.officers.map((o, i) => [i + 1, o.name, o.user, o.count, +(o.pct / 100).toFixed(4)]),
+            totalRow: ['', 'TOTAL', '', officersTotal, stats.totalUnique ? +(officersTotal / stats.totalUnique).toFixed(4) : 1]
+        });
+        XL.utils.book_append_sheet(wb, officerWs, 'Field Officers');
+
+        // ── Sheet 5: DT Performance ─────────────────────────────────────────
+        const dtTot = stats.dtRows.reduce((a, r) => ({ exp: a.exp + r.boqTotal, act: a.act + r.actualTotal, conc: a.conc + r.concrete, wood: a.wood + r.wooden }), { exp: 0, act: 0, conc: 0, wood: 0 });
+        const dtWs = makeDataSheet(XL, {
+            sheetTitle: 'DISTRIBUTION TRANSFORMER PERFORMANCE',
+            subtitle: `${stats.dtRows.length} DTs   ·   Expected vs Actual with completion status`,
+            columns: [
+                { header: 'DT Name', type: 's', width: 34 },
+                { header: 'Feeder', type: 's', width: 26 },
+                { header: 'Vendor', type: 's', width: 18 },
+                { header: 'Expected', type: 'n', width: 11, fmt: '#,##0' },
+                { header: 'Actual', type: 'n', width: 11, fmt: '#,##0' },
+                { header: 'Concrete', type: 'n', width: 11, fmt: '#,##0' },
+                { header: 'Wooden', type: 'n', width: 11, fmt: '#,##0' },
+                { header: 'Progress', type: 'n', width: 12, fmt: '0.0%' },
+                { header: 'Status', type: 's', width: 14 }
+            ],
+            rows: stats.dtRows.map(r => { const c = dtClassify(r); return [r.dtName, r.feeder, r.vendor, r.boqTotal, r.actualTotal, r.concrete, r.wooden, c.progress == null ? '' : +(c.progress / 100).toFixed(4), c.status]; }),
+            totalRow: ['TOTAL', '', '', dtTot.exp, dtTot.act, dtTot.conc, dtTot.wood, dtTot.exp > 0 ? +(dtTot.act / dtTot.exp).toFixed(4) : '', '']
+        });
+        XL.utils.book_append_sheet(wb, dtWs, 'DT Performance');
+
+        // ── Sheet 6: Business Unit Summary ──────────────────────────────────
+        const buCounts = uniquePolesByGroup(filteredData, d => d['Bussines Unit'] || 'Unknown');
+        const buRows = Object.entries(buCounts).sort((a, b) => b[1] - a[1])
+            .map(([bu, c]) => [bu, c, stats.totalUnique ? +(c / stats.totalUnique).toFixed(4) : 0]);
+        const buWs = makeDataSheet(XL, {
+            sheetTitle: 'BUSINESS UNIT SUMMARY',
+            subtitle: `${buRows.length} business unit${buRows.length > 1 ? 's' : ''}   ·   unique poles by BU`,
+            columns: [
+                { header: 'Business Unit', type: 's', width: 26 },
+                { header: 'Unique Poles', type: 'n', width: 14, fmt: '#,##0' },
+                { header: 'Share', type: 'n', width: 12, fmt: '0.0%' }
+            ],
+            rows: buRows,
+            totalRow: ['TOTAL', stats.totalUnique, 1]
+        });
+        XL.utils.book_append_sheet(wb, buWs, 'Business Units');
+
+        const fname = `IDB_Assets_Report_${new Date().toISOString().split('T')[0]}.xlsx`;
+        if (styled) saveWorkbook(XL, wb, fname);
+        else XL.writeFile(wb, fname);
+    }
+
+    // Full-width merges for the summary sheet: merge only the banner/section/
+    // insight rows (a single leading cell with the rest blank), never the
+    // 2-column data tables.
+    function computeSummaryMerges(cells, ncol) {
+        const merges = [];
+        cells.forEach((row, r) => {
+            const lead = row[0];
+            const leadVal = lead && typeof lead === 'object' ? lead.v : lead;
+            // Merge full-width ONLY for single-lead-cell rows (title / section
+            // band / insight line). The 2-column data tables carry values in
+            // cols 1+, so they never match and keep their individual headers.
+            const rest = row.slice(1).every(c => { const v = c && typeof c === 'object' ? c.v : c; return v === '' || v == null; });
+            if (leadVal !== '' && leadVal != null && rest) merges.push({ s: { r, c: 0 }, e: { r, c: ncol - 1 } });
+        });
+        return merges;
+    }
+
+    // Shared methodology notes (Excel "Notes & Methodology" + PDF footnote) so
+    // every headline figure states its counting basis and reconciles.
+    function methodologyLines() {
+        return [
+            'Poles are counted by unique LT Pole SLRN — a pole captured more than once counts once.',
+            'Only field-captured attributes are reported; simulated/diagnostic fields (e.g. pole condition) are deliberately excluded.',
+            'Run Rate = dated unique poles ÷ active working days.  BOQ Completion = unique poles ÷ scoped BOQ target.',
+            'Capture dates are MM/DD/YYYY. All figures reflect the dashboard filters active at the moment of export.'
+        ];
+    }
+
+    // Shared narrative insight lines (used by Excel Key Insights + PDF).
+    function buildInsightLines(stats) {
+        const lines = [];
+        const lead = stats.vendors[0];
+        lines.push(`${stats.totalUnique.toLocaleString()} unique poles captured across ${stats.coverage.feeders} feeders, ${stats.coverage.dts} DTs and ${stats.coverage.bus} business unit${stats.coverage.bus > 1 ? 's' : ''} by ${stats.coverage.officers} field officers.`);
+        if (lead) lines.push(`${lead.name} leads enumeration with ${lead.count.toLocaleString()} poles (${lead.pct.toFixed(1)}% of the total).`);
+        lines.push(`Delivery is ${stats.velocity.verdict} at ${Math.round(stats.velocity.runRate)} poles/day (benchmark ${stats.velocity.targetRate}); the recent trend is ${stats.velocity.trending}${stats.velocity.trendPct ? ` (${stats.velocity.trendPct > 0 ? '+' : ''}${stats.velocity.trendPct}%)` : ''}.`);
+        lines.push(`Building-SLRN linkage stands at ${stats.linkage.pct.toFixed(1)}% — ${stats.linkage.linked.toLocaleString()} of ${stats.linkage.total.toLocaleString()} poles linked, ${stats.linkage.unlinked.toLocaleString()} outstanding.`);
+        if (stats.boq.completionPct != null) lines.push(`Overall BOQ completion is ${stats.boq.completionPct.toFixed(1)}% (${stats.totalUnique.toLocaleString()} of ${stats.boq.target.toLocaleString()} target poles).`);
+        lines.push(`DT delivery: ${stats.dtStats.completed} completed, ${stats.dtStats.nearComplete} near complete, ${stats.dtStats.inProgress} in progress, ${stats.dtStats.notStarted} not started.`);
+        if (stats.dominantPole) lines.push(`${stats.dominantPole.type} is the dominant pole type at ${stats.dominantPole.pct.toFixed(0)}% of captured assets.`);
+        return lines;
     }
 
     function downloadCSV() {
-        if (!filteredData || filteredData.length === 0) {
-            alert("No data available to download.");
-            return;
-        }
-
-        const cleaned = getCleanExportData();
-        const ws = XLSX.utils.json_to_sheet(cleaned);
-        const csv = XLSX.utils.sheet_to_csv(ws);
-        // Prepend a UTF-8 BOM so Excel opens the CSV with correct encoding.
-        const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+        if (!filteredData || filteredData.length === 0) { alert('No data available to download.'); return; }
+        const reg = buildRegisterMatrix();
+        const esc = (v) => {
+            let s = v == null ? '' : String(v);
+            // Neutralise spreadsheet formula/DDE injection: a cell that starts
+            // with = + - @ (or a control char) is prefixed with an apostrophe.
+            if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+            // Quote on comma, quote, CR or LF (a lone CR must not split a record).
+            return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+        };
+        const lines = [reg.headers.map(esc).join(',')];
+        reg.rows.forEach(row => lines.push(row.map(esc).join(',')));
+        // UTF-8 BOM so Excel opens it with correct encoding.
+        const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
+        const a = document.createElement('a');
         a.href = url;
-        a.download = "IDB_Monitor_Data.csv";
+        a.download = `IDB_Pole_Register_${new Date().toISOString().split('T')[0]}.csv`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -6482,134 +6970,199 @@ document.addEventListener('DOMContentLoaded', () => {
                 const { jsPDF } = window.jspdf || {};
                 if (!jsPDF) { alert('PDF library not loaded. Please refresh.'); setPdfBtnLabel('Download PDF Report'); downloadPdfBtn.style.opacity = '1'; downloadPdfBtn.style.pointerEvents = 'auto'; return; }
                 const doc = new jsPDF('p', 'mm', 'a4');
-                const pw = 210, ph = 297, ml = 14, mr = 14, mt = 14;
+                doc.setProperties({
+                    title: 'IDB 2.0 Assets Tagging — Management Report',
+                    subject: 'Asset Enumeration Programme',
+                    author: 'IDB 2.0 Monitoring System',
+                    creator: 'IDB 2.0 Dashboard (Ikeja Electric)'
+                });
+                const pw = 210, ph = 297, ml = 14, mr = 14, mt = 16;
                 const cw = pw - ml - mr;
                 let y = mt;
 
-                // --- Gather data ---
-                const kpiGet = (id) => (document.getElementById(id)?.textContent || '--').trim();
-                const kpis = {
-                    totalBoq: kpiGet('kpi-boq-records'), totalAct: kpiGet('kpi-act-records'), totalProg: kpiGet('kpi-prog-records'), totalRem: kpiGet('kpi-rem-records'),
-                    goodBoq: kpiGet('kpi-boq-concrete'), goodAct: kpiGet('kpi-act-concrete'), goodProg: kpiGet('kpi-prog-concrete'), goodRem: kpiGet('kpi-rem-concrete'),
-                    badBoq: kpiGet('kpi-boq-wooden'), badAct: kpiGet('kpi-act-wooden'), badProg: kpiGet('kpi-prog-wooden'), badRem: kpiGet('kpi-rem-wooden'),
-                    newBoq: kpiGet('kpi-boq-users'), newAct: kpiGet('kpi-act-users'), newProg: kpiGet('kpi-prog-users'), newRem: kpiGet('kpi-rem-users'),
-                    feederBoq: kpiGet('kpi-boq-feeders'), feederAct: kpiGet('kpi-act-feeders'), feederProg: kpiGet('kpi-prog-feeders'),
-                    dtBoq: kpiGet('kpi-boq-dts'), dtAct: kpiGet('kpi-act-dts'), dtProg: kpiGet('kpi-prog-dts'),
-                    activeUsers: kpiGet('topCardActiveUsers'), completionRate: kpiGet('topCardCompletionRate')
-                };
-                const pdfTotal = countUniquePoles(filteredData); // unique SLRN — matches the KPI cards
-                const vendorCounts = uniquePolesByGroupExclusive(filteredData, d => d.Vendor_Name || 'Other');
-                const sortedVendors = Object.entries(vendorCounts).sort((a, b) => b[1] - a[1]);
-                const userCounts = uniquePolesByGroup(filteredData, d => d.User);
-                const sortedUsers = Object.entries(userCounts).sort((a, b) => b[1] - a[1]);
-                const pdfLink = buildingLinkage(filteredData);
-                const pdfLinkPct = pdfLink.pct.toFixed(1);
-                const pdfBuildings = uniqueBuildings(filteredData);
-                const dtData = getEnhancedDTData();
-                const dtRows = dtData.sort((a, b) => b.actualTotal - a.actualTotal).slice(0, 40);
-                // Velocity
-                const pdfDateStrings = filteredData.map(d => d["Date/timestamp"] ? d["Date/timestamp"].split(' ')[0] : '').filter(Boolean);
-                const pdfDates = [...new Set(pdfDateStrings)].sort();
-                const pdfActiveDays = pdfDates.length || 1;
-                const pdfRunRate = (pdfTotal / pdfActiveDays).toFixed(1);
-                const pdfRecent3 = pdfDates.slice(-3);
-                const pdfPrev3 = pdfDates.slice(-6, -3);
-                const pdfRecentCount = filteredData.filter(d => pdfRecent3.includes((d["Date/timestamp"] || '').split(' ')[0])).length;
-                const pdfPrevCount = filteredData.filter(d => pdfPrev3.includes((d["Date/timestamp"] || '').split(' ')[0])).length;
-                const pdfRecentRate = pdfRecent3.length > 0 ? Math.round(pdfRecentCount / pdfRecent3.length) : 0;
-                const pdfPrevRate = pdfPrev3.length > 0 ? Math.round(pdfPrevCount / pdfPrev3.length) : 0;
-                const pdfTrendPct = pdfPrevRate > 0 ? Math.round(((pdfRecentRate - pdfPrevRate) / pdfPrevRate) * 100) : 0;
-                const pdfTrending = pdfTrendPct > 5 ? 'accelerating' : pdfTrendPct < -5 ? 'decelerating' : 'holding steady';
-                const pdfFirstDate = pdfDates[0] || 'N/A';
-                const pdfLastDate = pdfDates[pdfDates.length - 1] || 'N/A';
-                const TARGET_RATE = 50;
-                let pdfVelocityVerdict = pdfRunRate >= TARGET_RATE ? 'on target' : pdfRunRate >= TARGET_RATE * 0.7 ? 'approaching target' : 'below target';
-                // Coverage
-                const pdfFeederCount = new Set(filteredData.map(d => d.Feeder).filter(Boolean)).size;
-                const pdfDtCount = new Set(filteredData.map(d => d["DT Name"]).filter(Boolean)).size;
-                const pdfUtCount = new Set(filteredData.map(d => d.Undertaking).filter(Boolean)).size;
-                const pdfBuCount = new Set(filteredData.map(d => d["Bussines Unit"]).filter(Boolean)).size;
-                const pdfTotalUsers = Object.keys(userCounts).length;
-                // Scope the BOQ target by the active feeder/DT filter so completion matches the KPI cards.
-                let pdfBoqData = boqData;
-                const pdfFeederVals = multiSelects.feederFilter?.getValues();
-                if (pdfFeederVals && pdfFeederVals.length > 0) pdfBoqData = pdfBoqData.filter(d => pdfFeederVals.includes(d["FEEDER NAME"]));
-                const pdfDtVals = multiSelects.dtFilter?.getValues();
-                if (pdfDtVals && pdfDtVals.length > 0) pdfBoqData = pdfBoqData.filter(d => pdfDtVals.includes(d["DT NAME"]));
-                const pdfBoqTotal = pdfBoqData.length > 0 ? pdfBoqData.reduce((s, d) => s + (parseInt(d["POLES Grand Total"]) || 0), 0) : 0;
-                const pdfCompletionPct = pdfBoqTotal > 0 ? Math.min(((pdfTotal / pdfBoqTotal) * 100), 100).toFixed(1) : null;
-                const pdfPoleTypes = uniquePolesByGroup(filteredData, d => (d["Type of Pole"] || 'Unknown').toUpperCase());
-                const pdfDominantPole = Object.entries(pdfPoleTypes).sort((a, b) => b[1] - a[1])[0];
-                const pdfDominantPolePct = pdfDominantPole ? ((pdfDominantPole[1] / pdfTotal) * 100).toFixed(0) : 0;
-                // DT status
-                const pdfDtCompleted = dtData.filter(r => r.boqTotal > 0 && (r.actualTotal / r.boqTotal) >= 1).length;
-                const pdfDtNearComplete = dtData.filter(r => r.boqTotal > 0 && (r.actualTotal / r.boqTotal) >= 0.9 && (r.actualTotal / r.boqTotal) < 1).length;
-                const pdfDtInProgress = dtData.filter(r => r.actualTotal > 0 && (r.boqTotal === 0 || (r.actualTotal / r.boqTotal) < 0.9)).length;
-                const pdfDtNotStarted = dtData.filter(r => r.actualTotal === 0).length;
-                // Vendor officer insights
-                const pdfVendorOfficerInsights = ['ETC Workforce', 'Jesom Technology', 'Ikeja Electric'].map(v => {
-                    const vU = {}; filteredData.filter(d => d.Vendor_Name === v).forEach(d => { if (d.User) vU[d.User] = (vU[d.User] || 0) + 1; });
-                    const s = Object.entries(vU).sort((a, b) => b[1] - a[1]); if (s.length === 0) return null;
-                    return { vendor: v, officers: s.length, best: { name: getDisplayName(s[0][0]), count: s[0][1] }, worst: { name: getDisplayName(s[s.length - 1][0]), count: s[s.length - 1][1] }, avg: Math.round(s.reduce((x, u) => x + u[1], 0) / s.length) };
-                }).filter(Boolean);
-                // Filters
-                const getFilterVal = (id) => { const el = document.getElementById(id); if (!el) return 'All'; if (el.tagName === 'SELECT') return el.options[el.selectedIndex]?.text || 'All'; return el.value || 'All'; };
-                const filters = { vendor: getFilterVal('vendorFilter'), bu: getFilterVal('buFilter'), ut: getFilterVal('utFilter'), user: getFilterVal('userFilter') };
-                const activeFilters = Object.entries(filters).filter(([, v]) => v !== 'All' && v !== 'All Vendors' && v !== 'All Business Units' && v !== 'All Undertakings' && v !== 'All Users');
-                const filterText = activeFilters.length > 0 ? activeFilters.map(([k, v]) => `${k}: ${v}`).join(' | ') : 'No filters applied (All Data)';
-                const now = new Date();
-                const dateStr = now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-                const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+                // One analytics engine feeds the PDF and the Excel workbook, so
+                // every figure here matches the workbook and the on-screen KPIs.
+                const stats = computeReportStats();
+                const { dateStr, timeStr } = stats.generatedAt;
+                const filterText = stats.filterText;
 
-                // === HELPERS ===
-                const checkPage = (need) => { if (y + need > ph - 14) { doc.addPage(); y = mt; } };
-                const setColor = (hex) => { const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16); return [r, g, b]; };
-                const drawLine = (y1) => { doc.setDrawColor(200); doc.line(ml, y1, pw - mr, y1); };
-                // Wrap text into lines that fit maxWidth
+                // ── palette ──────────────────────────────────────────────────
+                const setColor = (hex) => [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
+                const BLUE = setColor('#1e40af'), INK = setColor('#1f2937'), SLATE = setColor('#475569'), MUTE = setColor('#94a3b8');
+                const vendorColor = (name) => name === 'ETC Workforce' ? setColor('#0ea5e9') : name === 'Jesom Technology' ? setColor('#ef4444') : name === 'Ikeja Electric' ? setColor('#eab308') : setColor('#64748b');
+                const PALETTE = ['#0ea5e9', '#b45309', '#10b981', '#8b5cf6', '#64748b', '#ec4899', '#f59e0b'].map(setColor);
+                const STATUS_COLORS = { 'Completed': setColor('#059669'), 'Near Complete': setColor('#f59e0b'), 'In Progress': setColor('#3b82f6'), 'Not Started': setColor('#94a3b8') };
+
+                // ── page/running-header plumbing ─────────────────────────────
+                let currentSection = '';
+                const slimHeader = (label) => {
+                    doc.setFillColor(...BLUE);
+                    doc.rect(0, 0, pw, 11, 'F');
+                    doc.setTextColor(255, 255, 255); doc.setFontSize(9); doc.setFont('helvetica', 'bold');
+                    doc.text('IDB 2.0 ASSETS TAGGING MONITORING REPORT', ml, 7);
+                    doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
+                    doc.text(label || '', pw - mr, 7, { align: 'right' });
+                    y = 17;
+                };
+                const checkPage = (need) => { if (y + need > ph - 14) { doc.addPage(); slimHeader(currentSection); } };
+                const newPage = (section) => { doc.addPage(); currentSection = section; slimHeader(section); };
+
                 const wrapText = (text, maxWidth, fontSize) => {
                     doc.setFontSize(fontSize);
-                    const words = text.split(' ');
+                    const words = String(text).split(' ');
                     const lines = []; let line = '';
                     words.forEach(w => {
                         const test = line ? line + ' ' + w : w;
                         if (doc.getTextWidth(test) > maxWidth) { if (line) lines.push(line); line = w; }
-                        else { line = test; }
+                        else line = test;
                     });
                     if (line) lines.push(line);
                     return lines;
                 };
-                // Draw a simple table
-                const drawTable = (headers, rows, colWidths, opts = {}) => {
-                    const fs = opts.fontSize || 8;
-                    const rh = opts.rowHeight || 6;
-                    const hdrBg = opts.headerBg || [30, 64, 175];
-                    doc.setFontSize(fs);
-                    // Header
-                    checkPage(rh * 3);
-                    doc.setFillColor(...hdrBg);
-                    doc.rect(ml, y, cw, rh + 2, 'F');
-                    doc.setTextColor(255, 255, 255);
-                    doc.setFont('helvetica', 'bold');
-                    let cx = ml + 1;
-                    headers.forEach((h, i) => {
-                        doc.text(h, cx + 1, y + rh - 0.5);
-                        cx += colWidths[i];
+                const sectionTitle = (t) => {
+                    checkPage(12);
+                    doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(...BLUE);
+                    doc.text(t, ml, y); y += 1.6;
+                    doc.setDrawColor(...BLUE); doc.setLineWidth(0.4); doc.line(ml, y, ml + cw, y); y += 5;
+                    doc.setLineWidth(0.2);
+                };
+                const writeParagraph = (text, opts = {}) => {
+                    const lines = wrapText(text, cw - 4, opts.size || 8.5);
+                    doc.setFontSize(opts.size || 8.5); doc.setFont('helvetica', opts.font || 'normal');
+                    doc.setTextColor(...(opts.color || SLATE));
+                    lines.forEach(line => { checkPage(4.6); doc.text(line, ml + 1, y); y += 4.2; });
+                    y += 2;
+                };
+
+                // ── chart primitives (pure vector — print-crisp, theme-free) ──
+                const drawDonut = (cx, cy, rO, rI, segs, centerTop, centerBot) => {
+                    const total = segs.reduce((s, x) => s + x.value, 0) || 1;
+                    let a = -Math.PI / 2;
+                    segs.forEach(seg => {
+                        if (seg.value <= 0) return;
+                        const end = a + (seg.value / total) * 2 * Math.PI;
+                        const steps = Math.max(2, Math.ceil((end - a) / (Math.PI / 36)));
+                        doc.setFillColor(...seg.rgb);
+                        for (let i = 0; i < steps; i++) {
+                            const a0 = a + (end - a) * i / steps, a1 = a + (end - a) * (i + 1) / steps;
+                            doc.triangle(cx, cy, cx + rO * Math.cos(a0), cy + rO * Math.sin(a0), cx + rO * Math.cos(a1), cy + rO * Math.sin(a1), 'F');
+                        }
+                        a = end;
                     });
-                    y += rh + 2;
-                    // Rows
-                    doc.setFont('helvetica', 'normal');
+                    doc.setFillColor(255, 255, 255); doc.circle(cx, cy, rI, 'F');
+                    if (centerTop != null) {
+                        doc.setFontSize(13); doc.setFont('helvetica', 'bold'); doc.setTextColor(...INK);
+                        doc.text(String(centerTop), cx, cy + (centerBot ? 0 : 1.5), { align: 'center' });
+                    }
+                    if (centerBot != null) {
+                        doc.setFontSize(6); doc.setFont('helvetica', 'normal'); doc.setTextColor(...MUTE);
+                        doc.text(String(centerBot), cx, cy + 4.5, { align: 'center' });
+                    }
+                };
+                const drawLegend = (x, y0, items, width) => {
+                    items.forEach((it, i) => {
+                        const ly = y0 + i * 5.6;
+                        doc.setFillColor(...it.rgb); doc.roundedRect(x, ly - 2.8, 3.2, 3.2, 0.5, 0.5, 'F');
+                        doc.setFontSize(7.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(...INK);
+                        doc.text(String(it.label).substring(0, 22), x + 5, ly);
+                        doc.setFont('helvetica', 'bold');
+                        doc.text(it.right, x + width, ly, { align: 'right' });
+                    });
+                };
+                const drawHBars = (x, y0, w, items, opts = {}) => {
+                    const max = Math.max(...items.map(i => i.value), 1);
+                    const barH = opts.barH || 5.5, gap = opts.gap || 3, labelW = opts.labelW || 42, valW = 14;
+                    items.forEach((it, i) => {
+                        const by = y0 + i * (barH + gap);
+                        doc.setFontSize(7.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(...SLATE);
+                        doc.text(String(it.label).substring(0, 24), x, by + barH - 1.4);
+                        const tx = x + labelW, tw = w - labelW - valW;
+                        doc.setFillColor(...setColor('#eef2f7')); doc.roundedRect(tx, by, tw, barH, 0.6, 0.6, 'F');
+                        const bw = Math.max(0.6, tw * (it.value / max));
+                        doc.setFillColor(...it.rgb); doc.roundedRect(tx, by, bw, barH, 0.6, 0.6, 'F');
+                        doc.setFont('helvetica', 'bold'); doc.setTextColor(...INK); doc.setFontSize(7.5);
+                        doc.text(it.valueLabel != null ? String(it.valueLabel) : String(it.value), x + w, by + barH - 1.4, { align: 'right' });
+                    });
+                    return y0 + items.length * (barH + gap);
+                };
+                const drawLineChart = (x, y0, w, h, points, opts = {}) => {
+                    const max = Math.max(...points.map(p => p.value), opts.target || 0, 1);
+                    doc.setDrawColor(...setColor('#cbd5e1')); doc.setLineWidth(0.2);
+                    doc.line(x, y0, x, y0 + h); doc.line(x, y0 + h, x + w, y0 + h);
+                    [0, 0.5, 1].forEach(f => {
+                        const gy = y0 + h - h * f;
+                        doc.setDrawColor(...setColor('#eef2f7')); doc.line(x, gy, x + w, gy);
+                        doc.setFontSize(6); doc.setFont('helvetica', 'normal'); doc.setTextColor(...MUTE);
+                        doc.text(String(Math.round(max * f)), x - 1.5, gy + 1, { align: 'right' });
+                    });
+                    if (opts.target) {
+                        const ty = y0 + h - h * (opts.target / max);
+                        doc.setDrawColor(...setColor('#ef4444')); doc.setLineWidth(0.3); doc.setLineDashPattern([1, 1], 0);
+                        doc.line(x, ty, x + w, ty); doc.setLineDashPattern([], 0);
+                        doc.setFontSize(6); doc.setTextColor(...setColor('#ef4444'));
+                        doc.text(`Target ${opts.target}`, x + w, ty - 1, { align: 'right' });
+                    }
+                    const n = points.length;
+                    const px = (i) => n > 1 ? x + w * i / (n - 1) : x + w / 2;
+                    const py = (v) => y0 + h - h * (v / max);
+                    doc.setDrawColor(...BLUE); doc.setLineWidth(0.6);
+                    for (let i = 0; i < n - 1; i++) doc.line(px(i), py(points[i].value), px(i + 1), py(points[i + 1].value));
+                    const stepLbl = Math.max(1, Math.ceil(n / 8));
+                    points.forEach((p, i) => {
+                        doc.setFillColor(...BLUE); doc.circle(px(i), py(p.value), 0.8, 'F');
+                        if (n <= 10 || i % stepLbl === 0 || i === n - 1) {
+                            doc.setFontSize(5.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(...MUTE);
+                            doc.text(p.label, px(i), y0 + h + 3, { align: 'center' });
+                        }
+                    });
+                };
+                const drawProgress = (x, y0, w, h, pct) => {
+                    doc.setFillColor(...setColor('#e2e8f0')); doc.roundedRect(x, y0, w, h, 1, 1, 'F');
+                    const col = pct >= 90 ? setColor('#059669') : pct >= 60 ? setColor('#3b82f6') : setColor('#d97706');
+                    doc.setFillColor(...col); doc.roundedRect(x, y0, Math.max(1.2, w * Math.min(pct, 100) / 100), h, 1, 1, 'F');
+                };
+
+                // ── general table (per-column alignment + status colouring) ──
+                const drawTable = (headers, rows, colWidths, opts = {}) => {
+                    const fs = opts.fontSize || 8, rh = opts.rowHeight || 6;
+                    const align = opts.align || headers.map(() => 'left');
+                    const statusCol = opts.statusCol;
+                    // The blue column-header band, re-drawn on every page break so
+                    // continuation pages of long tables keep their column labels.
+                    const drawHead = () => {
+                        doc.setFontSize(fs);
+                        doc.setFillColor(...BLUE); doc.rect(ml, y, cw, rh + 2, 'F');
+                        doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold');
+                        let hx = ml + 1;
+                        headers.forEach((h, i) => {
+                            const a = align[i] || 'left';
+                            const tx = a === 'right' ? hx + colWidths[i] - 2 : hx + 1.5;
+                            doc.text(String(h), tx, y + rh - 0.5, { align: a === 'right' ? 'right' : 'left' });
+                            hx += colWidths[i];
+                        });
+                        y += rh + 2;
+                        doc.setFont('helvetica', 'normal');
+                    };
+                    doc.setFontSize(fs);
+                    checkPage(rh * 3);
+                    drawHead();
+                    let cx = ml + 1;
                     rows.forEach((row, ri) => {
-                        checkPage(rh + 1);
-                        if (ri % 2 === 0) { doc.setFillColor(248, 250, 252); doc.rect(ml, y, cw, rh + 1, 'F'); }
-                        doc.setTextColor(30, 30, 30);
+                        if (y + rh + 1 > ph - 14) { doc.addPage(); slimHeader(currentSection); drawHead(); }
+                        if (ri % 2 === 1) { doc.setFillColor(...setColor('#f4f7fb')); doc.rect(ml, y, cw, rh + 1, 'F'); }
                         cx = ml + 1;
                         row.forEach((cell, ci) => {
-                            const txt = String(cell).substring(0, Math.floor(colWidths[ci] / 1.8));
-                            doc.text(txt, cx + 1, y + rh - 0.5);
+                            const a = align[ci] || 'left';
+                            let txt = String(cell);
+                            const maxChars = Math.floor(colWidths[ci] / (fs * 0.19));
+                            if (txt.length > maxChars) txt = txt.substring(0, Math.max(1, maxChars - 1)) + '…';
+                            if (statusCol === ci && STATUS_COLORS[cell]) doc.setTextColor(...STATUS_COLORS[cell]), doc.setFont('helvetica', 'bold');
+                            else doc.setTextColor(...INK), doc.setFont('helvetica', 'normal');
+                            const tx = a === 'right' ? cx + colWidths[ci] - 2 : cx + 1.5;
+                            doc.text(txt, tx, y + rh - 0.5, { align: a === 'right' ? 'right' : 'left' });
                             cx += colWidths[ci];
                         });
-                        // Grid lines
-                        doc.setDrawColor(220); cx = ml;
+                        doc.setDrawColor(...setColor('#e5e7eb')); cx = ml;
                         colWidths.forEach(w => { doc.line(cx, y, cx, y + rh + 1); cx += w; });
                         doc.line(cx, y, cx, y + rh + 1);
                         doc.line(ml, y + rh + 1, ml + cw, y + rh + 1);
@@ -6618,180 +7171,163 @@ document.addEventListener('DOMContentLoaded', () => {
                     y += 3;
                 };
 
-                // === HEADER ===
-                doc.setFillColor(30, 64, 175);
-                doc.rect(0, 0, pw, 22, 'F');
-                doc.setTextColor(255, 255, 255);
-                doc.setFontSize(16); doc.setFont('helvetica', 'bold');
-                doc.text('IDB 2.0 ASSETS TAGGING MONITORING REPORT', pw / 2, 10, { align: 'center' });
+                // ═══════════════════ PAGE 1 — COVER & EXECUTIVE SUMMARY ═══════
+                currentSection = 'Executive Summary';
+                doc.setFillColor(...BLUE); doc.rect(0, 0, pw, 24, 'F');
+                doc.setFillColor(...setColor('#1e3a8a')); doc.rect(0, 24, pw, 1.4, 'F');
+                doc.setTextColor(255, 255, 255); doc.setFontSize(16); doc.setFont('helvetica', 'bold');
+                doc.text('IDB 2.0 ASSETS TAGGING MONITORING REPORT', pw / 2, 11, { align: 'center' });
                 doc.setFontSize(9); doc.setFont('helvetica', 'normal');
-                doc.text(`Generated: ${dateStr} at ${timeStr}  |  ${filterText}`, pw / 2, 17, { align: 'center' });
-                y = 28;
+                doc.text(`Ikeja Electric  ·  Asset Enumeration Programme`, pw / 2, 17, { align: 'center' });
+                doc.setFontSize(7.5);
+                doc.text(`Generated ${dateStr} at ${timeStr}   |   Scope: ${filterText}`.substring(0, 130), pw / 2, 21.5, { align: 'center' });
+                y = 32;
 
-                // === EXECUTIVE INSIGHTS ===
-                doc.setFillColor(248, 250, 252);
-                const insightStartY = y;
-                // We'll draw the background after we know the height
-
-                doc.setFontSize(12); doc.setFont('helvetica', 'bold');
-                doc.setTextColor(...setColor('#1e40af'));
-                doc.text('EXECUTIVE SUMMARY & DASHBOARD INSIGHTS', ml + 3, y + 5);
-                y += 10;
-
-                // Paragraph helper
-                const writeParagraph = (text, indent) => {
-                    const lines = wrapText(text, cw - (indent || 6), 8.5);
-                    doc.setFontSize(8.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(51, 65, 85);
-                    lines.forEach(line => {
-                        checkPage(4.5);
-                        doc.text(line, ml + (indent || 3), y);
-                        y += 4;
+                // Hero KPI cards
+                const heroCards = (cards) => {
+                    const n = cards.length, gap = 3, cwid = (cw - (n - 1) * gap) / n, ch = 21;
+                    cards.forEach((c, i) => {
+                        const bx = ml + i * (cwid + gap);
+                        doc.setFillColor(...c.bg); doc.roundedRect(bx, y, cwid, ch, 1.5, 1.5, 'F');
+                        doc.setDrawColor(...c.accent); doc.setLineWidth(0.5); doc.line(bx, y, bx, y + ch);
+                        doc.setFontSize(6.8); doc.setFont('helvetica', 'bold'); doc.setTextColor(...SLATE);
+                        doc.text(c.title.toUpperCase(), bx + 4, y + 5.5);
+                        doc.setFontSize(15); doc.setFont('helvetica', 'bold'); doc.setTextColor(...c.accent);
+                        doc.text(String(c.value), bx + 4, y + 13.5);
+                        doc.setFontSize(6.3); doc.setFont('helvetica', 'normal'); doc.setTextColor(...MUTE);
+                        doc.text(String(c.sub || ''), bx + 4, y + 18.5);
                     });
-                    y += 2;
+                    y += ch + 5;
                 };
-
-                // Project overview
-                writeParagraph(
-                    `The IDB 2.0 Asset Enumeration project has captured a total of ${pdfTotal.toLocaleString()} pole assets across ${pdfBuCount} Business Unit${pdfBuCount > 1 ? 's' : ''}, covering ${pdfFeederCount} feeders, ${pdfDtCount} distribution transformers, and ${pdfUtCount} undertaking${pdfUtCount > 1 ? 's' : ''}. A workforce of ${pdfTotalUsers} active field officers has been deployed across all vendor teams. Data collection spans from ${pdfFirstDate} to ${pdfLastDate} (${pdfActiveDays} active working days).`
-                );
-
-                // Velocity
-                writeParagraph(
-                    `Project Velocity: The current run rate stands at ${pdfRunRate} poles/day, which is ${pdfVelocityVerdict} against the benchmark of ${TARGET_RATE} poles/day. The recent 3-day trend is ${pdfTrending}${Math.abs(pdfTrendPct) > 0 ? ` (${pdfTrendPct > 0 ? '+' : ''}${pdfTrendPct}% compared to the prior 3-day period)` : ''}.${pdfCompletionPct !== null ? ` Overall BOQ completion stands at ${pdfCompletionPct}% (${pdfTotal.toLocaleString()} of ${pdfBoqTotal.toLocaleString()} target poles).` : ''}`
-                );
-
-                // Data completeness & coverage
-                writeParagraph(
-                    `Data Completeness & Coverage: Of ${pdfLink.total.toLocaleString()} poles captured, ${pdfLinkPct}% (${pdfLink.linked.toLocaleString()}) carry an associated building SLRN, while ${pdfLink.unlinked.toLocaleString()} remain unlinked. ${pdfBuildings.toLocaleString()} buildings are connected across the network.${pdfDominantPole ? ` The dominant pole material is ${pdfDominantPole[0].charAt(0) + pdfDominantPole[0].slice(1).toLowerCase()}, accounting for ${pdfDominantPolePct}% of all captured assets.` : ''} ${pdfLink.pct < 60 ? 'Building-tagging completeness is low; prioritise linking the outstanding poles to their buildings.' : pdfLink.pct < 85 ? 'Building-tagging is progressing; schedule follow-up on unlinked poles.' : 'Building-SLRN linkage is strong across the captured assets.'}`
-                );
-
-                // Vendor performance
-                const vendorText = sortedVendors.map(([name, count]) => `${name} has tagged ${count.toLocaleString()} assets (${((count / (pdfTotal || 1)) * 100).toFixed(1)}%)`).join(', ');
-                writeParagraph(`Vendor Performance: ${vendorText}.${sortedVendors.length > 1 ? ` ${sortedVendors[0][0]} leads the enumeration effort.` : ''}`);
-
-                // Officer performance
-                if (pdfVendorOfficerInsights.length > 0) {
-                    const officerText = pdfVendorOfficerInsights.map(v => `Under ${v.vendor} (${v.officers} officers), top: ${v.best.name} (${v.best.count} poles), lowest: ${v.worst.name} (${v.worst.count} poles, avg: ${v.avg}/officer)`).join('. ');
-                    writeParagraph(`Field Officer Performance: ${officerText}.${sortedUsers.length > 0 ? ` Overall leader: ${getDisplayName(sortedUsers[0][0])} with ${sortedUsers[0][1].toLocaleString()} assets.` : ''}`);
-                }
-
-                // DT progress
-                writeParagraph(`DT Progress Overview: Out of ${dtData.length} distribution transformers tracked: ${pdfDtCompleted} completed, ${pdfDtNearComplete} near completion, ${pdfDtInProgress} in progress, and ${pdfDtNotStarted} not yet started.${pdfDtNotStarted > 0 ? ` The ${pdfDtNotStarted} unstarted DTs should be prioritized in the next deployment cycle.` : ' All tracked DTs have commenced operations.'}`);
-
-                // Recommendations
-                doc.setFontSize(8.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...setColor('#92400e'));
-                checkPage(6);
-                doc.text('KEY RECOMMENDATIONS:', ml + 3, y); y += 4;
-                doc.setFont('helvetica', 'normal'); doc.setTextColor(120, 53, 15);
-                const recs = [];
-                if (parseFloat(pdfRunRate) < TARGET_RATE) recs.push(`Increase daily run rate from ${pdfRunRate} to meet the ${TARGET_RATE} poles/day target.`);
-                else recs.push(`Maintain current run rate of ${pdfRunRate} poles/day which meets the project target.`);
-                if (pdfLink.pct < 80 && pdfLink.unlinked > 0) recs.push(`Improve building-SLRN linkage (currently ${pdfLinkPct}%) by tagging the ${pdfLink.unlinked.toLocaleString()} unlinked poles to their buildings.`);
-                if (pdfDtNotStarted > 0) recs.push(`Mobilize resources for the ${pdfDtNotStarted} unstarted DTs to prevent timeline slippage.`);
-                if (pdfVendorOfficerInsights.some(v => v.worst.count < v.avg * 0.5)) recs.push('Address performance gaps among lower-performing officers via training.');
-                recs.push('Continue daily monitoring and schedule weekly vendor review meetings.');
-                recs.forEach(r => {
-                    const lines = wrapText('  - ' + r, cw - 6, 8);
-                    lines.forEach(l => { checkPage(4); doc.text(l, ml + 5, y); y += 3.8; });
-                });
-                y += 2;
-
-                // Draw insight background
-                const insightH = y - insightStartY;
-                // Draw on page 1 behind text — use rect with light fill
-                const totalPages = doc.internal.getNumberOfPages();
-                for (let p = 1; p <= totalPages; p++) {
-                    doc.setPage(p);
-                    if (p === 1) {
-                        doc.setFillColor(248, 250, 252); doc.setDrawColor(30, 64, 175);
-                        doc.rect(ml - 1, insightStartY - 2, cw + 2, Math.min(insightH + 4, ph - insightStartY), 'D');
-                    }
-                }
-                doc.setPage(totalPages);
-
-                // === KPI TABLE ===
-                y += 4; checkPage(10);
-                doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(...setColor('#1e40af'));
-                doc.text('KEY PERFORMANCE INDICATORS', ml, y); y += 2; drawLine(y); y += 4;
-                const kpiHeaders = ['Metric', 'Expected', 'Actual', 'Progress', 'Remaining'];
-                const kpiColW = [cw * 0.30, cw * 0.17, cw * 0.17, cw * 0.18, cw * 0.18];
-                const kpiRows = [
-                    ['Total Poles', kpis.totalBoq, kpis.totalAct, kpis.totalProg, kpis.totalRem],
-                    ['New Poles (Install)', kpis.newBoq, kpis.newAct, kpis.newProg, kpis.newRem],
-                    ['Feeders', kpis.feederBoq, kpis.feederAct, kpis.feederProg, '-'],
-                    ['DTs', kpis.dtBoq, kpis.dtAct, kpis.dtProg, '-'],
-                    ['Building Linkage', '100%', pdfLinkPct + '%', pdfLinkPct + '%', pdfLink.unlinked.toLocaleString() + ' to tag'],
-                    ['Buildings Connected', '-', pdfBuildings.toLocaleString(), '-', '-']
-                ];
-                drawTable(kpiHeaders, kpiRows, kpiColW);
-
-                // === SUMMARY METRICS ===
-                checkPage(14);
-                const metricBoxW = cw / 4;
-                const metrics = [
-                    { label: 'Active Users', val: kpis.activeUsers, bg: [239, 246, 255], color: '#1e40af' },
-                    { label: 'Completion Rate', val: kpis.completionRate, bg: [240, 253, 244], color: '#059669' },
-                    { label: 'Building Linkage', val: pdfLinkPct + '%', bg: [254, 252, 232], color: '#d97706' },
-                    { label: 'Buildings Linked', val: pdfBuildings.toLocaleString(), bg: [236, 253, 245], color: '#059669' }
-                ];
-                metrics.forEach((m, i) => {
-                    const bx = ml + i * metricBoxW;
-                    doc.setFillColor(...m.bg); doc.roundedRect(bx + 1, y, metricBoxW - 2, 12, 1, 1, 'F');
-                    doc.setFontSize(6.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(100);
-                    doc.text(m.label.toUpperCase(), bx + metricBoxW / 2, y + 4, { align: 'center' });
-                    doc.setFontSize(13); doc.setFont('helvetica', 'bold'); doc.setTextColor(...setColor(m.color));
-                    doc.text(String(m.val), bx + metricBoxW / 2, y + 10.5, { align: 'center' });
-                });
-                y += 17;
-
-                // === VENDOR TABLE ===
-                checkPage(10);
-                doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(...setColor('#1e40af'));
-                doc.text('VENDOR PERFORMANCE BREAKDOWN', ml, y); y += 2; drawLine(y); y += 4;
-                const vHeaders = ['Vendor', 'Assets Tagged', 'Share'];
-                const vColW = [cw * 0.45, cw * 0.30, cw * 0.25];
-                const vRows = sortedVendors.map(([name, count]) => [name, count.toLocaleString(), ((count / (pdfTotal || 1)) * 100).toFixed(1) + '%']);
-                vRows.push(['TOTAL', pdfTotal.toLocaleString(), '100%']);
-                drawTable(vHeaders, vRows, vColW);
-
-                // === TOP OFFICERS ===
-                checkPage(10);
-                doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(...setColor('#1e40af'));
-                doc.text('TOP FIELD OFFICERS (BY ASSETS TAGGED)', ml, y); y += 2; drawLine(y); y += 4;
-                const uHeaders = ['#', 'Officer', 'Assets', 'Share'];
-                const uColW = [cw * 0.08, cw * 0.50, cw * 0.22, cw * 0.20];
-                const uRows = sortedUsers.slice(0, 20).map(([user, count], i) => [
-                    String(i + 1), getDisplayName(user), count.toLocaleString(), ((count / (pdfTotal || 1)) * 100).toFixed(1) + '%'
+                heroCards([
+                    { title: 'Unique Poles', value: stats.totalUnique.toLocaleString(), sub: `${stats.rawCount.toLocaleString()} captures`, bg: setColor('#eff6ff'), accent: BLUE },
+                    { title: 'BOQ Completion', value: stats.boq.completionPct != null ? stats.boq.completionPct.toFixed(1) + '%' : '—', sub: stats.boq.target ? `of ${stats.boq.target.toLocaleString()} target` : 'no target in scope', bg: setColor('#f0fdf4'), accent: setColor('#059669') },
+                    { title: 'Building Linkage', value: stats.linkage.pct.toFixed(1) + '%', sub: `${stats.linkage.unlinked.toLocaleString()} to tag`, bg: setColor('#fffbeb'), accent: setColor('#b45309') },
+                    { title: 'Run Rate', value: Math.round(stats.velocity.runRate) + '/day', sub: stats.velocity.verdict, bg: setColor('#ecfeff'), accent: setColor('#0891b2') }
                 ]);
-                drawTable(uHeaders, uRows, uColW);
 
-                // === DT TABLE ===
+                sectionTitle('EXECUTIVE SUMMARY');
+                writeParagraph(`The IDB 2.0 Asset Enumeration programme has captured ${stats.totalUnique.toLocaleString()} unique pole assets across ${stats.coverage.bus} business unit${stats.coverage.bus > 1 ? 's' : ''}, ${stats.coverage.feeders} feeders, ${stats.coverage.dts} distribution transformers and ${stats.coverage.uts} undertaking${stats.coverage.uts > 1 ? 's' : ''}. A workforce of ${stats.coverage.officers} field officers is active across the vendor teams, with data collection spanning ${stats.velocity.firstDate} to ${stats.velocity.lastDate} (${stats.velocity.activeDays} active working days).`);
+                writeParagraph(`Delivery velocity is ${Math.round(stats.velocity.runRate)} poles/day, ${stats.velocity.verdict} against the ${stats.velocity.targetRate} poles/day benchmark. The recent 3-day trend is ${stats.velocity.trending}${stats.velocity.trendPct ? ` (${stats.velocity.trendPct > 0 ? '+' : ''}${stats.velocity.trendPct}% vs the prior period)` : ''}.${stats.boq.completionPct != null ? ` Overall BOQ completion stands at ${stats.boq.completionPct.toFixed(1)}% (${stats.totalUnique.toLocaleString()} of ${stats.boq.target.toLocaleString()} target poles).` : ''}`);
+                writeParagraph(`Of ${stats.linkage.total.toLocaleString()} poles captured, ${stats.linkage.pct.toFixed(1)}% (${stats.linkage.linked.toLocaleString()}) carry an associated building SLRN while ${stats.linkage.unlinked.toLocaleString()} remain unlinked; ${stats.buildings.toLocaleString()} buildings are connected across the network.${stats.dominantPole ? ` ${stats.dominantPole.type} is the dominant pole type at ${stats.dominantPole.pct.toFixed(0)}% of assets.` : ''} ${stats.linkage.pct < 60 ? 'Building-tagging completeness is low; prioritise linking the outstanding poles.' : stats.linkage.pct < 85 ? 'Building-tagging is progressing; schedule follow-up on unlinked poles.' : 'Building-SLRN linkage is strong across the captured assets.'}`);
+                const vendorSentence = stats.vendors.map(v => `${v.name} ${v.count.toLocaleString()} (${v.pct.toFixed(1)}%)`).join(', ');
+                writeParagraph(`Vendor contribution: ${vendorSentence}.${stats.vendors.length > 1 ? ` ${stats.vendors[0].name} leads the enumeration effort.` : ''}`);
+                writeParagraph(`DT delivery across ${stats.dtStats.total} tracked transformers: ${stats.dtStats.completed} completed, ${stats.dtStats.nearComplete} near completion, ${stats.dtStats.inProgress} in progress and ${stats.dtStats.notStarted} not yet started.${stats.dtStats.notStarted > 0 ? ` The ${stats.dtStats.notStarted} unstarted DTs should be prioritised in the next cycle.` : ' All tracked DTs have commenced.'}`);
+
+                // Recommendations box
                 checkPage(10);
-                doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(...setColor('#1e40af'));
-                const dtTitle = `DT PERFORMANCE ANALYSIS${dtRows.length < dtData.length ? ` (Top ${dtRows.length} of ${dtData.length})` : ''}`;
-                doc.text(dtTitle, ml, y); y += 2; drawLine(y); y += 4;
-                const dHeaders = ['#', 'DT Name', 'Feeder', 'Vendor', 'Exp.', 'Act.', 'Good', 'Bad', 'Prog.', 'Status'];
-                const dColW = [cw*0.04, cw*0.18, cw*0.15, cw*0.12, cw*0.07, cw*0.07, cw*0.07, cw*0.06, cw*0.08, cw*0.16];
-                const dRows = dtRows.map((row, i) => {
-                    const prog = row.boqTotal > 0 ? ((row.actualTotal / row.boqTotal) * 100).toFixed(1) : '0.0';
-                    let status = 'In Progress';
-                    if (row.actualTotal === 0) status = 'Not Started';
-                    else if (parseFloat(prog) >= 100) status = 'Completed';
-                    else if (parseFloat(prog) > 90) status = 'Near Complete';
-                    return [String(i + 1), row.dtName, row.feeder, row.vendor, String(row.boqTotal), String(row.actualTotal), String(row.concrete), String(row.wooden), prog + '%', status];
-                });
-                drawTable(dHeaders, dRows, dColW, { fontSize: 6.5, rowHeight: 5 });
+                doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(...setColor('#92400e'));
+                doc.text('KEY RECOMMENDATIONS', ml, y); y += 4.5;
+                doc.setFont('helvetica', 'normal'); doc.setTextColor(...setColor('#78350f'));
+                const recs = [];
+                if (stats.velocity.runRate < stats.velocity.targetRate) recs.push(`Lift the daily run rate from ${Math.round(stats.velocity.runRate)} toward the ${stats.velocity.targetRate} poles/day target.`);
+                else recs.push(`Sustain the current run rate of ${Math.round(stats.velocity.runRate)} poles/day, which meets the project target.`);
+                if (stats.linkage.pct < 85 && stats.linkage.unlinked > 0) recs.push(`Improve building-SLRN linkage (currently ${stats.linkage.pct.toFixed(1)}%) by tagging the ${stats.linkage.unlinked.toLocaleString()} unlinked poles.`);
+                if (stats.dtStats.notStarted > 0) recs.push(`Mobilise resources for the ${stats.dtStats.notStarted} unstarted DTs to prevent timeline slippage.`);
+                if (stats.vendors.length > 1) { const lag = stats.vendors[stats.vendors.length - 1]; recs.push(`Review capacity for ${lag.name} (${lag.pct.toFixed(1)}% share) to balance vendor throughput.`); }
+                recs.push('Continue daily monitoring and hold weekly vendor review meetings.');
+                recs.forEach(r => { wrapText('•  ' + r, cw - 6, 8).forEach(l => { checkPage(4); doc.setFontSize(8); doc.text(l, ml + 3, y); y += 3.9; }); });
 
-                // === FOOTER on all pages ===
+                // Notes & methodology footnote — states the counting basis.
+                y += 2; checkPage(14);
+                doc.setDrawColor(...setColor('#e5e7eb')); doc.setLineWidth(0.2); doc.line(ml, y, ml + cw, y); y += 3.5;
+                doc.setFontSize(7); doc.setFont('helvetica', 'bold'); doc.setTextColor(...SLATE);
+                doc.text('NOTES & METHODOLOGY', ml, y); y += 3.4;
+                doc.setFont('helvetica', 'normal'); doc.setTextColor(...MUTE);
+                methodologyLines().forEach(n => { wrapText('•  ' + n, cw - 4, 6.5).forEach(l => { checkPage(3.2); doc.setFontSize(6.5); doc.text(l, ml + 2, y); y += 2.9; }); });
+
+                // ═══════════════════ PAGE 2 — VISUAL ANALYTICS ════════════════
+                newPage('Visual Analytics');
+                sectionTitle('VISUAL ANALYTICS');
+
+                // Row A: two donuts (vendor share, pole type)
+                const donutTop = y + 2;
+                const dcx1 = ml + 26, dcx2 = ml + cw / 2 + 26;
+                doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(...INK);
+                doc.text('Vendor Share', ml, y); doc.text('Pole Type Mix', ml + cw / 2, y);
+                const vendSegs = stats.vendors.map(v => ({ value: v.count, rgb: vendorColor(v.name) }));
+                drawDonut(dcx1, donutTop + 20, 18, 10.5, vendSegs, stats.totalUnique.toLocaleString(), 'poles');
+                drawLegend(dcx1 + 24, donutTop + 12, stats.vendors.map(v => ({ label: v.name, rgb: vendorColor(v.name), right: `${v.pct.toFixed(1)}%` })), cw / 2 - 52);
+                const typeSegs = stats.poleTypes.slice(0, 6).map((t, i) => ({ value: t.count, rgb: PALETTE[i % PALETTE.length] }));
+                drawDonut(dcx2, donutTop + 20, 18, 10.5, typeSegs, stats.dominantPole ? stats.dominantPole.pct.toFixed(0) + '%' : '', stats.dominantPole ? stats.dominantPole.type : '');
+                drawLegend(dcx2 + 24, donutTop + 12, stats.poleTypes.slice(0, 6).map((t, i) => ({ label: t.type, rgb: PALETTE[i % PALETTE.length], right: `${t.pct.toFixed(1)}%` })), cw / 2 - 52);
+                y = donutTop + 46;
+
+                // Row B: DT status horizontal bars + BOQ completion gauge
+                checkPage(50);
+                doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(...INK);
+                doc.text('DT Delivery Status', ml, y);
+                doc.text('BOQ Completion', ml + cw / 2, y);
+                const statusItems = [
+                    { label: 'Completed', value: stats.dtStats.completed, rgb: STATUS_COLORS['Completed'] },
+                    { label: 'Near Complete', value: stats.dtStats.nearComplete, rgb: STATUS_COLORS['Near Complete'] },
+                    { label: 'In Progress', value: stats.dtStats.inProgress, rgb: STATUS_COLORS['In Progress'] },
+                    { label: 'Not Started', value: stats.dtStats.notStarted, rgb: STATUS_COLORS['Not Started'] }
+                ];
+                drawHBars(ml, y + 4, cw / 2 - 10, statusItems, { labelW: 26 });
+                // completion gauge on the right
+                const gx = ml + cw / 2, gw = cw / 2;
+                const cpct = stats.boq.completionPct != null ? stats.boq.completionPct : 0;
+                doc.setFontSize(20); doc.setFont('helvetica', 'bold'); doc.setTextColor(...BLUE);
+                doc.text(stats.boq.completionPct != null ? cpct.toFixed(1) + '%' : 'N/A', gx, y + 14);
+                doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.setTextColor(...MUTE);
+                doc.text(stats.boq.target ? `${stats.totalUnique.toLocaleString()} of ${stats.boq.target.toLocaleString()} target poles` : 'No BOQ target in current scope', gx, y + 19);
+                drawProgress(gx, y + 23, gw, 6, cpct);
+                y += 40;
+
+                // Row C: velocity line chart (last 14 active days)
+                checkPage(50);
+                doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(...INK);
+                doc.text('Daily Capture Velocity (last 14 active days)', ml, y); y += 4;
+                const vpts = stats.velocity.dailyCounts.slice(-14).map(d => ({ label: d.date.slice(0, 5), value: d.count }));
+                if (vpts.length >= 2) drawLineChart(ml + 6, y, cw - 8, 34, vpts, { target: stats.velocity.targetRate });
+                else { doc.setFontSize(8); doc.setFont('helvetica', 'italic'); doc.setTextColor(...MUTE); doc.text('Not enough dated captures to plot a trend.', ml + 6, y + 10); }
+                y += 42;
+
+                // ═══════════════════ PAGE 3 — PERFORMANCE TABLES ═════════════
+                newPage('Performance Tables');
+                sectionTitle('KEY PERFORMANCE INDICATORS');
+                drawTable(['Metric', 'Expected', 'Actual', 'Progress', 'Remaining'],
+                    stats.kpiCards,
+                    [cw * 0.30, cw * 0.17, cw * 0.17, cw * 0.18, cw * 0.18],
+                    { align: ['left', 'right', 'right', 'right', 'right'] });
+
+                sectionTitle('VENDOR PERFORMANCE BREAKDOWN');
+                const vRows = stats.vendors.map(v => [v.name, v.count.toLocaleString(), v.pct.toFixed(1) + '%']);
+                vRows.push(['TOTAL', stats.totalUnique.toLocaleString(), '100%']);
+                drawTable(['Vendor', 'Assets Tagged', 'Share'], vRows,
+                    [cw * 0.5, cw * 0.28, cw * 0.22], { align: ['left', 'right', 'right'] });
+
+                sectionTitle('TOP FIELD OFFICERS (BY UNIQUE POLES)');
+                const oRows = stats.officers.slice(0, 20).map((o, i) => [String(i + 1), o.name, o.count.toLocaleString(), o.pct.toFixed(1) + '%']);
+                drawTable(['#', 'Field Officer', 'Assets', 'Share'], oRows,
+                    [cw * 0.08, cw * 0.52, cw * 0.22, cw * 0.18], { align: ['left', 'left', 'right', 'right'] });
+
+                // ═══════════════════ PAGE 4+ — DT PERFORMANCE ════════════════
+                newPage('DT Performance');
+                const dtShown = stats.dtRows.slice(0, 45);
+                sectionTitle(`DT PERFORMANCE ANALYSIS${dtShown.length < stats.dtRows.length ? ` (Top ${dtShown.length} of ${stats.dtRows.length})` : ''}`);
+                const dRows = dtShown.map((r, i) => {
+                    const c = dtClassify(r);
+                    const progLabel = c.progress == null ? '—' : c.progress.toFixed(1) + '%';
+                    return [String(i + 1), r.dtName, r.feeder, r.vendor, String(r.boqTotal), String(r.actualTotal), String(r.concrete), String(r.wooden), progLabel, c.status];
+                });
+                drawTable(['#', 'DT Name', 'Feeder', 'Vendor', 'Exp.', 'Act.', 'Conc.', 'Wood', 'Prog.', 'Status'], dRows,
+                    [cw * 0.04, cw * 0.19, cw * 0.15, cw * 0.11, cw * 0.06, cw * 0.06, cw * 0.06, cw * 0.06, cw * 0.07, cw * 0.14],
+                    { fontSize: 6.5, rowHeight: 5, align: ['left', 'left', 'left', 'left', 'right', 'right', 'right', 'right', 'right', 'left'], statusCol: 9 });
+
+                // ═══════════════════ FOOTER (all pages) ══════════════════════
                 const totalPgs = doc.internal.getNumberOfPages();
                 for (let p = 1; p <= totalPgs; p++) {
                     doc.setPage(p);
-                    doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.setTextColor(150);
-                    doc.text(`IDB 2.0 Monitoring System  |  Page ${p} of ${totalPgs}  |  Report generated ${dateStr}`, pw / 2, ph - 6, { align: 'center' });
+                    doc.setDrawColor(...setColor('#e5e7eb')); doc.setLineWidth(0.2); doc.line(ml, ph - 9, pw - mr, ph - 9);
+                    doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.setTextColor(...MUTE);
+                    doc.text('IDB 2.0 Monitoring System  ·  Ikeja Electric', ml, ph - 5);
+                    doc.text(`Page ${p} of ${totalPgs}`, pw / 2, ph - 5, { align: 'center' });
+                    doc.text(`Generated ${dateStr}`, pw - mr, ph - 5, { align: 'right' });
                 }
 
-                // === SAVE ===
-                doc.save(`IDB_Dashboard_Report_${new Date().toISOString().split('T')[0]}.pdf`);
+                doc.save(`IDB_Assets_Report_${new Date().toISOString().split('T')[0]}.pdf`);
                 setPdfBtnLabel('Download PDF Report');
                 downloadPdfBtn.style.opacity = '1';
                 downloadPdfBtn.style.pointerEvents = 'auto';

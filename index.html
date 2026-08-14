@@ -29,7 +29,14 @@
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
     <!-- Plotly.js -->
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
-    <!-- SheetJS (xlsx) -->
+    <!-- SheetJS with cell styling (xlsx-js-style) — used for the polished
+         Excel export. Loaded FIRST so we can capture it as window.XLSXStyle,
+         then the plain community build overwrites window.XLSX for the upload
+         parser (which never needs styles). If the styled CDN fails, the export
+         gracefully falls back to the plain build (unstyled but valid). -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+    <script>try { window.XLSXStyle = window.XLSX; } catch (e) {}</script>
+    <!-- SheetJS (xlsx) — plain community build for the template upload parser -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- Highcharts -->
     <script src="https://cdn.jsdelivr.net/npm/highcharts@11/highcharts.js"></script>
@@ -988,7 +995,7 @@
     <script src="convex-client.js?v=20260710a"></script>
     <script src="auth-footprint.js?v=20260705a"></script>
     <script src="dashboard-auth.js?v=20260707b"></script>
-    <script src="script.js?v=20260814h"></script>
+    <script src="script.js?v=20260814j"></script>
 </body>
 
 </html>
