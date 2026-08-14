@@ -4504,10 +4504,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 { key: 'user',   label: 'User',          filterId: 'userFilter' }
             ];
 
-            // Map each filter to the underlying data field so we can cascade:
-            // BU → UT → Feeder → DT → Vendor → User. Each group's options
-            // are computed from globalData filtered by all upstream selections,
-            // giving true cascading dropdowns.
+            // Map each map-panel filter to its underlying data field.
             const fieldFor = {
                 buFilter:     'Bussines Unit',
                 utFilter:     'Undertaking',
@@ -4516,41 +4513,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 vendorFilter: 'Vendor_Name',
                 userFilter:   'User'
             };
-            const cascadeOrder = ['buFilter', 'utFilter', 'feederFilter', 'dtFilter', 'vendorFilter', 'userFilter'];
 
-            const applies = (set, v) => !set || set.size === 0 || set.has(v);
-
-            // Returns the sorted unique values for `targetFilterId`, filtered by
-            // all upstream selections in the cascade.
+            // Symmetric faceting: a group's options are the values that co-occur
+            // with EVERY other active filter (sidebar or map panel, plus the Asset
+            // SLRN lookup), reusing the shared dataMatchingFacetsExcept — so the map
+            // panel narrows the same way the sidebar does, not just by "upstream"
+            // filters in a fixed order.
             const optionsForFilter = (targetFilterId) => {
-                const upstreamFilters = cascadeOrder.slice(0, cascadeOrder.indexOf(targetFilterId));
+                const fld = fieldFor[targetFilterId];
                 const out = new Set();
-                (globalData || []).forEach(d => {
-                    for (const upId of upstreamFilters) {
-                        const ms = multiSelects[upId];
-                        const fld = fieldFor[upId];
-                        if (!applies(ms?.selectedValues, d[fld])) return;
-                    }
-                    const v = d[fieldFor[targetFilterId]];
+                dataMatchingFacetsExcept(targetFilterId).forEach(d => {
+                    const v = d[fld];
                     if (v !== undefined && v !== null && v !== '') out.add(String(v));
                 });
                 return [...out].sort((a, b) => a.localeCompare(b));
-            };
-
-            // When upstream changes, drop any downstream selectedValues that
-            // are no longer valid under the new cascade.
-            const pruneDownstream = (changedFilterId) => {
-                const idx = cascadeOrder.indexOf(changedFilterId);
-                for (let i = idx + 1; i < cascadeOrder.length; i++) {
-                    const ms = multiSelects[cascadeOrder[i]];
-                    if (!ms) continue;
-                    const validSet = new Set(optionsForFilter(cascadeOrder[i]));
-                    let changed = false;
-                    [...ms.selectedValues].forEach(v => {
-                        if (!validSet.has(v)) { ms.selectedValues.delete(v); changed = true; }
-                    });
-                    if (changed && typeof ms.refresh === 'function') ms.refresh();
-                }
             };
 
             const buildPanel = () => {
@@ -4584,13 +4560,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (!ms) return;
 
                     const syncAfterChange = () => {
-                        pruneDownstream(filterId);
+                        // Refresh this filter's own sidebar widget (its trigger label
+                        // + checkboxes), then fire onChange -> the shared faceted
+                        // cascade, which rebuilds/prunes every OTHER filter
+                        // symmetrically. Finally re-render this panel to match.
                         if (typeof ms.refresh === 'function') ms.refresh();
                         if (typeof ms.onChange === 'function') ms.onChange();
                         buildPanel();
                         // When the user narrows by BU, UT, Feeder, or DT,
-                        // zoom the map to the coverage area of the resulting
-                        // cascaded selection.
+                        // zoom the map to the coverage area of the resulting selection.
                         if (['buFilter', 'utFilter', 'feederFilter', 'dtFilter'].includes(filterId)) {
                             zoomToCurrentSelection(filterId);
                         }
