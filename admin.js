@@ -469,6 +469,43 @@
     $("auditBody").innerHTML = html;
   }
 
+  /* ---------- theme toggle (dark ↔ light) ---------- */
+  // The theme is already applied in admin.html's <head> (no flash); here we
+  // sync the button UI, handle clicks and persist to the shared 'idb-theme'
+  // key so the choice carries across the dashboard and admin console.
+  function applyTheme(mode) {
+    var theme = mode === "light" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", theme);
+    var btn = $("themeToggle");
+    if (btn) {
+      var icon = btn.querySelector(".theme-toggle-icon");
+      var label = btn.querySelector(".theme-toggle-label");
+      if (icon) icon.textContent = theme === "light" ? "☀️" : "🌙";
+      if (label) label.textContent = theme === "light" ? "Light" : "Dark";
+      btn.setAttribute("aria-pressed", theme === "light" ? "true" : "false");
+    }
+  }
+  (function initThemeToggle() {
+    var saved = "dark";
+    try {
+      saved = localStorage.getItem("idb-theme") === "light" ? "light" : "dark";
+    } catch (e) {}
+    applyTheme(saved); // sync the button UI with the already-applied theme
+    var btn = $("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next =
+          document.documentElement.getAttribute("data-theme") === "light"
+            ? "dark"
+            : "light";
+        applyTheme(next);
+        try {
+          localStorage.setItem("idb-theme", next);
+        } catch (e) {}
+      });
+    }
+  })();
+
   /* ---------- wiring ---------- */
   document.addEventListener("click", function (e) {
     var btn = e.target.closest("[data-act]");

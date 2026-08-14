@@ -102,6 +102,43 @@
     }
   }
 
+  /* ---- theme toggle (dark ↔ light) ---- */
+  // The theme is already applied in login.html's <head> (no flash); here we
+  // sync the button UI, handle clicks and persist to the shared 'idb-theme'
+  // key so the choice carries across the login, dashboard and admin pages.
+  function applyTheme(mode) {
+    var theme = mode === "light" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", theme);
+    var btn = $("themeToggle");
+    if (btn) {
+      var icon = btn.querySelector(".theme-toggle-icon");
+      var label = btn.querySelector(".theme-toggle-label");
+      if (icon) icon.textContent = theme === "light" ? "☀️" : "🌙";
+      if (label) label.textContent = theme === "light" ? "Light" : "Dark";
+      btn.setAttribute("aria-pressed", theme === "light" ? "true" : "false");
+    }
+  }
+  (function initThemeToggle() {
+    var saved = "dark";
+    try {
+      saved = localStorage.getItem("idb-theme") === "light" ? "light" : "dark";
+    } catch (e) {}
+    applyTheme(saved); // sync the button UI with the already-applied theme
+    var btn = $("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next =
+          document.documentElement.getAttribute("data-theme") === "light"
+            ? "dark"
+            : "light";
+        applyTheme(next);
+        try {
+          localStorage.setItem("idb-theme", next);
+        } catch (e) {}
+      });
+    }
+  })();
+
   // On load: if there is already a valid session, show the session panel.
   if (IDB && IDB.auth) {
     IDB.auth.me().then(function (res) {

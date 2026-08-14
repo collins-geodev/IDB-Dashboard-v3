@@ -6,6 +6,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>About · IDB Assets Dashboard</title>
     <meta name="description" content="Ownership and purpose of the IDB Assets Dashboard — a private, invitation-only internal tool for authorized Ikeja Electric IDB team staff.">
+    <!-- Apply the saved colour theme before any CSS paints, so there is no
+         flash of the wrong theme on load. Shares the dashboard's 'idb-theme'
+         key, so the choice carries across every page. Defaults to dark. -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('idb-theme');
+          document.documentElement.setAttribute('data-theme', t === 'light' ? 'light' : 'dark');
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
     <link rel="icon" type="image/jpeg" href="images/favicon.jpg?v=2">
     <style>
         :root {
@@ -15,6 +28,20 @@
             --ink: #e7edf4;
             --muted: #9fb0c0;
             --accent: #38bdf8;
+            --p-ink: #d4deea;
+        }
+        /* Light theme — activated by <html data-theme="light"> (shared
+           'idb-theme' key). Only the local vars flip; the one hardcoded
+           paragraph colour reads via --p-ink so it flips too. Accent is
+           darkened for readable contrast on white. */
+        :root[data-theme="light"] {
+            --bg: #f4f7fa;
+            --card: #ffffff;
+            --border: #ccd7e3;
+            --ink: #10192d;
+            --muted: #47566b;
+            --accent: #0369a1;
+            --p-ink: #2b3a4f;
         }
         * { box-sizing: border-box; }
         body {
@@ -39,13 +66,38 @@
         }
         .card h2 { font-size: 1rem; margin: 1.3rem 0 .3rem; color: var(--accent); }
         .card h2:first-child { margin-top: 0; }
-        .card p { margin: 0; color: #d4deea; }
+        .card p { margin: 0; color: var(--p-ink); }
         a { color: var(--accent); }
         .foot { margin-top: 1.4rem; font-size: .95rem; }
+        .theme-toggle {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 10;
+            display: inline-flex;
+            align-items: center;
+            gap: .4rem;
+            padding: .4rem .7rem;
+            background: var(--card);
+            color: var(--ink);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: .8rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: border-color .15s ease;
+        }
+        .theme-toggle:hover { border-color: var(--accent); }
     </style>
 </head>
 
 <body>
+    <button class="theme-toggle" id="themeToggle" type="button" aria-pressed="false"
+        title="Toggle light / dark theme">
+        <span class="theme-toggle-icon" aria-hidden="true">🌙</span>
+        <span class="theme-toggle-label">Dark</span>
+    </button>
     <main class="about">
         <img src="images/ie-logo.png?v=20260405c" alt="Ikeja Electric logo" class="logo"
             onerror="this.style.display='none'">
@@ -74,6 +126,37 @@
 
         <p class="foot"><a href="login.html">← Back to sign in</a></p>
     </main>
+
+    <!-- Theme toggle: the theme is already applied in <head> (no flash); here
+         we sync the button UI, handle clicks and persist to the shared
+         'idb-theme' key so the choice carries across every page. -->
+    <script>
+      (function () {
+        function apply(mode) {
+          var theme = mode === 'light' ? 'light' : 'dark';
+          document.documentElement.setAttribute('data-theme', theme);
+          var btn = document.getElementById('themeToggle');
+          if (btn) {
+            var icon = btn.querySelector('.theme-toggle-icon');
+            var label = btn.querySelector('.theme-toggle-label');
+            if (icon) icon.textContent = theme === 'light' ? '☀️' : '🌙';
+            if (label) label.textContent = theme === 'light' ? 'Light' : 'Dark';
+            btn.setAttribute('aria-pressed', theme === 'light' ? 'true' : 'false');
+          }
+        }
+        var saved = 'dark';
+        try { saved = localStorage.getItem('idb-theme') === 'light' ? 'light' : 'dark'; } catch (e) {}
+        apply(saved);
+        var btn = document.getElementById('themeToggle');
+        if (btn) {
+          btn.addEventListener('click', function () {
+            var next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+            apply(next);
+            try { localStorage.setItem('idb-theme', next); } catch (e) {}
+          });
+        }
+      })();
+    </script>
 </body>
 
 </html>

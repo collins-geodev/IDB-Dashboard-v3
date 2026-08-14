@@ -26,6 +26,69 @@
   --red: hsl(var(--destructive));
 }
 
+/* =====================================================================
+ * LIGHT THEME  —  activated by <html data-theme="light">. Mirrors the
+ * dashboard's approach (see style.css): only the raw HSL design tokens are
+ * overridden, and every derived --bg/--card-bg/--txt/… mapping resolves those
+ * lazily, so it flips automatically. The handful of components below hardcode a
+ * light-on-dark colour, so they are remapped to stay legible on light surfaces.
+ * The dark theme (default) is untouched. Both the admin console and the login
+ * screen opt in (head script + toggle, shared 'idb-theme' key); any page that
+ * doesn't stays dark. Token values match the dashboard's light palette.
+ * ===================================================================== */
+:root[data-theme="light"] {
+  --background: 210 40% 97%;
+  --foreground: 222 47% 12%;
+  --card: 0 0% 100%;
+  --primary: 199 89% 45%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 210 40% 92%;
+  --muted: 210 30% 92%;
+  --muted-foreground: 215 20% 35%;
+  --accent: 162 72% 36%;
+  --destructive: 0 78% 52%;
+  --border: 214 30% 84%;
+}
+
+/* Dark-island remaps: buttons, badges and messages that hardcode a pale
+   light-on-dark text colour get a darker, higher-contrast tone on light. */
+:root[data-theme="light"] .btn-danger,
+:root[data-theme="light"] .msg.error,
+:root[data-theme="light"] .badge.status-inactive {
+  color: #b91c1c;
+}
+:root[data-theme="light"] .btn-warn {
+  color: #b45309;
+}
+:root[data-theme="light"] .btn-success,
+:root[data-theme="light"] .msg.ok,
+:root[data-theme="light"] .badge.evt:not(.resume),
+:root[data-theme="light"] .badge.status-active {
+  color: #047857;
+}
+:root[data-theme="light"] .badge.admin,
+:root[data-theme="light"] .msg.info {
+  color: #1d4ed8;
+}
+
+/* Heavy near-black drop shadows read as smudges on a light ground — soften. */
+:root[data-theme="light"] .auth-card {
+  box-shadow: 0 20px 45px -20px rgba(15, 23, 42, 0.25);
+}
+:root[data-theme="light"] .toast {
+  box-shadow: 0 18px 40px -12px rgba(15, 23, 42, 0.22);
+}
+
+/* Login-screen theme toggle: pinned to the top-right corner, out of the card's
+   flow. Only the login page adds .theme-toggle-fixed — the admin header toggle
+   (same #themeToggle id, no this class) keeps its in-flow header placement. */
+.theme-toggle-fixed {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 10;
+}
+
 * {
   box-sizing: border-box;
 }
