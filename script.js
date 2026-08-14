@@ -5251,19 +5251,22 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!dtHighlightLayer) return;
         dtHighlightLayer.clearLayers();
 
-        // Collect the DT's poles from the filtered set (dedupe by SLRN so a
-        // pole captured on several rows lights up once), tallying by vendor.
+        // Collect the DT's poles from the filtered set, deduped by SLRN and
+        // gated on valid coordinates — EXACTLY how the DT badge counts them —
+        // so the legend total can never diverge from the badge you clicked.
         const seen = new Set();
         const counts = { blue: 0, black: 0, white: 0, other: 0 };
         let total = 0;
+        const HL_LIMIT = 2000; // safety cap on animated markers (never hit in practice)
         (filteredData || []).forEach(d => {
+            if (total >= HL_LIMIT) return;
             if (String(d['DT Name'] || '').trim() !== dtName) return;
             const lat = parseFloat(d.Latitude), lon = parseFloat(d.Longitude);
             if (isNaN(lat) || isNaN(lon)) return;
             const pid = poleSlrn(d);
-            const dedupeKey = pid || (lat + ',' + lon);
-            if (seen.has(dedupeKey)) return;
-            seen.add(dedupeKey);
+            if (!pid) return;               // badge skips SLRN-less rows; match it
+            if (seen.has(pid)) return;
+            seen.add(pid);
             const info = VENDOR_HL[d.Vendor_Name];
             const key = info ? info.key : 'other';
             counts[key]++; total++;
@@ -5420,7 +5423,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     weight: 1,
                     opacity: 1,
                     fillOpacity: 0.85,
-                    className: 'data-point-marker' // enables CSS pulse animation
+                    className: 'data-point-marker', // enables CSS pulse animation
+                    bubblingMouseEvents: false     // a pole click must not reach the map 'click' (which clears a DT highlight)
                 });
 
                 const captureDate = d["Date/timestamp"] ? String(d["Date/timestamp"]).split(' ')[0] : "N/A";

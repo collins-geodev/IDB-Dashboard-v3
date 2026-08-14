@@ -3455,24 +3455,29 @@ header.exec-header img.exec-header-logo,
    ETC = blue, Jesom = black, Ikeja = white. A contrasting outline keeps
    black and white legible on both the light and dark basemaps.
    ══════════════════════════════════════════════════════════════════════ */
-.dt-hl-wrapper { background: transparent !important; border: none !important; }
+/* pointer-events:none lets a click on a glowing pole pass THROUGH to the
+   underlying pole marker (opening its popup) instead of being swallowed by
+   the overlay and bubbling to the map (which would clear the highlight). */
+.dt-hl-wrapper { background: transparent !important; border: none !important; pointer-events: none !important; }
 .dt-hl { position: relative; display: block; width: 22px; height: 22px; }
+/* The opaque core (14px) never shrinks below the ~14px base pole dot even at
+   the pulse trough, so the base marker's colour never bleeds around it. */
 .dt-hl-core {
     position: absolute; top: 50%; left: 50%;
-    width: 11px; height: 11px; border-radius: 50%;
+    width: 14px; height: 14px; border-radius: 50%;
     transform: translate(-50%, -50%);
     animation: dtHlPulse 1.15s ease-in-out infinite;
 }
 .dt-hl-ring {
     position: absolute; top: 50%; left: 50%;
-    width: 12px; height: 12px; border-radius: 50%;
+    width: 14px; height: 14px; border-radius: 50%;
     transform: translate(-50%, -50%);
     animation: dtHlRing 1.5s ease-out infinite;
     pointer-events: none;
 }
 @keyframes dtHlPulse {
-    0%, 100% { transform: translate(-50%, -50%) scale(0.68); }
-    50%      { transform: translate(-50%, -50%) scale(1.4); }
+    0%, 100% { transform: translate(-50%, -50%) scale(0.9); }
+    50%      { transform: translate(-50%, -50%) scale(1.45); }
 }
 @keyframes dtHlRing {
     0%   { transform: translate(-50%, -50%) scale(0.55); opacity: 0.9; }
