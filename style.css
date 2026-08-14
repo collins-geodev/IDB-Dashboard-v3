@@ -3343,12 +3343,119 @@ header.exec-header img.exec-header-logo,
 }
 .tcn-tooltip::before { border-top-color: rgba(251, 191, 36, 0.98) !important; }
 
+/* ══════════════════════════════════════════════════════════════════════
+   DT — Distribution Transformer markers (derived centroids)
+   Emerald rounded-square badges with a lightning glyph + an expanding
+   ring, deliberately distinct from the violet ISS diamonds, gold TCN
+   hexagons and the vendor-coloured pole dots. Each carries a corner count
+   badge (tagged poles) and reveals its DT name on hover via tooltip.
+   ══════════════════════════════════════════════════════════════════════ */
+.dt-marker-wrapper {
+    background: transparent !important;
+    border: none !important;
+}
+.dt-marker {
+    position: relative;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.dt-marker-core {
+    position: relative;
+    width: 21px;
+    height: 21px;
+    border-radius: 7px;
+    background: radial-gradient(circle at 32% 28%, #6ee7b7 0%, #10b981 48%, #047857 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1.5px solid rgba(255, 255, 255, 0.9);
+    box-shadow: 0 0 9px rgba(16, 185, 129, 0.8), 0 2px 5px rgba(0, 0, 0, 0.5);
+    transform: rotate(45deg);            /* rounded-square reads as a diamond */
+    animation: dtCorePulse 2.2s ease-in-out infinite;
+    cursor: pointer;
+    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.dt-marker-core svg {
+    transform: rotate(-45deg);           /* keep the bolt glyph upright */
+}
+.dt-marker-ring {
+    position: absolute;
+    width: 21px;
+    height: 21px;
+    border-radius: 8px;
+    border: 2px solid rgba(16, 185, 129, 0.65);
+    transform: rotate(45deg);
+    animation: dtRing 2.2s ease-out infinite;
+    pointer-events: none;
+}
+.dt-marker-badge {
+    position: absolute;
+    top: -7px;
+    right: -10px;
+    min-width: 15px;
+    height: 15px;
+    padding: 0 3px;
+    box-sizing: border-box;
+    border-radius: 8px;
+    background: #052e2b;
+    color: #6ee7b7;
+    font-family: 'Inter', 'Segoe UI', sans-serif;
+    font-size: 9px;
+    font-weight: 800;
+    line-height: 13px;
+    text-align: center;
+    border: 1px solid rgba(110, 231, 183, 0.9);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+    pointer-events: none;
+}
+.dt-marker-wrapper:hover .dt-marker-core {
+    transform: rotate(45deg) scale(1.22);
+}
+@keyframes dtCorePulse {
+    0%, 100% { box-shadow: 0 0 8px rgba(16, 185, 129, 0.7), 0 2px 5px rgba(0, 0, 0, 0.5); }
+    50%      { box-shadow: 0 0 18px rgba(16, 185, 129, 1), 0 2px 5px rgba(0, 0, 0, 0.5); }
+}
+@keyframes dtRing {
+    0%   { transform: rotate(45deg) scale(0.65); opacity: 0.85; }
+    100% { transform: rotate(45deg) scale(2); opacity: 0; }
+}
+.dt-tooltip {
+    background: linear-gradient(180deg, rgba(16, 185, 129, 0.98), rgba(4, 120, 87, 0.98)) !important;
+    color: #ecfdf5 !important;
+    border: 1.5px solid rgba(255, 255, 255, 0.75) !important;
+    border-radius: 5px !important;
+    padding: 4px 9px !important;
+    font-size: 10.5px !important;
+    font-weight: 800 !important;
+    letter-spacing: 0.3px !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6), 0 0 12px rgba(16, 185, 129, 0.5) !important;
+}
+.dt-tooltip::before { border-top-color: rgba(16, 185, 129, 0.98) !important; }
+
+/* Emerald diamond swatch in the layer-control "Distribution Transformers" row */
+.dt-legend-swatch {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    background: radial-gradient(circle at 32% 28%, #6ee7b7 0%, #10b981 48%, #047857 100%);
+    border: 1px solid rgba(255, 255, 255, 0.85);
+    transform: rotate(45deg);
+    margin: 0 8px 0 3px;
+    vertical-align: middle;
+}
+
 /* Respect reduced motion for these layers too */
 @media (prefers-reduced-motion: reduce) {
     .ht-feeder-line,
     .iss-marker,
     .tcn-marker,
-    .tcn-marker::before {
+    .tcn-marker::before,
+    .dt-marker-core,
+    .dt-marker-ring {
         animation: none !important;
     }
 }

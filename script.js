@@ -40,6 +40,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let htFeederLayer = null;       // Shomolu HT feeder polylines
     let issLayer = null;            // Injection Substation point markers
     let tcnLayer = null;            // TCN transmission station markers
+    let dtLayer = null;             // Distribution Transformer markers (derived centroids)
+    let mapLayersControl = null;    // base/overlay layer switcher (for adding DT overlay)
     let boundariesLoaded = false;   // one-time load guard
     let utBoundsCache = null;       // UT-only bounds (fallback when no data)
     let mapInitiallyFitted = false; // first-render fit guard
@@ -4754,7 +4756,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Default the basemap to match the dashboard theme (dark by default).
             const wantLight = document.documentElement.getAttribute('data-theme') === 'light';
             (wantLight ? lightLayer : darkLayer).addTo(map);
-            L.control.layers(
+            mapLayersControl = L.control.layers(
                 { 'Dark': darkLayer, 'Light': lightLayer, 'Satellite': satLayer, 'Hybrid': hybridLayer },
                 null,
                 { position: 'topright', collapsed: false }
@@ -4774,6 +4776,13 @@ document.addEventListener('DOMContentLoaded', () => {
             issLayer = L.layerGroup().addTo(map);
             tcnLayer = L.layerGroup().addTo(map);
             markersLayer = L.layerGroup().addTo(map);
+            dtLayer = L.layerGroup().addTo(map);   // DT centroids sit above pole dots
+
+            // Expose the DT layer as a toggleable overlay so users can hide the
+            // transformer badges when they want an unobstructed pole view.
+            if (mapLayersControl) {
+                mapLayersControl.addOverlay(dtLayer, '<span class="dt-legend-swatch"></span>Distribution Transformers');
+            }
 
             // Hide UT text labels at far-out zooms to avoid clutter
             const mapEl = document.getElementById('map');
@@ -4849,6 +4858,105 @@ document.addEventListener('DOMContentLoaded', () => {
                 count++;
             }
         });
+
+        // ═══════════════════════════════════════════════════════════════
+        // Distribution Transformers — derived-centroid animated markers
+        // A DT has no coordinate of its own in the field data, so each DT's
+        // map position is the centroid (mean lat/long) of its tagged poles in
+        // the *current* filtered set. Because they are computed from
+        // filteredData, the DT badges appear, disappear and drift in step with
+        // every filter change — no separate wiring needed.
+        // ═══════════════════════════════════════════════════════════════
+        if (dtLayer) {
+            dtLayer.clearLayers();
+            const dtGroups = new Map();
+            filteredData.forEach(d => {
+                const name = String(d["DT Name"] || '').trim();
+                if (!name) return;
+                const lat = parseFloat(d.Latitude);
+                const lon = parseFloat(d.Longitude);
+                if (isNaN(lat) || isNaN(lon)) return;
+                let g = dtGroups.get(name);
+                if (!g) {
+                    g = {
+                        name,
+                        dtNo: String(d["DT Number"] || d["DT No"] || d["DTNumber"] || '').trim(),
+                        feeder: String(d["Feeder"] || '').trim(),
+                        undertaking: String(d["Undertaking"] || '').trim(),
+                        bu: String(d["Bussines Unit"] || '').trim(),
+                        sumLat: 0, sumLon: 0, n: 0, poles: new Set()
+                    };
+                    dtGroups.set(name, g);
+                }
+                g.sumLat += lat;
+                g.sumLon += lon;
+                g.n++;
+                const pid = poleSlrn(d);
+                if (pid) g.poles.add(pid);
+            });
+
+            // Draw the biggest DTs first, and cap the count so dense filters
+            // don't paper the map with hundreds of overlapping badges.
+            const DT_LIMIT = 600;
+            const dtList = Array.from(dtGroups.values())
+                .sort((a, b) => (b.poles.size || b.n) - (a.poles.size || a.n));
+            const dtShown = Math.min(dtList.length, DT_LIMIT);
+
+            const escHtml = (s) => String(s).replace(/[&<>"]/g, c => (
+                { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]
+            ));
+
+            for (let i = 0; i < dtShown; i++) {
+                const g = dtList[i];
+                const clat = g.sumLat / g.n;
+                const clon = g.sumLon / g.n;
+                const poleCount = g.poles.size || g.n;
+                const badge = poleCount > 999 ? '999+' : String(poleCount);
+
+                const marker = L.marker([clat, clon], {
+                    icon: L.divIcon({
+                        className: 'dt-marker-wrapper',
+                        html: `
+                            <div class="dt-marker">
+                                <span class="dt-marker-ring"></span>
+                                <span class="dt-marker-core">
+                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="#052e2b" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                                </span>
+                                <span class="dt-marker-badge">${badge}</span>
+                            </div>
+                        `,
+                        iconSize: [30, 30],
+                        iconAnchor: [15, 15]
+                    }),
+                    zIndexOffset: 300
+                });
+
+                marker.bindTooltip(escHtml(g.name), { direction: 'top', offset: [0, -14], className: 'dt-tooltip' });
+
+                const row = (lbl, v) => v ? `<div class="asset-popup-row"><div class="asset-popup-label">${lbl}</div><div class="asset-popup-value">${escHtml(v)}</div></div>` : '';
+                marker.bindPopup(`
+                    <div class="asset-popup">
+                        <div class="asset-popup-title">${escHtml(g.name)}</div>
+                        <div class="asset-popup-subtitle">DISTRIBUTION TRANSFORMER</div>
+                        <div class="asset-popup-divider"></div>
+                        <div class="asset-popup-table">
+                            ${row('DT Number', g.dtNo)}
+                            ${row('Feeder', g.feeder)}
+                            ${row('Undertaking', g.undertaking)}
+                            ${row('Business Unit', g.bu)}
+                            <div class="asset-popup-row"><div class="asset-popup-label">Tagged Poles</div><div class="asset-popup-value">${poleCount.toLocaleString()}</div></div>
+                            <div class="asset-popup-row asset-popup-row-last"><div class="asset-popup-label">Centroid</div><div class="asset-popup-value">${clat.toFixed(5)}, ${clon.toFixed(5)}</div></div>
+                        </div>
+                    </div>
+                `, { className: 'asset-popup-wrapper', maxWidth: 320, minWidth: 250 });
+
+                dtLayer.addLayer(marker);
+            }
+
+            if (dtList.length > DT_LIMIT) {
+                console.info(`Map: showing top ${DT_LIMIT} of ${dtList.length} DTs (by pole count) to limit clutter.`);
+            }
+        }
 
         // Refresh search suggestions whenever data is re-rendered
         if (typeof window._refreshMapSearchSuggestions === 'function') {
