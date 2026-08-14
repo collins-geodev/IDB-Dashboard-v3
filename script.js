@@ -5515,22 +5515,26 @@ document.addEventListener('DOMContentLoaded', () => {
                     bubblingMouseEvents: false     // a pole click must not reach the map 'click' (which clears a DT highlight)
                 });
 
-                const captureDate = d["Date/timestamp"] ? String(d["Date/timestamp"]).split(' ')[0] : "N/A";
-                const val = (v) => (v === undefined || v === null || v === '') ? 'N/A' : String(v);
-                const poleId = val(d["Lt PoleSLRN"] || d["LT Pole No"]);
+                const val = (v) => (v === undefined || v === null || v === '') ? 'N/A' : hlEsc(String(v));
+                const poleSLRN = val(d["Lt PoleSLRN"]);
+                const poleID = val(d["LT Pole ID"] || d["LT Pole No"]);
+                const officer = val(getDisplayName(d["User"]) || d["User"]);
                 const popupContent = `
                     <div class="asset-popup">
-                        <div class="asset-popup-title">${poleId}</div>
+                        <div class="asset-popup-title">${poleSLRN}</div>
+                        <div class="asset-popup-subtitle">TAGGED POLE</div>
                         <div class="asset-popup-divider"></div>
                         <div class="asset-popup-table">
-                            <div class="asset-popup-row"><div class="asset-popup-label">Pole ID</div><div class="asset-popup-value">${poleId}</div></div>
                             <div class="asset-popup-row"><div class="asset-popup-label">Business Unit</div><div class="asset-popup-value">${val(d["Bussines Unit"])}</div></div>
-                            <div class="asset-popup-row"><div class="asset-popup-label">Undertaking</div><div class="asset-popup-value">${val(d["Undertaking"])}</div></div>
-                            <div class="asset-popup-row"><div class="asset-popup-label">Feeder</div><div class="asset-popup-value">${val(d["Feeder"])}</div></div>
+                            <div class="asset-popup-row"><div class="asset-popup-label">Feeder Name</div><div class="asset-popup-value">${val(d["Feeder"])}</div></div>
                             <div class="asset-popup-row"><div class="asset-popup-label">DT Name</div><div class="asset-popup-value">${val(d["DT Name"])}</div></div>
+                            <div class="asset-popup-row"><div class="asset-popup-label">Pole SLRN</div><div class="asset-popup-value">${poleSLRN}</div></div>
+                            <div class="asset-popup-row"><div class="asset-popup-label">Pole ID</div><div class="asset-popup-value">${poleID}</div></div>
+                            <div class="asset-popup-row"><div class="asset-popup-label">Field Officer</div><div class="asset-popup-value">${officer}</div></div>
                             <div class="asset-popup-row"><div class="asset-popup-label">Vendor</div><div class="asset-popup-value">${val(d["Vendor_Name"])}</div></div>
-                            <div class="asset-popup-row"><div class="asset-popup-label">User</div><div class="asset-popup-value">${val(getDisplayName(d["User"]))}</div></div>
-                            <div class="asset-popup-row asset-popup-row-last"><div class="asset-popup-label">Date</div><div class="asset-popup-value">${captureDate}</div></div>
+                            <div class="asset-popup-row"><div class="asset-popup-label">Address</div><div class="asset-popup-value">${val(d["Location address"])}</div></div>
+                            <div class="asset-popup-row"><div class="asset-popup-label">Latitude</div><div class="asset-popup-value">${lat.toFixed(6)}</div></div>
+                            <div class="asset-popup-row asset-popup-row-last"><div class="asset-popup-label">Longitude</div><div class="asset-popup-value">${lon.toFixed(6)}</div></div>
                         </div>
                     </div>
                 `;
