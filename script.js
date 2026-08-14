@@ -264,16 +264,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function initMultiSelects() {
+        // Every filter routes through the same faceted cascade: selecting any one
+        // narrows the options in all the others (see cascadeAllFilters).
         const filterConfigs = {
-            vendorFilter:   { onChange: handleVendorChange },
-            buFilter:       { onChange: applyFilters },
-            utFilter:       { onChange: applyFilters },
-            userFilter:     { onChange: applyFilters },
-            feederFilter:   { onChange: handleFeederChange },
-            dtFilter:       { onChange: () => { updateUpriserOptions(); applyFilters(); } },
-            upriserFilter:  { onChange: applyFilters },
-            materialFilter: { allValue: '', onChange: applyFilters },
-            dateFilter:     { onChange: handleDateChange },
+            vendorFilter:   { onChange: () => handleFilterChange('vendorFilter') },
+            buFilter:       { onChange: () => handleFilterChange('buFilter') },
+            utFilter:       { onChange: () => handleFilterChange('utFilter') },
+            userFilter:     { onChange: () => handleFilterChange('userFilter') },
+            feederFilter:   { onChange: () => handleFilterChange('feederFilter') },
+            dtFilter:       { onChange: () => handleFilterChange('dtFilter') },
+            upriserFilter:  { onChange: () => handleFilterChange('upriserFilter') },
+            materialFilter: { allValue: '', onChange: () => handleFilterChange('materialFilter') },
+            dateFilter:     { onChange: () => handleFilterChange('dateFilter') },
         };
 
         for (const [id, cfg] of Object.entries(filterConfigs)) {
@@ -2893,6 +2895,137 @@ document.addEventListener('DOMContentLoaded', () => {
         refreshAllMultiSelects();
     }
 
+    // Ikeja Electric system usernames — used to pad the User filter when nothing
+    // narrows the scope (so any IE staff can be browsed), shared by the dependent-
+    // filter builder and the faceted cascade.
+    const IKEJA_USER_ROSTER = [
+        'kadebayo', 'ttope', 'rakinloye', 'vifeanyi', 'osunday', 'wadegoke', 'omoses',
+        'doluwaseun', 'dowoicho', 'uifeanyichukwu', 'dekpe', 'odtaiwo', 'iakintola',
+        'rabayomi', 'ojohn', 'roluwasoji', 'eikechukwu', 'gakhimien', 'smadu', 'makpan',
+        'msanuolu', 'mdaniel', 'molaiya', 'mmichael', 'mwasiu', 'myusuf', 'mola', 'mnnadi',
+        'makinmayowa', 'molabode', 'mmatthew', 'mdemilade', 'lkugbayi', 'kerinle',
+        'tsolomon', 'aalaba', 'pralph', 'tadegolu', 'bayodele', 'fjohnson', 'atemidayo',
+        'osamuel', 'sabdulmuiz', 'eobasi', 'oadeagbo', 'ajmustapha', 'dobademi',
+        'aluqman', 'ustephen', 'jutibe', 'oolawaiye', 'aadeola', 'cfonatius', 'bbankole',
+        'gabefe', 'madedayo', 'smartins', 'aabbul', 'sthompson', 'aomotoyo', 'aquadri',
+        'ajulius', 'dgabriel', 'cogochukwu', 'majao', 'cejindu', 'oedobor', 'ooladapo',
+        'dolujide', 'eodiana', 'jmark', 'aezekiel', 'ponwubiko'
+    ];
+
+    // Rebuild the User <select> options from a data subset, preserving the display-
+    // name dedup (one entry per name, preferring the id that has records) and the
+    // Ikeja roster padding when nothing narrows the scope. Mirrors the User logic in
+    // populateDependentFilters so the faceted cascade can rebuild this facet alone.
+    function populateUserSelect(data) {
+        const userSelect = document.getElementById('userFilter');
+        if (!userSelect) return;
+        const userSet = new Set(data.map(item => item["User"]));
+        const vendorVals = multiSelects.vendorFilter?.getValues();
+        const narrowingActive = !!assetLookupQuery ||
+            ['dateFilter', 'feederFilter', 'dtFilter', 'buFilter', 'utFilter', 'upriserFilter']
+                .some(id => { const v = multiSelects[id]?.getValues(); return Array.isArray(v) && v.length > 0; });
+        if (!narrowingActive && (!vendorVals || vendorVals.includes('Ikeja Electric'))) {
+            IKEJA_USER_ROSTER.forEach(n => userSet.add(n));
+        }
+        const usersWithData = new Set(data.map(item => item['User']).filter(Boolean));
+        const seenDisplayNames = new Map();
+        [...userSet].filter(Boolean).forEach(username => {
+            const displayName = getDisplayName(username);
+            if (!displayName) return;
+            const hasData = usersWithData.has(username);
+            const existing = seenDisplayNames.get(displayName);
+            if (!existing) seenDisplayNames.set(displayName, { id: username, name: displayName, hasData });
+            else if (!existing.hasData && hasData) seenDisplayNames.set(displayName, { id: username, name: displayName, hasData });
+        });
+        const users = [...seenDisplayNames.values()].sort((a, b) => a.name.localeCompare(b.name));
+        userSelect.innerHTML = '<option value="All">All Users</option>';
+        users.forEach(u => {
+            const opt = document.createElement('option');
+            opt.value = u.id; opt.textContent = u.name;
+            userSelect.appendChild(opt);
+        });
+    }
+
+    // ── Faceted cascade ──────────────────────────────────────────────────────
+    // Selecting any filter narrows every OTHER filter's options to only the values
+    // that co-occur with the current selection. Each dropdown is rebuilt from the
+    // data matching all OTHER active filters (its own axis is excluded so you can
+    // still add more values within it), plus the Asset SLRN lookup. Stale selections
+    // are pruned by MultiSelect.refresh().
+    const FILTER_FACETS = [
+        { id: 'vendorFilter', val: d => d["Vendor_Name"] },
+        { id: 'buFilter', val: d => d["Bussines Unit"] },
+        { id: 'utFilter', val: d => d["Undertaking"] },
+        { id: 'userFilter', val: d => d["User"] },
+        { id: 'feederFilter', val: d => d["Feeder"] },
+        { id: 'dtFilter', val: d => d["DT Name"] },
+        { id: 'upriserFilter', val: d => String(d["UpriserNo"]) },
+        { id: 'materialFilter', val: d => (d["Type of Pole"] || '').trim().toUpperCase() },
+        { id: 'dateFilter', val: d => (d["Date/timestamp"] || '').split(' ')[0] },
+    ];
+
+    // Predicate for one facet's current selection (no selection = pass-all).
+    function facetPredicate(facet) {
+        const sel = multiSelects[facet.id]?.getValues();
+        if (!sel) return () => true;
+        const set = new Set(sel);
+        return d => set.has(facet.val(d));
+    }
+
+    // Records matching every active facet EXCEPT `exceptId`, plus the Asset lookup.
+    function dataMatchingFacetsExcept(exceptId) {
+        const preds = FILTER_FACETS.filter(f => f.id !== exceptId).map(facetPredicate);
+        return globalData.filter(d => {
+            if (!matchesAssetLookup(d, assetLookupQuery)) return false;
+            for (const p of preds) if (!p(d)) return false;
+            return true;
+        });
+    }
+
+    // Rebuild a plain facet <select> (distinct values, sorted) from a data subset.
+    function rebuildFacetOptions(id, valFn, data, allLabel, opts = {}) {
+        const sel = document.getElementById(id);
+        if (!sel) return;
+        const vals = [...new Set(data.map(valFn).filter(Boolean))];
+        vals.sort(opts.numeric ? (a, b) => a - b : (a, b) => String(a).localeCompare(String(b)));
+        const allValue = opts.allValue != null ? opts.allValue : 'All';
+        sel.innerHTML = '<option value="' + allValue + '">' + allLabel + '</option>';
+        vals.forEach(v => {
+            const o = document.createElement('option');
+            o.value = v;
+            o.textContent = opts.titleCase ? (String(v).charAt(0) + String(v).slice(1).toLowerCase()) : v;
+            sel.appendChild(o);
+        });
+    }
+
+    // Rebuild every filter's options from the other filters, then refresh widgets.
+    // Skips the facet the user just changed: its own option list can't be affected
+    // by its own selection, and leaving it untouched keeps the open dropdown stable.
+    function cascadeAllFilters(changedId) {
+        const rebuild = {
+            vendorFilter: () => rebuildVendorOptions(dataMatchingFacetsExcept('vendorFilter')),
+            feederFilter: () => rebuildFeederOptions(dataMatchingFacetsExcept('feederFilter')),
+            dateFilter: () => rebuildDateOptions(dataMatchingFacetsExcept('dateFilter')),
+            buFilter: () => rebuildFacetOptions('buFilter', d => d["Bussines Unit"], dataMatchingFacetsExcept('buFilter'), 'All Business Units'),
+            utFilter: () => rebuildFacetOptions('utFilter', d => d["Undertaking"], dataMatchingFacetsExcept('utFilter'), 'All Undertakings'),
+            dtFilter: () => rebuildFacetOptions('dtFilter', d => d["DT Name"], dataMatchingFacetsExcept('dtFilter'), 'All DTs'),
+            upriserFilter: () => rebuildFacetOptions('upriserFilter', d => d["UpriserNo"], dataMatchingFacetsExcept('upriserFilter'), 'All Uprisers', { numeric: true }),
+            materialFilter: () => rebuildFacetOptions('materialFilter', d => (d["Type of Pole"] || '').trim().toUpperCase(), dataMatchingFacetsExcept('materialFilter'), 'All Materials', { allValue: '', titleCase: true }),
+            userFilter: () => populateUserSelect(dataMatchingFacetsExcept('userFilter')),
+        };
+        FILTER_FACETS.forEach(f => {
+            if (f.id === changedId) return;
+            rebuild[f.id]();
+            multiSelects[f.id]?.refresh();
+        });
+    }
+
+    // Single entry point for every filter's change: narrow the others, then redraw.
+    function handleFilterChange(changedId) {
+        cascadeAllFilters(changedId);
+        applyFilters();
+    }
+
     function populateDependentFilters(data, opts = {}) {
         const { skipDate = false, skipFeeder = false } = opts;
         const buSelect = document.getElementById('buFilter');
@@ -2962,19 +3095,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 .some(id => { const v = multiSelects[id]?.getValues(); return Array.isArray(v) && v.length > 0; });
         if (!narrowingActive && (!vendorVals || vendorVals.includes('Ikeja Electric'))) {
             // Add Ikeja Electric system usernames to the user filter
-            [
-                'kadebayo', 'ttope', 'rakinloye', 'vifeanyi', 'osunday', 'wadegoke', 'omoses',
-                'doluwaseun', 'dowoicho', 'uifeanyichukwu', 'dekpe', 'odtaiwo', 'iakintola',
-                'rabayomi', 'ojohn', 'roluwasoji', 'eikechukwu', 'gakhimien', 'smadu', 'makpan',
-                'msanuolu', 'mdaniel', 'molaiya', 'mmichael', 'mwasiu', 'myusuf', 'mola', 'mnnadi',
-                'makinmayowa', 'molabode', 'mmatthew', 'mdemilade', 'lkugbayi', 'kerinle',
-                'tsolomon', 'aalaba', 'pralph', 'tadegolu', 'bayodele', 'fjohnson', 'atemidayo',
-                'osamuel', 'sabdulmuiz', 'eobasi', 'oadeagbo', 'ajmustapha', 'dobademi',
-                'aluqman', 'ustephen', 'jutibe', 'oolawaiye', 'aadeola', 'cfonatius', 'bbankole',
-                'gabefe', 'madedayo', 'smartins', 'aabbul', 'sthompson', 'aomotoyo', 'aquadri',
-                'ajulius', 'dgabriel', 'cogochukwu', 'majao', 'cejindu', 'oedobor', 'ooladapo',
-                'dolujide', 'eodiana', 'jmark', 'aezekiel', 'ponwubiko'
-            ].forEach(n => userSet.add(n));
+            IKEJA_USER_ROSTER.forEach(n => userSet.add(n));
         }
 
         // Build set of usernames that actually have data records in this dataset
@@ -3072,36 +3193,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Faceted cascade shared by the Feeder and Date filters: each of Vendor / User
-    // / Date (and BU/UT/DT/Upriser/Material) is recomputed from the CURRENT Feeder +
-    // Vendor + Date selection, excluding its own axis so the dropdown isn't collapsed
-    // to what's already picked. Net effect: choosing a feeder (or date) reveals only
-    // the vendors, users and dates that actually worked that scope. The Feeder
-    // dropdown itself is left intact so more feeders can still be added. Current
-    // selections survive where still valid (MultiSelect.refresh prunes the rest).
-    function cascadeDependentOptions(opts = {}) {
-        const rebuildVendor = opts.rebuildVendor === true;
-        const feederVals = multiSelects.feederFilter?.getValues();
-        const vendorVals = multiSelects.vendorFilter?.getValues();
-        const dateVals = multiSelects.dateFilter?.getValues();
-        const byFeeder = d => !feederVals || feederVals.includes(d["Feeder"]);
-        const byVendor = d => !vendorVals || vendorVals.includes(d["Vendor_Name"]);
-        const byDate = d => !dateVals || dateVals.includes((d["Date/timestamp"] || '').split(' ')[0]);
-
-        if (rebuildVendor) rebuildVendorOptions(globalData.filter(d => byFeeder(d) && byDate(d)));
-        rebuildDateOptions(globalData.filter(d => byFeeder(d) && byVendor(d)));
-        // User + BU/UT/DT/Upriser/Material from the full intersection; Feeder & Date
-        // are rebuilt above (or left intact), so skip them here.
-        populateDependentFilters(
-            globalData.filter(d => byFeeder(d) && byVendor(d) && byDate(d)),
-            { skipFeeder: true, skipDate: true }
-        );
-
-        const toRefresh = ['buFilter', 'utFilter', 'userFilter', 'dtFilter', 'upriserFilter', 'materialFilter', 'dateFilter'];
-        if (rebuildVendor) toRefresh.push('vendorFilter');
-        toRefresh.forEach(id => multiSelects[id]?.refresh());
-    }
-
     // An Asset SLRN lookup is the narrowest filter there is — it resolves to a
     // single pole (or the handful sharing a building). So every other dropdown
     // is rebuilt from just the matched records: after searching a pole, opening
@@ -3109,161 +3200,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // the whole dataset. Clearing the lookup restores the lists from whatever
     // ordinary selections remain.
     function cascadeAssetLookupOptions() {
-        if (!assetLookupQuery) {
-            // Restore the full lists. Vendor and Feeder must be rebuilt
-            // explicitly: cascadeDependentOptions() skips both, so the
-            // single-value lists left by the lookup would otherwise stick.
-            rebuildVendorOptions(globalData);
-            rebuildFeederOptions(globalData);
-            cascadeDependentOptions({ rebuildVendor: false });
-            multiSelects.feederFilter?.refresh();
-            return;
-        }
-
-        const matched = globalData.filter(d => matchesAssetLookup(d, assetLookupQuery));
-        if (!matched.length) return;   // no match: leave the lists as they are
-
-        rebuildVendorOptions(matched);
-        rebuildDateOptions(matched);
-        // Feeder and Date are rebuilt here too — unlike the feeder cascade there
-        // is no "add another feeder" case to preserve, the scope IS the match.
-        populateDependentFilters(matched, { skipDate: true });
-
-        ['vendorFilter', 'buFilter', 'utFilter', 'userFilter', 'feederFilter',
-         'dtFilter', 'upriserFilter', 'materialFilter', 'dateFilter']
-            .forEach(id => multiSelects[id]?.refresh());
-    }
-
-    // Selecting a feeder narrows Vendor, User and Date (and DT/Upriser/etc.) to
-    // whatever actually worked that feeder.
-    function handleFeederChange() {
-        cascadeDependentOptions({ rebuildVendor: true });
-        applyFilters();
-    }
-
-    function handleDateChange() {
-        cascadeDependentOptions({ rebuildVendor: false });
-        applyFilters();
-    }
-
-    function handleVendorChange() {
-        const vendorVals = multiSelects.vendorFilter.getValues();
-        let relevantData = globalData;
-        if (vendorVals) {
-            relevantData = globalData.filter(item => vendorVals.includes(item["Vendor_Name"]));
-        }
-
-        // Reset dependent filters and update their options
-        ['buFilter', 'utFilter', 'userFilter', 'feederFilter', 'dtFilter', 'upriserFilter', 'materialFilter', 'dateFilter'].forEach(id => {
-            if (multiSelects[id]) multiSelects[id].selectedValues.clear();
-        });
-
-        populateDependentFilters(relevantData);
-
-        // Refresh dependent multi-selects
-        ['buFilter', 'utFilter', 'userFilter', 'feederFilter', 'dtFilter', 'upriserFilter', 'materialFilter', 'dateFilter'].forEach(id => {
-            if (multiSelects[id]) multiSelects[id].refresh();
-        });
-
-        applyFilters();
-    }
-
-    function updateDTOptions() {
-        const feederVals = multiSelects.feederFilter.getValues();
-        const dtSelect = document.getElementById('dtFilter');
-
-        // Respect Vendor + Date Context
-        const vendorVals = multiSelects.vendorFilter.getValues();
-        const dateVals = multiSelects.dateFilter?.getValues();
-        let contextData = globalData;
-        if (vendorVals) {
-            contextData = contextData.filter(item => vendorVals.includes(item["Vendor_Name"]));
-        }
-        if (dateVals) {
-            contextData = contextData.filter(item => {
-                const itemDate = (item["Date/timestamp"] || '').split(' ')[0];
-                return dateVals.includes(itemDate);
-            });
-        }
-
-        // Get relevant data based on Feeder selection within Vendor + Date Context
-        let relevantData = contextData;
-        if (feederVals) {
-            relevantData = contextData.filter(item => feederVals.includes(item["Feeder"]));
-        }
-
-        // Get unique DTs
-        const dts = [...new Set(relevantData.map(item => item["DT Name"]))].filter(Boolean).sort();
-
-        // Clear and populate the underlying select
-        dtSelect.innerHTML = '<option value="All">All DTs</option>';
-        dts.forEach(dt => {
-            const opt = document.createElement('option');
-            opt.value = dt;
-            opt.textContent = dt;
-            dtSelect.appendChild(opt);
-        });
-
-        // Remove stale DT selections and refresh widget
-        if (multiSelects.dtFilter) {
-            const dtSet = new Set(dts);
-            multiSelects.dtFilter.selectedValues = new Set(
-                [...multiSelects.dtFilter.selectedValues].filter(v => dtSet.has(v))
-            );
-            multiSelects.dtFilter.refresh();
-        }
-
-        // Trigger Upriser update
-        updateUpriserOptions();
-    }
-
-    function updateUpriserOptions() {
-        const dtVals = multiSelects.dtFilter.getValues();
-        const feederVals = multiSelects.feederFilter.getValues();
-        const upriserSelect = document.getElementById('upriserFilter');
-
-        // Respect Vendor + Date Context
-        const vendorVals = multiSelects.vendorFilter.getValues();
-        const dateVals = multiSelects.dateFilter?.getValues();
-        let contextData = globalData;
-        if (vendorVals) {
-            contextData = contextData.filter(item => vendorVals.includes(item["Vendor_Name"]));
-        }
-        if (dateVals) {
-            contextData = contextData.filter(item => {
-                const itemDate = (item["Date/timestamp"] || '').split(' ')[0];
-                return dateVals.includes(itemDate);
-            });
-        }
-
-        // Get relevant data based on DT (and implicitly Feeder)
-        let relevantData = contextData;
-        if (dtVals) {
-            relevantData = contextData.filter(item => dtVals.includes(item["DT Name"]));
-        } else if (feederVals) {
-            relevantData = contextData.filter(item => feederVals.includes(item["Feeder"]));
-        }
-
-        // Get unique Uprisers
-        const uprisers = [...new Set(relevantData.map(item => item["UpriserNo"]))].filter(Boolean).sort((a, b) => a - b);
-
-        // Clear and populate
-        upriserSelect.innerHTML = '<option value="All">All Uprisers</option>';
-        uprisers.forEach(upriser => {
-            const opt = document.createElement('option');
-            opt.value = upriser;
-            opt.textContent = upriser;
-            upriserSelect.appendChild(opt);
-        });
-
-        // Remove stale selections and refresh widget
-        if (multiSelects.upriserFilter) {
-            const upSet = new Set(uprisers.map(String));
-            multiSelects.upriserFilter.selectedValues = new Set(
-                [...multiSelects.upriserFilter.selectedValues].filter(v => upSet.has(v))
-            );
-            multiSelects.upriserFilter.refresh();
-        }
+        // The lookup is just another constraint in the faceted cascade
+        // (dataMatchingFacetsExcept applies matchesAssetLookup): while active it
+        // narrows every dropdown to the matched pole's context; when cleared it
+        // restores the lists from whatever ordinary selections remain.
+        cascadeAllFilters();
     }
 
     // Recompute filteredData from the current slicers + Asset SLRN lookup,
