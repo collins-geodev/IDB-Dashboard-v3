@@ -1862,631 +1862,667 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
 
-    // AI Assistant Logic
-    document.getElementById('ai-ask-btn').addEventListener('click', handleAIQuery);
-    document.getElementById('ai-query').addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') handleAIQuery();
-    });
-
-    function handleAIQuery() {
-        const rawQuery = document.getElementById('ai-query').value.trim();
-        const query = rawQuery.toLowerCase();
+    // =====================================================================
+    // AI DATA ASSISTANT  —  offline analytics engine (no LLM, no API keys).
+    // Answers free-form questions about the *real* dataset: poles, pole type,
+    // buildings connected, building-SLRN linkage, geography (BU / undertaking /
+    // feeder / DT / area), field officers, vendors, velocity & trends, BOQ
+    // targets & completion, and individual SLRN look-ups. Understands loose
+    // phrasing via synonyms, number-words and fuzzy entity matching.
+    //
+    // Honesty note: this dataset carries no real pole-condition grading (every
+    // record is Status=COMPLETE); `simulateIssue` fills Issue_Type with random
+    // values. So the assistant does NOT report defect/quality figures as fact —
+    // it says condition data isn't captured and pivots to what is known.
+    // =====================================================================
+    (function initAIAssistant() {
+        const askBtn = document.getElementById('ai-ask-btn');
+        const inputEl = document.getElementById('ai-query');
         const responseEl = document.getElementById('ai-response');
+        const chipsEl = document.getElementById('ai-suggestions');
+        if (!askBtn || !inputEl || !responseEl) return;
 
-        responseEl.classList.remove('visible');
-        if (!query) return;
+        const ask = () => runQuery(inputEl.value);
+        askBtn.addEventListener('click', ask);
+        inputEl.addEventListener('keypress', (e) => { if (e.key === 'Enter') ask(); });
 
-        // --- INTELLIGENCE HELPERS ---
+        // Clickable example chips — one tap fills the box and runs the query.
+        const CHIPS = ['Summary', 'Top 5 field officers', 'Run rate by vendor',
+            'Concrete vs wooden', 'Buildings connected', 'Activity last 7 days',
+            'Feeders behind on BOQ', 'Building-SLRN linkage'];
+        if (chipsEl) {
+            chipsEl.innerHTML = CHIPS.map(c => '<button type="button" class="ai-chip">' + esc(c) + '</button>').join('');
+            chipsEl.querySelectorAll('.ai-chip').forEach(btnEl => btnEl.addEventListener('click', () => {
+                inputEl.value = btnEl.textContent;
+                runQuery(btnEl.textContent);
+            }));
+        }
 
-        const getDistance = (a, b) => {
-            if (a.length === 0) return b.length;
-            if (b.length === 0) return a.length;
-            const matrix = [];
-            for (let i = 0; i <= b.length; i++) matrix[i] = [i];
-            for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
-            for (let i = 1; i <= b.length; i++) {
-                for (let j = 1; j <= a.length; j++) {
-                    if (b.charAt(i - 1) === a.charAt(j - 1)) {
-                        matrix[i][j] = matrix[i - 1][j - 1];
-                    } else {
-                        matrix[i][j] = Math.min(matrix[i - 1][j - 1] + 1, Math.min(matrix[i][j - 1] + 1, matrix[i - 1][j] + 1));
-                    }
-                }
-            }
-            return matrix[b.length][a.length];
-        };
+        // ---------- safe rendering helpers ----------
+        function esc(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+        const bold = (s) => '<strong>' + esc(s) + '</strong>';
+        const fmt = (n) => (typeof n === 'number' && isFinite(n)) ? n.toLocaleString() : esc(n);
+        const pctOf = (num, den) => den > 0 ? (num / den * 100) : 0;
+        const pct1 = (num, den) => pctOf(num, den).toFixed(1) + '%';
+        const norm = (s) => String(s == null ? '' : s).trim().toLowerCase();
+        const titleCase = (s) => String(s).replace(/\b\w/g, c => c.toUpperCase());
 
-        const findClosestEntity = (input, list) => {
-            let bestMatch = null;
-            let minDist = Infinity;
+        // Reveal with a brief "thinking" beat, then the answer (fades in via CSS).
+        let thinkTimer = null;
+        function show(html) {
+            if (thinkTimer) clearTimeout(thinkTimer);
+            responseEl.classList.remove('visible');
+            responseEl.innerHTML = '<div class="ai-loading"><span></span><span></span><span></span></div>';
+            responseEl.classList.add('visible');
+            thinkTimer = setTimeout(() => { responseEl.innerHTML = html; }, 380);
+        }
+
+        // ---------- metric helpers (real fields only) ----------
+        const dayOf = (d) => (d['Date/timestamp'] || '').split(' ')[0];
+        const activeDates = (ds) => [...new Set(ds.map(dayOf).filter(Boolean))];
+        function runRate(ds) {
+            const days = activeDates(ds).length || 1;
+            return { total: ds.length, days, rate: +(ds.length / days).toFixed(1) };
+        }
+        function poleTypes(ds) {
+            const c = {};
+            ds.forEach(d => { const t = (d['Type of Pole'] || 'Unknown').toUpperCase(); c[t] = (c[t] || 0) + 1; });
+            return c;
+        }
+        function buildingsStats(ds) {
+            let total = 0, withB = 0, max = 0;
+            ds.forEach(d => {
+                const n = parseInt(d['No of Buildings Connected to the Pole']) || 0;
+                total += n; if (n > 0) withB++; if (n > max) max = n;
+            });
+            return { total, withB, max, avg: ds.length ? +(total / ds.length).toFixed(2) : 0, n: ds.length };
+        }
+        function linkage(ds) {
+            const linked = ds.filter(d => String(d['Associated Buildings SLRN'] || '').trim()).length;
+            return { linked, unlinked: ds.length - linked, n: ds.length };
+        }
+        const uniqCount = (ds, field) => new Set(ds.map(d => d[field]).filter(Boolean)).size;
+        function groupCount(ds, keyFn) {
+            const c = {};
+            ds.forEach(d => { const k = keyFn(d); if (k != null && k !== '') c[k] = (c[k] || 0) + 1; });
+            return c;
+        }
+        // Ordered [ [key, count], ... ] descending (or ascending when asc=true).
+        const rankEntries = (obj, asc) => Object.entries(obj).sort((a, b) => asc ? a[1] - b[1] : b[1] - a[1]);
+
+        // BOQ target per feeder (normalised feeder key -> target poles).
+        function boqByFeeder() {
+            const m = {};
+            (boqData || []).forEach(d => {
+                const f = norm(d['FEEDER NAME']); if (!f) return;
+                m[f] = (m[f] || 0) + (parseInt(d['POLES Grand Total']) || 0);
+            });
+            return m;
+        }
+        const boqTotal = () => (boqData || []).reduce((s, d) => s + (parseInt(d['POLES Grand Total']) || 0), 0);
+        // BOQ target for a filtered scope: sum the per-DT BOQ rows whose DT is present
+        // in the scoped data (BOQ is per-DT, so this works for any geographic filter —
+        // feeder / DT / undertaking / BU). Falls back to the whole program when unfiltered.
+        function boqTargetForScope(ctx) {
+            if (!ctx.filters.length) return boqTotal();
+            const dts = new Set(ctx.data.map(d => norm(d['DT Name'])).filter(Boolean));
+            return (boqData || []).reduce((s, d) => dts.has(norm(d['DT NAME'])) ? s + (parseInt(d['POLES Grand Total']) || 0) : s, 0);
+        }
+
+        // ---------- fuzzy matching (Levenshtein) ----------
+        function lev(a, b) {
+            if (a === b) return 0;
+            if (!a.length) return b.length;
+            if (!b.length) return a.length;
+            const m = [];
+            for (let i = 0; i <= b.length; i++) m[i] = [i];
+            for (let j = 0; j <= a.length; j++) m[0][j] = j;
+            for (let i = 1; i <= b.length; i++)
+                for (let j = 1; j <= a.length; j++)
+                    m[i][j] = b[i - 1] === a[j - 1] ? m[i - 1][j - 1]
+                        : Math.min(m[i - 1][j - 1] + 1, m[i][j - 1] + 1, m[i - 1][j] + 1);
+            return m[b.length][a.length];
+        }
+        // Best fuzzy match of any query token against a list of names.
+        function fuzzyBest(qTokens, list) {
+            let best = null, bestScore = 0;
             list.forEach(item => {
-                const dist = getDistance(input, item.toLowerCase());
-                if (dist < minDist && dist < 4) {
-                    minDist = dist;
-                    bestMatch = item;
-                }
-            });
-            return bestMatch;
-        };
-
-        const formatNum = (n) => typeof n === 'number' ? n.toLocaleString() : n;
-
-        const getRunRate = (dataset) => {
-            const dates = new Set(dataset.map(d => d["Date/timestamp"] ? d["Date/timestamp"].split(' ')[0] : '').filter(Boolean));
-            const days = dates.size || 1;
-            return { rate: (dataset.length / days).toFixed(1), days, total: dataset.length };
-        };
-
-        const getDefectStats = (dataset) => {
-            const bad = dataset.filter(d => d.Issue_Type && d.Issue_Type !== 'Good Condition').length;
-            const pct = dataset.length > 0 ? ((bad / dataset.length) * 100).toFixed(1) : '0.0';
-            return { bad, pct, good: dataset.length - bad };
-        };
-
-        const getPoleTypes = (dataset) => {
-            const counts = {};
-            dataset.forEach(d => {
-                const t = (d["Type of Pole"] || 'Unknown').toUpperCase();
-                counts[t] = (counts[t] || 0) + 1;
-            });
-            return counts;
-        };
-
-        // Show Loading State
-        responseEl.innerHTML = '<div class="ai-loading"><span></span><span></span><span></span></div>';
-        responseEl.classList.add('visible');
-
-        setTimeout(() => {
-            const data = filteredData;
-            let answer = "";
-
-            // Extract numeric limit (e.g., "Top 10")
-            const numMatch = query.match(/(\d+)/);
-            const customLimit = numMatch ? parseInt(numMatch[1]) : 5;
-
-            // --- CONTEXT FILTERING (stacking: vendor > feeder > DT > BU > undertaking) ---
-            let contextData = data;
-            let contextParts = [];
-
-            // Vendor detection
-            const vendors = [...new Set(data.map(d => d.Vendor_Name))].filter(Boolean);
-            let foundVendor = null;
-            for (let v of vendors) {
-                if (query.includes(v.toLowerCase())) { foundVendor = v; break; }
-            }
-            if (!foundVendor) {
-                if (query.includes('ikeja') || query.match(/\bie\b/)) foundVendor = vendors.find(v => v.includes('Ikeja'));
-                if (!foundVendor && query.includes('etc')) foundVendor = vendors.find(v => v.includes('ETC'));
-                if (!foundVendor && query.includes('jesom')) foundVendor = vendors.find(v => v.includes('Jesom'));
-            }
-            if (foundVendor) {
-                contextData = contextData.filter(d => d.Vendor_Name === foundVendor);
-                contextParts.push(foundVendor);
-            }
-
-            // Feeder detection
-            const allFeeders = [...new Set(data.map(d => d.Feeder).filter(Boolean))];
-            let foundFeeder = null;
-            for (let f of allFeeders) {
-                if (query.includes(f.toLowerCase())) { foundFeeder = f; break; }
-            }
-            if (!foundFeeder) foundFeeder = findClosestEntity(query, allFeeders);
-            // Only apply feeder filter if the query explicitly mentions feeder-related terms or the match is strong
-            if (foundFeeder && (query.includes('feeder') || query.includes(foundFeeder.toLowerCase().split('-')[0]))) {
-                contextData = contextData.filter(d => d.Feeder === foundFeeder);
-                contextParts.push('Feeder: ' + foundFeeder);
-            } else { foundFeeder = null; }
-
-            // DT detection
-            const allDTs = [...new Set(data.map(d => d["DT Name"]).filter(Boolean))];
-            let foundDT = null;
-            for (let dt of allDTs) {
-                if (query.includes(dt.toLowerCase())) { foundDT = dt; break; }
-            }
-            if (foundDT) {
-                contextData = contextData.filter(d => d["DT Name"] === foundDT);
-                contextParts.push('DT: ' + foundDT);
-            }
-
-            // Business Unit detection
-            const allBUs = [...new Set(data.map(d => d["Bussines Unit"]).filter(Boolean))];
-            let foundBU = null;
-            if (query.match(/\bbu\b|business unit/)) {
-                for (let bu of allBUs) {
-                    if (query.includes(bu.toLowerCase())) { foundBU = bu; break; }
-                }
-                if (!foundBU) foundBU = findClosestEntity(query.replace(/business unit|bu/g, '').trim(), allBUs);
-            } else {
-                for (let bu of allBUs) {
-                    if (query.includes(bu.toLowerCase())) { foundBU = bu; break; }
-                }
-            }
-            if (foundBU) {
-                contextData = contextData.filter(d => d["Bussines Unit"] === foundBU);
-                contextParts.push('BU: ' + foundBU);
-            }
-
-            // Undertaking detection
-            const allUTs = [...new Set(data.map(d => d.Undertaking).filter(Boolean))];
-            let foundUT = null;
-            if (query.includes('undertaking')) {
-                for (let ut of allUTs) {
-                    if (query.includes(ut.toLowerCase())) { foundUT = ut; break; }
-                }
-                if (!foundUT) foundUT = findClosestEntity(query.replace(/undertaking/g, '').trim(), allUTs);
-            } else {
-                for (let ut of allUTs) {
-                    if (query.includes(ut.toLowerCase())) { foundUT = ut; break; }
-                }
-            }
-            if (foundUT) {
-                contextData = contextData.filter(d => d.Undertaking === foundUT);
-                contextParts.push('Undertaking: ' + foundUT);
-            }
-
-            const contextName = contextParts.length > 0 ? contextParts.join(' > ') : 'All Data';
-
-            // --- INTENT DETECTION (broader, ordered by specificity) ---
-            let intent = "unknown";
-
-            if (query.match(/\bcompare\b|\bvs\b|\bversus\b|difference between/)) intent = "compare";
-            else if (query.match(/\bsummary\b|\boverview\b|\bstatus\b|\breport\b|\bdashboard\b|\bbrief\b/)) intent = "summary";
-            else if (query.match(/\bboq\b|\btarget\b|\bbill of quantit|\bplanned\b|\bprocurement\b/)) intent = "boq";
-            else if (query.match(/\btrend\b|\bover time\b|\bprogress\b|\byesterday\b|\btoday\b|\blast\s+\d+\s+day|\bthis week\b|\bweekly\b|\bwhen\b|\bdate\b|\btimeline\b/)) intent = "trend";
-            else if (query.match(/\btop\b|\bbest\b|\bhighest\b|\bmost\b|\blead\b|\bfirst\b/)) intent = "rank_high";
-            else if (query.match(/\bbottom\b|\bworst\b|\blowest\b|\bleast\b|\bslowest\b/)) intent = "rank_low";
-            else if (query.match(/\brun rate\b|\bvelocity\b|\bspeed\b|\bpace\b|\bavg rate\b|\bdaily rate\b/)) intent = "run_rate";
-            else if (query.match(/\bissue\b|\bdefect\b|\bproblem\b|\bbroken\b|\bdamage\b|\bbad\b|\bquality\b/)) intent = "issues";
-            else if (query.match(/\bpole type\b|\bmaterial\b|\bconcrete\b|\bwood\b|\bdistribution of pole|\bpole.*breakdown\b/)) intent = "pole_type";
-            else if (query.match(/\bbuilding\b|\bconnected\b|\bserved\b|\bcustomer\b/)) intent = "buildings";
-            else if (query.match(/\blocation\b|\baddress\b|\barea\b|\bwhere\b|\bregion\b/)) intent = "location";
-            else if (query.match(/\bcount\b|\btotal\b|\bhow many\b|\bnumber\b/)) intent = "count";
-            else if (query.match(/\bfeeder\b/) && !foundFeeder) intent = "list_feeders";
-            else if (query.match(/\bdt\b|\btransformer\b/) && !foundDT) intent = "list_dts";
-            else if (query.match(/\bundertaking\b/) && !foundUT) intent = "list_uts";
-            else if (query.match(/\bbusiness unit\b|\bbu\b/) && !foundBU) intent = "list_bus";
-
-            // --- INTENT EXECUTION ---
-
-            // RANKING
-            if (intent === "rank_high" || intent === "rank_low") {
-                const isHigh = intent === "rank_high";
-                const sortMult = isHigh ? -1 : 1;
-                const adj = isHigh ? "Top" : "Bottom";
-
-                if (query.includes('vendor') && !foundVendor) {
-                    const counts = {};
-                    contextData.forEach(d => counts[d.Vendor_Name] = (counts[d.Vendor_Name] || 0) + 1);
-                    const sorted = Object.entries(counts).sort((a, b) => (a[1] - b[1]) * sortMult);
-                    const list = sorted.slice(0, customLimit).map((v, i) => `${i + 1}. **${v[0]}** — ${formatNum(v[1])} poles`).join('<br>');
-                    answer = `**${adj} Vendors:**<br>${list}`;
-                }
-                else if (query.match(/feeder/)) {
-                    const counts = {};
-                    contextData.forEach(d => { if (d.Feeder) counts[d.Feeder] = (counts[d.Feeder] || 0) + 1; });
-                    const sorted = Object.entries(counts).sort((a, b) => (a[1] - b[1]) * sortMult);
-                    const list = sorted.slice(0, customLimit).map((f, i) => `${i + 1}. **${f[0]}** — ${formatNum(f[1])} poles`).join('<br>');
-                    answer = `**${adj} ${customLimit} Feeders** (${contextName}):<br>${list}`;
-                }
-                else if (query.match(/dt|transformer/)) {
-                    const counts = {};
-                    contextData.forEach(d => { if (d["DT Name"]) counts[d["DT Name"]] = (counts[d["DT Name"]] || 0) + 1; });
-                    const sorted = Object.entries(counts).sort((a, b) => (a[1] - b[1]) * sortMult);
-                    const list = sorted.slice(0, customLimit).map((dt, i) => `${i + 1}. **${dt[0]}** — ${formatNum(dt[1])} poles`).join('<br>');
-                    answer = `**${adj} ${customLimit} DTs** (${contextName}):<br>${list}`;
-                }
-                else if (query.match(/undertaking/)) {
-                    const counts = {};
-                    contextData.forEach(d => { if (d.Undertaking) counts[d.Undertaking] = (counts[d.Undertaking] || 0) + 1; });
-                    const sorted = Object.entries(counts).sort((a, b) => (a[1] - b[1]) * sortMult);
-                    const list = sorted.slice(0, customLimit).map((u, i) => `${i + 1}. **${u[0]}** — ${formatNum(u[1])} poles`).join('<br>');
-                    answer = `**${adj} ${customLimit} Undertakings** (${contextName}):<br>${list}`;
-                }
-                else {
-                    // Default: rank users/officers
-                    const counts = {};
-                    contextData.forEach(d => { if (d.User) counts[d.User] = (counts[d.User] || 0) + 1; });
-                    const sorted = Object.entries(counts).sort((a, b) => (a[1] - b[1]) * sortMult);
-                    const list = sorted.slice(0, customLimit).map((u, i) => `${i + 1}. ${getDisplayName(u[0])} — **${formatNum(u[1])}** poles`).join('<br>');
-                    answer = `**${adj} ${customLimit} Field Officers** (${contextName}):<br>${list}`;
-                }
-            }
-
-            // COMPARE
-            else if (intent === "compare") {
-                // Detect two vendors or two users
-                const mentionedVendors = vendors.filter(v => query.includes(v.toLowerCase()));
-                // Also check shortnames
-                if (query.includes('etc') && !mentionedVendors.find(v => v.includes('ETC'))) { const v = vendors.find(v => v.includes('ETC')); if (v) mentionedVendors.push(v); }
-                if (query.includes('jesom') && !mentionedVendors.find(v => v.includes('Jesom'))) { const v = vendors.find(v => v.includes('Jesom')); if (v) mentionedVendors.push(v); }
-                if ((query.includes('ikeja') || query.match(/\bie\b/)) && !mentionedVendors.find(v => v.includes('Ikeja'))) { const v = vendors.find(v => v.includes('Ikeja')); if (v) mentionedVendors.push(v); }
-
-                if (mentionedVendors.length >= 2) {
-                    const rows = mentionedVendors.map(v => {
-                        const vd = data.filter(d => d.Vendor_Name === v);
-                        const rr = getRunRate(vd);
-                        const df = getDefectStats(vd);
-                        const users = new Set(vd.map(d => d.User)).size;
-                        return `**${v}:**<br>  Poles: ${formatNum(vd.length)} | Run Rate: ${rr.rate}/day | Users: ${users} | Defects: ${df.pct}%`;
+                const itemTokens = norm(item).split(/[^a-z0-9]+/).filter(t => t.length >= 3);
+                itemTokens.forEach(it => {
+                    qTokens.forEach(qt => {
+                        if (qt.length < 3) return;
+                        const d = lev(qt, it);
+                        const score = 1 - d / Math.max(qt.length, it.length);
+                        if (score > bestScore && score >= 0.72) { bestScore = score; best = item; }
                     });
-                    answer = `**Vendor Comparison:**<br><br>${rows.join('<br><br>')}`;
-                } else if (mentionedVendors.length === 0) {
-                    // Compare all vendors
-                    const rows = vendors.map(v => {
-                        const vd = data.filter(d => d.Vendor_Name === v);
-                        const rr = getRunRate(vd);
-                        const df = getDefectStats(vd);
-                        return `**${v}:** ${formatNum(vd.length)} poles | ${rr.rate}/day | Defects: ${df.pct}%`;
-                    });
-                    answer = `**All Vendors Comparison:**<br>${rows.join('<br>')}`;
-                } else {
-                    answer = "Please mention two vendors to compare. E.g., 'Compare ETC vs Ikeja Electric'.";
-                }
-            }
-
-            // SUMMARY
-            else if (intent === "summary") {
-                const rr = getRunRate(contextData);
-                const df = getDefectStats(contextData);
-                const users = new Set(contextData.map(d => d.User)).size;
-                const feeders = new Set(contextData.map(d => d.Feeder)).size;
-                const dts = new Set(contextData.map(d => d["DT Name"])).size;
-                const uts = new Set(contextData.map(d => d.Undertaking)).size;
-                const poleTypes = getPoleTypes(contextData);
-                const typeStr = Object.entries(poleTypes).map(([k, v]) => `${k}: ${formatNum(v)}`).join(', ');
-
-                let boqTotal = 0;
-                if (boqData.length) boqTotal = boqData.reduce((s, d) => s + (parseInt(d["POLES Grand Total"]) || 0), 0);
-                const completionPct = boqTotal > 0 ? ((contextData.length / boqTotal) * 100).toFixed(1) : 'N/A';
-
-                answer = `**${contextName} — Dashboard Summary:**<br><br>` +
-                    `Total Poles: **${formatNum(contextData.length)}**<br>` +
-                    `Active Users: **${users}**<br>` +
-                    `Run Rate: **${rr.rate} poles/day** (${rr.days} active days)<br>` +
-                    `Feeders: **${feeders}** | DTs: **${dts}** | Undertakings: **${uts}**<br>` +
-                    `Defect Rate: **${df.pct}%** (${formatNum(df.bad)} defects)<br>` +
-                    `Pole Types: ${typeStr}<br>` +
-                    (boqTotal > 0 ? `BOQ Target: **${formatNum(boqTotal)}** | Completion: **${completionPct}%**` : '');
-            }
-
-            // BOQ
-            else if (intent === "boq") {
-                if (!boqData.length) {
-                    answer = "No BOQ data is currently loaded.";
-                } else {
-                    const totalTarget = boqData.reduce((s, d) => s + (parseInt(d["POLES Grand Total"]) || 0), 0);
-                    const totalBad = boqData.reduce((s, d) => s + (parseInt(d["BAD"]) || 0), 0);
-                    const totalGood = boqData.reduce((s, d) => s + (parseInt(d["GOOD"]) || 0), 0);
-                    const totalNew = boqData.reduce((s, d) => s + (parseInt(d["NEW POLE"]) || 0), 0);
-                    const actual = contextData.length;
-                    const completionPct = totalTarget > 0 ? ((actual / totalTarget) * 100).toFixed(1) : '0';
-
-                    if (query.match(/feeder/) && !query.match(/all/)) {
-                        // BOQ by feeder — top feeders by target
-                        const sorted = [...boqData].sort((a, b) => (parseInt(b["POLES Grand Total"]) || 0) - (parseInt(a["POLES Grand Total"]) || 0));
-                        const list = sorted.slice(0, customLimit).map((d, i) =>
-                            `${i + 1}. **${d["FEEDER NAME"] || d["DT NAME"]}** — Target: ${d["POLES Grand Total"]}, Good: ${d["GOOD"]}, Bad: ${d["BAD"]}, New: ${d["NEW POLE"]}`
-                        ).join('<br>');
-                        answer = `**BOQ — Top ${customLimit} by Target:**<br>${list}`;
-                    } else {
-                        answer = `**BOQ (Bill of Quantities) Overview:**<br><br>` +
-                            `Total BOQ Target: **${formatNum(totalTarget)} poles**<br>` +
-                            `Good Poles: **${formatNum(totalGood)}** | Bad Poles: **${formatNum(totalBad)}** | New Poles: **${formatNum(totalNew)}**<br>` +
-                            `Actual Field Records: **${formatNum(actual)}**<br>` +
-                            `Completion Rate: **${completionPct}%**`;
-                    }
-                }
-            }
-
-            // TREND
-            else if (intent === "trend") {
-                const dateMap = {};
-                contextData.forEach(d => {
-                    const ds = d["Date/timestamp"] ? d["Date/timestamp"].split(' ')[0] : '';
-                    if (ds) dateMap[ds] = (dateMap[ds] || 0) + 1;
                 });
-                const sortedDates = Object.entries(dateMap).sort((a, b) => {
-                    const da = new Date(a[0]), db = new Date(b[0]);
-                    return da - db;
-                });
+            });
+            return best ? { value: best, score: bestScore } : null;
+        }
 
-                if (sortedDates.length === 0) {
-                    answer = "No date-stamped records found in the current data.";
-                } else {
-                    // Check for "last N days" or "yesterday"
-                    const daysMatch = query.match(/last\s+(\d+)\s+day/);
-                    let recentDates = sortedDates;
+        // ---------- query normalisation ----------
+        const NUM_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, twenty: 20, fifty: 50 };
+        const SYNONYMS = [
+            [/\b(velocity|pace|throughput|productivity|speed)\b/g, 'run rate'],
+            [/\b(officers?|agents?|surveyors?|enumerators?|staff|personnel|workers?|field ?officers?)\b/g, 'user'],
+            [/\b(transformers?)\b/g, 'dt'],
+            [/\bwood\b/g, 'wooden'],
+            [/\b(premises|households?|houses|homes|structures?)\b/g, 'buildings'],
+            [/\b(bu|business ?units?)\b/g, 'businessunit'],
+            [/\b(u ?ts?|undertakings?)\b/g, 'undertaking'],
+            [/\b(defects?|faults?|damaged?|broken|vandali[sz]ed?|crooked|condition|quality)\b/g, 'issue'],
+            [/\b(leaderboard|ranking|rank)\b/g, 'top'],
+        ];
+        // Words that signal a BOQ shortfall question. Kept as a separate list (not
+        // folded into a "behind" synonym) so these common words don't hijack
+        // officer/vendor/undertaking questions into the feeder-BOQ ranking.
+        const BEHIND_RE = /\b(behind|lagging|shortfall|outstanding|remaining|gap)\b/;
+        const BOQ_CTX_RE = /\b(boq|target|bill of quant|completion|complete|feeder)\b/;
+        function normalize(raw) {
+            let q = ' ' + String(raw || '').toLowerCase().replace(/[^\w\s\-/]/g, ' ').replace(/\s+/g, ' ').trim() + ' ';
+            SYNONYMS.forEach(([re, to]) => { q = q.replace(re, to); });
+            Object.keys(NUM_WORDS).forEach(w => { q = q.replace(new RegExp('\\b' + w + '\\b', 'g'), NUM_WORDS[w]); });
+            return q.replace(/\s+/g, ' ').trim();
+        }
+        const has = (q, re) => re.test(q);
+        // A row count only counts when it directly follows a ranking/quantity word,
+        // so digits embedded in feeder/DT codes (e.g. "11-Alapere") don't hijack it.
+        function limitFrom(q, fallback) {
+            const m = q.match(/\b(?:top|bottom|first|last|show|list)\s+(\d{1,3})\b/);
+            return m ? Math.max(1, Math.min(50, parseInt(m[1]))) : fallback;
+        }
 
-                    if (daysMatch) {
-                        const n = parseInt(daysMatch[1]);
-                        recentDates = sortedDates.slice(-n);
-                    } else if (query.includes('yesterday')) {
-                        recentDates = sortedDates.slice(-2, -1);
-                    } else if (query.includes('today')) {
-                        recentDates = sortedDates.slice(-1);
-                    } else if (query.includes('week')) {
-                        recentDates = sortedDates.slice(-7);
-                    } else {
-                        recentDates = sortedDates.slice(-10);
-                    }
-
-                    const totalInRange = recentDates.reduce((s, d) => s + d[1], 0);
-                    const avgInRange = (totalInRange / (recentDates.length || 1)).toFixed(1);
-                    const list = recentDates.map(([date, count]) => `${date}: **${count}** poles`).join('<br>');
-
-                    answer = `**Activity Timeline** (${contextName}):<br><br>${list}<br><br>` +
-                        `Period Total: **${formatNum(totalInRange)}** | Avg: **${avgInRange}/day**`;
-                }
-            }
-
-            // RUN RATE
-            else if (intent === "run_rate") {
-                const rr = getRunRate(contextData);
-                const perVendor = vendors.map(v => {
-                    const vd = contextData.filter(d => d.Vendor_Name === v);
-                    if (vd.length === 0) return null;
-                    const vr = getRunRate(vd);
-                    return `${v}: **${vr.rate}/day**`;
-                }).filter(Boolean);
-
-                answer = `**${contextName} — Run Rate:**<br>` +
-                    `Overall: **${rr.rate} poles/day** (${formatNum(rr.total)} poles over ${rr.days} days)`;
-                if (!foundVendor && perVendor.length > 1) {
-                    answer += `<br><br>By Vendor:<br>${perVendor.join('<br>')}`;
-                }
-            }
-
-            // ISSUES
-            else if (intent === "issues") {
-                const df = getDefectStats(contextData);
-                const issueCounts = {};
-                contextData.forEach(d => {
-                    if (d.Issue_Type && d.Issue_Type !== 'Good Condition') {
-                        issueCounts[d.Issue_Type] = (issueCounts[d.Issue_Type] || 0) + 1;
-                    }
-                });
-                const sorted = Object.entries(issueCounts).sort((a, b) => b[1] - a[1]);
-                const breakdown = sorted.slice(0, 10).map(([type, count]) => `${type}: **${count}**`).join('<br>');
-
-                answer = `**${contextName} — Defect Analysis:**<br>` +
-                    `Total Defects: **${formatNum(df.bad)}** out of ${formatNum(contextData.length)} (${df.pct}%)<br>`;
-                if (breakdown) answer += `<br>Breakdown:<br>${breakdown}`;
-
-                // Top users with defects
-                const userDefects = {};
-                contextData.filter(d => d.Issue_Type && d.Issue_Type !== 'Good Condition').forEach(d => {
-                    userDefects[d.User] = (userDefects[d.User] || 0) + 1;
-                });
-                const topDefectUsers = Object.entries(userDefects).sort((a, b) => b[1] - a[1]).slice(0, 3);
-                if (topDefectUsers.length) {
-                    answer += `<br><br>Top Defect Reporters:<br>` +
-                        topDefectUsers.map((u, i) => `${i + 1}. ${getDisplayName(u[0])} — ${u[1]} defects`).join('<br>');
-                }
-            }
-
-            // POLE TYPE
-            else if (intent === "pole_type") {
-                const types = getPoleTypes(contextData);
-                const total = contextData.length;
-                const sorted = Object.entries(types).sort((a, b) => b[1] - a[1]);
-                const list = sorted.map(([type, count]) =>
-                    `**${type}**: ${formatNum(count)} (${(count / total * 100).toFixed(1)}%)`
-                ).join('<br>');
-                answer = `**${contextName} — Pole Type Distribution:**<br><br>${list}<br><br>Total: **${formatNum(total)}**`;
-            }
-
-            // BUILDINGS
-            else if (intent === "buildings") {
-                const buildingCounts = contextData.map(d => parseInt(d["No of Buildings Connected to the Pole"]) || 0);
-                const totalBuildings = buildingCounts.reduce((s, n) => s + n, 0);
-                const avgBuildings = contextData.length > 0 ? (totalBuildings / contextData.length).toFixed(1) : '0';
-                const maxBuildings = Math.max(...buildingCounts, 0);
-                const polesWithBuildings = buildingCounts.filter(n => n > 0).length;
-
-                answer = `**${contextName} — Buildings Connected:**<br><br>` +
-                    `Total Buildings Served: **${formatNum(totalBuildings)}**<br>` +
-                    `Poles with Buildings: **${formatNum(polesWithBuildings)}** of ${formatNum(contextData.length)}<br>` +
-                    `Avg Buildings/Pole: **${avgBuildings}**<br>` +
-                    `Max on Single Pole: **${maxBuildings}**`;
-            }
-
-            // LOCATION
-            else if (intent === "location") {
-                const addrCounts = {};
-                contextData.forEach(d => {
-                    const addr = d["Location address"];
-                    if (addr) {
-                        const area = addr.split(',').pop().trim() || addr;
-                        addrCounts[area] = (addrCounts[area] || 0) + 1;
-                    }
-                });
-                const sorted = Object.entries(addrCounts).sort((a, b) => b[1] - a[1]);
-                const list = sorted.slice(0, customLimit).map((a, i) => `${i + 1}. **${a[0]}** — ${a[1]} poles`).join('<br>');
-                answer = `**${contextName} — Top ${customLimit} Areas:**<br><br>${list}`;
-            }
-
-            // COUNT
-            else if (intent === "count") {
-                if (query.match(/dt|transformer/)) {
-                    const dts = new Set(contextData.map(d => d["DT Name"])).size;
-                    answer = `**${formatNum(dts)} Unique DTs** in ${contextName}.`;
-                } else if (query.match(/feed/)) {
-                    const feeders = new Set(contextData.map(d => d.Feeder)).size;
-                    answer = `**${formatNum(feeders)} Feeders** in ${contextName}.`;
-                } else if (query.match(/user|officer|people|staff/)) {
-                    const users = new Set(contextData.map(d => d.User)).size;
-                    answer = `**${users} Active Field Officers** in ${contextName}.`;
-                } else if (query.match(/undertaking/)) {
-                    const uts = new Set(contextData.map(d => d.Undertaking)).size;
-                    answer = `**${formatNum(uts)} Undertakings** in ${contextName}.`;
-                } else if (query.match(/business unit|\bbu\b/)) {
-                    const bus = new Set(contextData.map(d => d["Bussines Unit"])).size;
-                    answer = `**${formatNum(bus)} Business Units** in ${contextName}.`;
-                } else if (query.match(/wood/)) {
-                    const n = contextData.filter(d => (d["Type of Pole"] || "").toUpperCase().includes('WOOD')).length;
-                    answer = `Wooden Poles in ${contextName}: **${formatNum(n)}**`;
-                } else if (query.match(/concrete|conc/)) {
-                    const n = contextData.filter(d => (d["Type of Pole"] || "").toUpperCase().includes('CONCRETE')).length;
-                    answer = `Concrete Poles in ${contextName}: **${formatNum(n)}**`;
-                } else if (query.match(/vendor/)) {
-                    const vs = {};
-                    contextData.forEach(d => { vs[d.Vendor_Name] = (vs[d.Vendor_Name] || 0) + 1; });
-                    const list = Object.entries(vs).map(([v, c]) => `**${v}**: ${formatNum(c)}`).join('<br>');
-                    answer = `**Vendor Breakdown** (${contextName}):<br>${list}<br>Total: **${formatNum(contextData.length)}**`;
-                } else {
-                    answer = `Total Poles in ${contextName}: **${formatNum(contextData.length)}** (from ${formatNum(globalData.length)} total).`;
-                }
-            }
-
-            // LIST FEEDERS
-            else if (intent === "list_feeders") {
-                const counts = {};
-                contextData.forEach(d => { if (d.Feeder) counts[d.Feeder] = (counts[d.Feeder] || 0) + 1; });
-                const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-                const list = sorted.slice(0, customLimit).map((f, i) => `${i + 1}. **${f[0]}** — ${formatNum(f[1])} poles`).join('<br>');
-                answer = `**Feeders in ${contextName}** (${sorted.length} total, showing top ${Math.min(customLimit, sorted.length)}):<br>${list}`;
-            }
-
-            // LIST DTs
-            else if (intent === "list_dts") {
-                const counts = {};
-                contextData.forEach(d => { if (d["DT Name"]) counts[d["DT Name"]] = (counts[d["DT Name"]] || 0) + 1; });
-                const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-                const list = sorted.slice(0, customLimit).map((dt, i) => `${i + 1}. **${dt[0]}** — ${formatNum(dt[1])} poles`).join('<br>');
-                answer = `**DTs in ${contextName}** (${sorted.length} total, showing top ${Math.min(customLimit, sorted.length)}):<br>${list}`;
-            }
-
-            // LIST UNDERTAKINGS
-            else if (intent === "list_uts") {
-                const counts = {};
-                contextData.forEach(d => { if (d.Undertaking) counts[d.Undertaking] = (counts[d.Undertaking] || 0) + 1; });
-                const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-                const list = sorted.slice(0, customLimit).map((u, i) => `${i + 1}. **${u[0]}** — ${formatNum(u[1])} poles`).join('<br>');
-                answer = `**Undertakings in ${contextName}** (${sorted.length} total):<br>${list}`;
-            }
-
-            // LIST BUSINESS UNITS
-            else if (intent === "list_bus") {
-                const counts = {};
-                contextData.forEach(d => { if (d["Bussines Unit"]) counts[d["Bussines Unit"]] = (counts[d["Bussines Unit"]] || 0) + 1; });
-                const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-                const list = sorted.slice(0, customLimit).map((b, i) => `${i + 1}. **${b[0]}** — ${formatNum(b[1])} poles`).join('<br>');
-                answer = `**Business Units in ${contextName}** (${sorted.length} total):<br>${list}`;
-            }
-
-            // FALLBACK — Smart Search
-            else {
-                // 1. Try user name lookup
-                const allUsers = Object.keys(userFullNames).concat(Object.values(userFullNames));
-                const closeUser = findClosestEntity(query, allUsers);
-
-                if (closeUser) {
-                    let userId = closeUser;
-                    if (Object.values(userFullNames).includes(closeUser)) {
-                        userId = Object.keys(userFullNames).find(key => userFullNames[key] === closeUser);
-                    }
-                    const userRecs = data.filter(d => d.User === userId);
-                    if (userRecs.length > 0) {
-                        const rr = getRunRate(userRecs);
-                        const df = getDefectStats(userRecs);
-                        const uts = new Set(userRecs.map(d => d.Undertaking)).size;
-                        const vendor = userRecs[0].Vendor_Name || 'Unknown';
-                        const pTypes = getPoleTypes(userRecs);
-                        const typeStr = Object.entries(pTypes).map(([k, v]) => `${k}: ${v}`).join(', ');
-
-                        answer = `**${getDisplayName(userId)}** — Officer Profile:<br><br>` +
-                            `Vendor: **${vendor}**<br>` +
-                            `Total Poles: **${formatNum(userRecs.length)}**<br>` +
-                            `Run Rate: **${rr.rate}/day** (${rr.days} active days)<br>` +
-                            `Defect Rate: **${df.pct}%** (${df.bad} defects)<br>` +
-                            `Undertakings Covered: **${uts}**<br>` +
-                            `Pole Types: ${typeStr}`;
-                    } else {
-                        answer = `I found user "**${getDisplayName(userId) || closeUser}**" but they have no records in the current view.`;
-                    }
-                }
-                // 2. Try matching a specific feeder name
-                else if (findClosestEntity(query, allFeeders)) {
-                    const feeder = findClosestEntity(query, allFeeders);
-                    const fData = data.filter(d => d.Feeder === feeder);
-                    const rr = getRunRate(fData);
-                    const df = getDefectStats(fData);
-                    const users = new Set(fData.map(d => d.User)).size;
-                    const dts = new Set(fData.map(d => d["DT Name"])).size;
-                    answer = `**Feeder: ${feeder}**<br><br>` +
-                        `Poles: **${formatNum(fData.length)}** | DTs: **${dts}** | Users: **${users}**<br>` +
-                        `Run Rate: **${rr.rate}/day** | Defects: **${df.pct}%**`;
-                }
-                // 3. Try matching a specific DT name
-                else if (findClosestEntity(query, allDTs)) {
-                    const dt = findClosestEntity(query, allDTs);
-                    const dtData = data.filter(d => d["DT Name"] === dt);
-                    const rr = getRunRate(dtData);
-                    const users = new Set(dtData.map(d => d.User)).size;
-                    answer = `**DT: ${dt}**<br><br>` +
-                        `Poles: **${formatNum(dtData.length)}** | Users: **${users}** | Run Rate: **${rr.rate}/day**`;
-                }
-                // 4. Generic text search across all fields
-                else {
-                    const matches = data.filter(row =>
-                        Object.values(row).some(val => val && String(val).toLowerCase().includes(query))
-                    );
-                    if (matches.length > 0) {
-                        const rr = getRunRate(matches);
-                        const users = new Set(matches.map(d => d.User)).size;
-                        answer = `Found **${formatNum(matches.length)}** records matching "**${rawQuery}**".<br>` +
-                            `Users involved: **${users}** | Run Rate: **${rr.rate}/day**`;
-                        if (matches.length <= 5) {
-                            answer += '<br><br>Records:<br>' + matches.map(m =>
-                                `${m["DT Name"] || 'N/A'} — ${m.User ? getDisplayName(m.User) : 'N/A'} — ${m["Date/timestamp"] || ''}`
-                            ).join('<br>');
-                        }
-                    } else {
-                        answer = "I couldn't find a match. Try questions like:<br>" +
-                            "• **'Summary'** — full dashboard overview<br>" +
-                            "• **'Top 10 users'** — best performing officers<br>" +
-                            "• **'Compare ETC vs Ikeja'** — vendor comparison<br>" +
-                            "• **'BOQ targets'** — bill of quantities<br>" +
-                            "• **'Trend last 7 days'** — activity timeline<br>" +
-                            "• **'Pole types'** — material distribution<br>" +
-                            "• **'Issues in Ikeja Electric'** — defect analysis<br>" +
-                            "• Any **user name**, **feeder**, **DT**, or **area name**";
-                    }
-                }
-            }
-
-            // If context was applied, add a context note
-            if (contextParts.length > 0 && answer && !answer.startsWith("I couldn't")) {
-                answer += `<br><br><small>Context: ${contextName}</small>`;
-            }
-
-            // Typewriter Animation
-            const typeWriter = (text, element) => {
-                element.innerHTML = '';
-                element.classList.add('ai-cursor');
-                const formattedHtml = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-                let index = 0;
-                const speed = 12;
-                function type() {
-                    if (index < formattedHtml.length) {
-                        let char = formattedHtml.charAt(index);
-                        if (char === '<') {
-                            let endTag = formattedHtml.indexOf('>', index);
-                            if (endTag !== -1) {
-                                element.innerHTML += formattedHtml.substring(index, endTag + 1);
-                                index = endTag + 1;
-                            } else { element.innerHTML += char; index++; }
-                        } else { element.innerHTML += char; index++; }
-                        setTimeout(type, speed);
-                    } else { element.classList.remove('ai-cursor'); }
-                }
-                type();
+        // ---------- dimension registry ----------
+        function dims(data) {
+            return {
+                vendor: { field: 'Vendor_Name', label: 'Vendor', disp: v => v },
+                feeder: { field: 'Feeder', label: 'Feeder', disp: v => v },
+                dt: { field: 'DT Name', label: 'DT', disp: v => v },
+                undertaking: { field: 'Undertaking', label: 'Undertaking', disp: v => v },
+                businessunit: { field: 'Bussines Unit', label: 'Business Unit', disp: v => v },
+                user: { field: 'User', label: 'Field Officer', disp: v => getDisplayName(v) },
             };
+        }
 
-            typeWriter(answer, responseEl);
+        // Whole-token match: `value` must appear on word boundaries, so a short
+        // entity name (e.g. undertaking "igbobi") can't match inside a longer token
+        // (feeder "…igbobiinj…") and stack a bogus filter.
+        const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const wordIn = (q, s) => new RegExp('\\b' + escRe(s) + '\\b').test(q);
 
-        }, 1200);
-    }
+        // ---------- entity / context detection ----------
+        // Returns { filters:[{dim,value}], data:filteredSubset, label, vendorsHit:[...] }
+        function detectContext(q, qTokens, data) {
+            const spec = dims(data);
+            const filters = [];
+            const vendorsAll = [...new Set(data.map(d => d.Vendor_Name).filter(Boolean))];
+
+            // Vendors (with short aliases).
+            const vendorsHit = [];
+            vendorsAll.forEach(v => { if (wordIn(q, norm(v))) vendorsHit.push(v); });
+            [['etc', 'ETC'], ['jesom', 'Jesom'], ['ikeja', 'Ikeja'], ['ie', 'Ikeja']].forEach(([a, key]) => {
+                if (new RegExp('\\b' + a + '\\b').test(q)) {
+                    const v = vendorsAll.find(x => x.includes(key));
+                    if (v && !vendorsHit.includes(v)) vendorsHit.push(v);
+                }
+            });
+            if (vendorsHit.length === 1) filters.push({ dim: 'vendor', value: vendorsHit[0] });
+
+            // Feeder / DT / Undertaking / Business Unit — full-value substring, or a
+            // distinctive token match when the dimension word is present.
+            [['feeder', /\bfeeder/], ['dt', /\bdt\b/], ['undertaking', /\bundertaking\b/], ['businessunit', /\bbusinessunit\b/]]
+                .forEach(([dim, dimRe]) => {
+                    const vals = [...new Set(data.map(d => d[spec[dim].field]).filter(Boolean))].sort((a, b) => b.length - a.length);
+                    let hit = vals.find(v => norm(v).length >= 4 && wordIn(q, norm(v)));
+                    if (!hit && dimRe.test(q)) {
+                        // distinctive token (>=5 chars, not pure digits) uniquely identifying one value
+                        let bestTokLen = 4, best = null;
+                        vals.forEach(v => {
+                            norm(v).split(/[^a-z0-9]+/).forEach(tok => {
+                                if (tok.length > bestTokLen && !/^\d+$/.test(tok) && qTokens.includes(tok)) { bestTokLen = tok.length; best = v; }
+                            });
+                        });
+                        hit = best;
+                    }
+                    if (hit) filters.push({ dim, value: hit });
+                });
+
+            // Users — username or full-name substring.
+            const usersAll = [...new Set(data.map(d => d.User).filter(Boolean))];
+            const userHit = usersAll.find(u => {
+                const un = norm(u), fn = norm(getDisplayName(u));
+                return (un.length >= 4 && wordIn(q, un)) || (fn.length >= 5 && wordIn(q, fn));
+            });
+            if (userHit) filters.push({ dim: 'user', value: userHit });
+
+            let sub = data, label = [];
+            filters.forEach(f => { sub = sub.filter(d => d[spec[f.dim].field] === f.value); label.push(spec[f.dim].disp(f.value)); });
+            return { filters, data: sub, label: label.join(' › ') || 'all data', vendorsHit, spec, vendorsAll };
+        }
+
+        // ---------- answer builders ----------
+        function contextNote(ctx) {
+            return ctx.filters.length ? '<br><br><small>Scope: ' + esc(ctx.label) + '</small>' : '';
+        }
+
+        function summaryAnswer(ctx) {
+            const ds = ctx.data;
+            const rr = runRate(ds), bs = buildingsStats(ds), lk = linkage(ds), pt = poleTypes(ds);
+            const users = uniqCount(ds, 'User'), feeders = uniqCount(ds, 'Feeder'),
+                dtc = uniqCount(ds, 'DT Name'), uts = uniqCount(ds, 'Undertaking');
+            const typeStr = rankEntries(pt).map(([k, v]) => esc(titleCase(k)) + ' ' + pct1(v, ds.length)).join(' · ');
+            // BOQ targets are geographic, so "completion" is only meaningful for a
+            // geographic scope — and it must divide by the target for THAT scope, not
+            // the whole programme. Suppressed for vendor/officer scopes.
+            const geoScope = !ctx.filters.some(f => f.dim === 'vendor' || f.dim === 'user');
+            const bt = geoScope ? boqTargetForScope(ctx) : 0;
+            const comp = (bt > 0) ? ' · Completion ' + bold(pct1(ds.length, bt)) : '';
+            return '<div class="ai-head">📊 ' + esc(titleCase(ctx.label)) + ' — snapshot</div>' +
+                'Poles tagged: ' + bold(fmt(ds.length)) + comp + '<br>' +
+                'Field officers: ' + bold(users) + ' · Run rate: ' + bold(rr.rate + '/day') + ' over ' + bold(rr.days) + ' active days<br>' +
+                'Coverage: ' + bold(feeders) + ' feeders · ' + bold(dtc) + ' DTs · ' + bold(uts) + ' undertakings<br>' +
+                'Pole types: ' + typeStr + '<br>' +
+                'Buildings connected: ' + bold(fmt(bs.total)) + ' (avg ' + bold(bs.avg) + '/pole)<br>' +
+                'Building-SLRN linkage: ' + bold(pct1(lk.linked, lk.n)) + ' of poles linked' +
+                '<br><br><small>💡 Try "top 5 feeders", "run rate by vendor", or "feeders behind on BOQ".</small>' +
+                contextNote(ctx);
+        }
+
+        // Rank a dimension by a chosen metric.
+        function rankAnswer(q, ctx, asc) {
+            const ds = ctx.data, spec = ctx.spec;
+            const limit = limitFrom(q, 5);
+            const dir = asc ? 'Bottom' : 'Top';
+
+            // pick dimension
+            let dimKey = 'user';
+            if (has(q, /\bvendor/)) dimKey = 'vendor';
+            else if (has(q, /\bfeeder/)) dimKey = 'feeder';
+            else if (has(q, /\bdt\b/)) dimKey = 'dt';
+            else if (has(q, /\bundertaking\b/)) dimKey = 'undertaking';
+            else if (has(q, /\bbusinessunit\b/)) dimKey = 'businessunit';
+            else if (has(q, /\barea|\blocation|\baddress|\bstreet|\bwhere\b/)) dimKey = 'area';
+
+            // pick metric
+            const byRate = has(q, /\brun rate\b/);
+            const byBuildings = has(q, /\bbuildings\b/);
+
+            const keyFn = dimKey === 'area'
+                ? (d => { const a = d['Location address']; return a ? (a.split(',').pop().trim() || a) : ''; })
+                : (d => d[spec[dimKey] ? spec[dimKey].field : 'User']);
+            const dispFn = dimKey === 'user' ? (k => esc(getDisplayName(k)))
+                : (k => esc(k));
+            const dimLabel = dimKey === 'area' ? 'Areas' : (spec[dimKey].label + 's');
+
+            let rows;
+            if (byRate && dimKey !== 'area') {
+                // metric = poles / active days for that group
+                const groups = {};
+                ds.forEach(d => { const k = keyFn(d); if (k) (groups[k] = groups[k] || []).push(d); });
+                const arr = Object.entries(groups).map(([k, g]) => [k, runRate(g).rate]);
+                rows = arr.sort((a, b) => asc ? a[1] - b[1] : b[1] - a[1]).slice(0, limit)
+                    .map((r, i) => (i + 1) + '. ' + dispFn(r[0]) + ' — ' + bold(r[1] + '/day'));
+                return '<div class="ai-head">🏁 ' + dir + ' ' + limit + ' ' + esc(dimLabel) + ' by run rate</div>' +
+                    rows.join('<br>') + contextNote(ctx);
+            }
+            if (byBuildings) {
+                const groups = {};
+                ds.forEach(d => { const k = keyFn(d); if (k) groups[k] = (groups[k] || 0) + (parseInt(d['No of Buildings Connected to the Pole']) || 0); });
+                rows = rankEntries(groups, asc).slice(0, limit)
+                    .map((r, i) => (i + 1) + '. ' + dispFn(r[0]) + ' — ' + bold(fmt(r[1]) + ' buildings'));
+                return '<div class="ai-head">🏢 ' + dir + ' ' + limit + ' ' + esc(dimLabel) + ' by buildings connected</div>' +
+                    rows.join('<br>') + contextNote(ctx);
+            }
+            // default metric = pole count
+            const counts = groupCount(ds, keyFn);
+            rows = rankEntries(counts, asc).slice(0, limit)
+                .map((r, i) => (i + 1) + '. ' + dispFn(r[0]) + ' — ' + bold(fmt(r[1]) + ' poles'));
+            const noun = dimKey === 'user' ? '👷' : dimKey === 'feeder' ? '🔌' : dimKey === 'vendor' ? '🏗️' : '📍';
+            return '<div class="ai-head">' + noun + ' ' + dir + ' ' + limit + ' ' + esc(dimLabel) + ' by poles tagged</div>' +
+                rows.join('<br>') + contextNote(ctx);
+        }
+
+        function compareAnswer(q, ctx) {
+            const data = ctx.data, spec = ctx.spec;
+            const rowFor = (field, val, disp) => {
+                const vd = data.filter(d => d[field] === val);
+                if (!vd.length) return null;
+                const rr = runRate(vd), bs = buildingsStats(vd);
+                return '<div class="ai-row">' + bold(disp) + ' — ' + fmt(vd.length) + ' poles · ' +
+                    rr.rate + '/day · ' + fmt(bs.total) + ' buildings</div>';
+            };
+            // Which dimension does the user want to compare? Explicit word wins; else vendors.
+            let dimKey = 'vendor';
+            if (has(q, /\bfeeder/)) dimKey = 'feeder';
+            else if (has(q, /\bdt\b/)) dimKey = 'dt';
+            else if (has(q, /\bundertaking\b/)) dimKey = 'undertaking';
+            else if (has(q, /\buser\b/)) dimKey = 'user';
+            else if (has(q, /\bbusinessunit\b/)) dimKey = 'businessunit';
+
+            if (dimKey === 'vendor') {
+                let targets = ctx.vendorsHit.slice();
+                if (targets.length < 2) targets = ctx.vendorsAll;
+                const rows = targets.map(v => rowFor('Vendor_Name', v, v)).filter(Boolean);
+                if (!rows.length) return 'I could not find those vendors to compare. Try "compare ETC vs Jesom".';
+                return '<div class="ai-head">⚖️ Vendor comparison</div>' + rows.join('') + contextNote(ctx);
+            }
+            // Non-vendor: compare the top values of that dimension (by poles), capped at 6.
+            const field = spec[dimKey].field;
+            const dispFn = dimKey === 'user' ? getDisplayName : (v => v);
+            const top = rankEntries(groupCount(data, d => d[field])).slice(0, 6).map(e => e[0]);
+            const rows = top.map(v => rowFor(field, v, dispFn(v))).filter(Boolean);
+            if (rows.length < 2) return null; // nothing meaningful to compare → let router fall through
+            return '<div class="ai-head">⚖️ ' + esc(spec[dimKey].label) + ' comparison (top ' + rows.length + ')</div>' +
+                rows.join('') + contextNote(ctx);
+        }
+
+        function runRateAnswer(ctx) {
+            const ds = ctx.data, rr = runRate(ds);
+            let out = '<div class="ai-head">🏁 ' + esc(titleCase(ctx.label)) + ' — run rate</div>' +
+                'Overall: ' + bold(rr.rate + ' poles/day') + ' (' + fmt(rr.total) + ' poles over ' + rr.days + ' active days)';
+            if (!ctx.filters.some(f => f.dim === 'vendor')) {
+                const per = ctx.vendorsAll.map(v => {
+                    const vd = ds.filter(d => d.Vendor_Name === v);
+                    return vd.length ? bold(v) + ': ' + runRate(vd).rate + '/day' : null;
+                }).filter(Boolean);
+                if (per.length > 1) out += '<br><br>By vendor:<br>' + per.join('<br>');
+            }
+            return out + '<br><br><small>Target: &gt;50 poles/day/officer.</small>' + contextNote(ctx);
+        }
+
+        function trendAnswer(q, ctx) {
+            const ds = ctx.data;
+            const byDay = {};
+            ds.forEach(d => { const day = dayOf(d); if (day) byDay[day] = (byDay[day] || 0) + 1; });
+            // Parse to real calendar dates so windows are calendar days, not "active" days.
+            const sorted = Object.keys(byDay).map(day => ({ day, t: new Date(day).getTime(), n: byDay[day] }))
+                .filter(x => isFinite(x.t)).sort((a, b) => a.t - b.t);
+            if (!sorted.length) return 'No date-stamped records are in the current scope.';
+            const anchor = sorted[sorted.length - 1].t;
+            const DAY = 86400000;
+            // Active days falling in the calendar window (end inclusive, spanning n days).
+            const windowDays = (end, n) => sorted.filter(x => x.t <= end && x.t > end - n * DAY);
+
+            let winDays, label, end = anchor;
+            const dm = q.match(/last (\d+) day/);
+            if (dm) { winDays = Math.max(1, parseInt(dm[1])); label = 'last ' + winDays + ' day' + (winDays === 1 ? '' : 's'); }
+            else if (q.includes('yesterday')) { winDays = 1; label = 'yesterday'; end = anchor - DAY; }
+            else if (q.includes('today')) { winDays = 1; label = 'latest day'; }
+            else if (q.includes('week')) { winDays = 7; label = 'last 7 days'; }
+            else { winDays = 10; label = 'last 10 days'; }
+
+            const win = windowDays(end, winDays);
+            const list = win.length ? win.map(x => esc(x.day) + ': ' + bold(x.n)).join('<br>') : '<em>no activity in this window</em>';
+            const totalR = win.reduce((s, x) => s + x.n, 0);
+            const avgR = (totalR / winDays).toFixed(1);
+            // Momentum: last 7 calendar days vs the 7 before them.
+            let momentum = '';
+            const cur = windowDays(anchor, 7), prev = windowDays(anchor - 7 * DAY, 7);
+            if (prev.length) {
+                const la = cur.reduce((s, x) => s + x.n, 0) / 7;
+                const pa = prev.reduce((s, x) => s + x.n, 0) / 7;
+                const delta = pa > 0 ? Math.round((la - pa) / pa * 100) : 0;
+                const word = delta > 5 ? 'accelerating ▲' : delta < -5 ? 'slowing ▼' : 'holding steady';
+                momentum = '<br><br>Momentum: ' + bold(word) + ' (' + (delta >= 0 ? '+' : '') + delta + '% vs prior week)';
+            }
+            return '<div class="ai-head">📈 Activity — ' + esc(titleCase(ctx.label)) + ' (' + esc(label) + ')</div>' +
+                list + '<br><br>Period total: ' + bold(fmt(totalR)) + ' · avg ' + bold(avgR + '/day') + momentum + contextNote(ctx);
+        }
+
+        function poleTypeAnswer(ctx) {
+            const ds = ctx.data, pt = poleTypes(ds);
+            const list = rankEntries(pt).map(([k, v]) => bold(titleCase(k)) + ': ' + fmt(v) + ' (' + pct1(v, ds.length) + ')').join('<br>');
+            return '<div class="ai-head">🪵 Pole types — ' + esc(titleCase(ctx.label)) + '</div>' + list +
+                '<br><br>Total: ' + bold(fmt(ds.length)) + ' poles' + contextNote(ctx);
+        }
+
+        function buildingsAnswer(ctx) {
+            const bs = buildingsStats(ctx.data);
+            return '<div class="ai-head">🏢 Buildings connected — ' + esc(titleCase(ctx.label)) + '</div>' +
+                'Total buildings served: ' + bold(fmt(bs.total)) + '<br>' +
+                'Poles carrying buildings: ' + bold(fmt(bs.withB)) + ' of ' + fmt(bs.n) + ' (' + pct1(bs.withB, bs.n) + ')<br>' +
+                'Average: ' + bold(bs.avg + ' buildings/pole') + ' · busiest pole: ' + bold(bs.max) + contextNote(ctx);
+        }
+
+        function linkageAnswer(ctx) {
+            const lk = linkage(ctx.data);
+            return '<div class="ai-head">🔗 Building-SLRN linkage — ' + esc(titleCase(ctx.label)) + '</div>' +
+                'Poles with an associated building SLRN: ' + bold(fmt(lk.linked)) + ' (' + pct1(lk.linked, lk.n) + ')<br>' +
+                'Poles without one: ' + bold(fmt(lk.unlinked)) + ' (' + pct1(lk.unlinked, lk.n) + ')<br>' +
+                '<small>💡 Unlinked poles are candidates for building-tagging follow-up.</small>' + contextNote(ctx);
+        }
+
+        function boqAnswer(q, ctx) {
+            if (!boqData || !boqData.length) return 'No BOQ (Bill of Quantities) targets are loaded.';
+            const actual = ctx.data.length;
+            // Feeders behind / completion per feeder.
+            if (has(q, /\bfeeder\b/) || BEHIND_RE.test(q)) {
+                const targetByF = boqByFeeder();
+                const actualByF = {}, dispByF = {};
+                ctx.data.forEach(d => { const f = norm(d.Feeder); if (!f) return; actualByF[f] = (actualByF[f] || 0) + 1; if (!dispByF[f]) dispByF[f] = d.Feeder; });
+                const rows = Object.keys(targetByF)
+                    .map(f => ({ f, t: targetByF[f], a: actualByF[f] || 0, disp: dispByF[f] || f }))
+                    .filter(r => r.t > 0);
+                const behind = BEHIND_RE.test(q) || has(q, /\bbottom|worst|lowest\b/);
+                rows.sort((a, b) => behind ? (a.a / a.t) - (b.a / b.t) : (b.a / b.t) - (a.a / a.t));
+                const limit = limitFrom(q, 8);
+                const list = rows.slice(0, limit).map((r, i) => {
+                    const remaining = Math.max(0, r.t - r.a);
+                    return (i + 1) + '. ' + bold(titleCase(r.disp)) + ' — ' + pct1(r.a, r.t) +
+                        ' (' + fmt(r.a) + '/' + fmt(r.t) + (remaining ? ', ' + fmt(remaining) + ' to go' : '') + ')';
+                }).join('<br>');
+                const head = behind ? '🚧 Feeders furthest behind BOQ' : '✅ Feeders closest to BOQ target';
+                return '<div class="ai-head">' + head + '</div>' + list +
+                    '<br><br><small>Completion = poles tagged ÷ BOQ target.</small>' + contextNote(ctx);
+            }
+            // Overview — target scoped to the current filter (whole programme if none).
+            const target = boqTargetForScope(ctx);
+            let out = '<div class="ai-head">📋 BOQ overview — ' + esc(titleCase(ctx.label)) + '</div>' +
+                'BOQ target: ' + bold(fmt(target) + ' poles') + '<br>';
+            if (!ctx.filters.length) {
+                // Good/Bad/New are whole-programme figures, only meaningful unfiltered.
+                const good = boqData.reduce((s, d) => s + (parseInt(d['GOOD']) || 0), 0);
+                const bad = boqData.reduce((s, d) => s + (parseInt(d['BAD']) || 0), 0);
+                const nw = boqData.reduce((s, d) => s + (parseInt(d['NEW POLE']) || 0), 0);
+                out += 'Breakdown — Good: ' + bold(fmt(good)) + ' · Bad: ' + bold(fmt(bad)) + ' · New: ' + bold(fmt(nw)) + '<br>';
+            }
+            out += 'Poles tagged so far: ' + bold(fmt(actual)) + '<br>' +
+                'Completion: ' + (target > 0 ? bold(pct1(actual, target)) : '<em>no BOQ target for this scope</em>') +
+                '<br><br><small>💡 Ask "feeders behind on BOQ" for the gap by feeder.</small>' + contextNote(ctx);
+            return out;
+        }
+
+        function countAnswer(q, ctx) {
+            const ds = ctx.data;
+            if (has(q, /\bdt\b/)) return bold(fmt(uniqCount(ds, 'DT Name'))) + ' unique DTs in ' + esc(ctx.label) + '.' + contextNote(ctx);
+            if (has(q, /\bfeeder/)) return bold(fmt(uniqCount(ds, 'Feeder'))) + ' feeders in ' + esc(ctx.label) + '.' + contextNote(ctx);
+            if (has(q, /\buser\b/)) return bold(fmt(uniqCount(ds, 'User'))) + ' active field officers in ' + esc(ctx.label) + '.' + contextNote(ctx);
+            if (has(q, /\bundertaking\b/)) return bold(fmt(uniqCount(ds, 'Undertaking'))) + ' undertakings in ' + esc(ctx.label) + '.' + contextNote(ctx);
+            if (has(q, /\bbusinessunit\b/)) return bold(fmt(uniqCount(ds, 'Bussines Unit'))) + ' business units in ' + esc(ctx.label) + '.' + contextNote(ctx);
+            if (has(q, /\bwooden\b/)) { const n = ds.filter(d => norm(d['Type of Pole']).includes('wood')).length; return bold(fmt(n)) + ' wooden poles in ' + esc(ctx.label) + ' (' + pct1(n, ds.length) + ').' + contextNote(ctx); }
+            if (has(q, /\bconcrete\b/)) { const n = ds.filter(d => norm(d['Type of Pole']).includes('concrete')).length; return bold(fmt(n)) + ' concrete poles in ' + esc(ctx.label) + ' (' + pct1(n, ds.length) + ').' + contextNote(ctx); }
+            if (has(q, /\bbuildings\b/)) return bold(fmt(buildingsStats(ds).total)) + ' buildings connected across ' + esc(ctx.label) + '.' + contextNote(ctx);
+            if (has(q, /\bvendor/)) {
+                const list = rankEntries(groupCount(ds, d => d.Vendor_Name)).map(([v, c]) => bold(v) + ': ' + fmt(c)).join('<br>');
+                return '<div class="ai-head">Vendor breakdown — ' + esc(titleCase(ctx.label)) + '</div>' + list + '<br>Total: ' + bold(fmt(ds.length)) + contextNote(ctx);
+            }
+            return 'Poles in ' + esc(ctx.label) + ': ' + bold(fmt(ds.length)) +
+                (ctx.filters.length ? ' (of ' + fmt(globalData.length) + ' total).' : '.') + contextNote(ctx);
+        }
+
+        function shareAnswer(q, ctx) {
+            // "what percentage/share of poles are wooden / linked / carry buildings"
+            const ds = ctx.data;
+            if (has(q, /\bwooden\b/)) { const n = ds.filter(d => norm(d['Type of Pole']).includes('wood')).length; return bold(pct1(n, ds.length)) + ' of poles in ' + esc(ctx.label) + ' are wooden (' + fmt(n) + ' of ' + fmt(ds.length) + ').' + contextNote(ctx); }
+            if (has(q, /\bconcrete\b/)) { const n = ds.filter(d => norm(d['Type of Pole']).includes('concrete')).length; return bold(pct1(n, ds.length)) + ' of poles in ' + esc(ctx.label) + ' are concrete (' + fmt(n) + ' of ' + fmt(ds.length) + ').' + contextNote(ctx); }
+            if (has(q, /\blink|associated|building slrn\b/)) { const lk = linkage(ds); return bold(pct1(lk.linked, lk.n)) + ' of poles in ' + esc(ctx.label) + ' have an associated building SLRN.' + contextNote(ctx); }
+            if (has(q, /\bbuildings\b/)) { const bs = buildingsStats(ds); return bold(pct1(bs.withB, bs.n)) + ' of poles in ' + esc(ctx.label) + ' carry at least one building.' + contextNote(ctx); }
+            return null;
+        }
+
+        function listAnswer(q, ctx) {
+            const ds = ctx.data, spec = ctx.spec, limit = limitFrom(q, 10);
+            let dimKey = null;
+            if (has(q, /\bfeeder/)) dimKey = 'feeder';
+            else if (has(q, /\bdt\b/)) dimKey = 'dt';
+            else if (has(q, /\bundertaking\b/)) dimKey = 'undertaking';
+            else if (has(q, /\bbusinessunit\b/)) dimKey = 'businessunit';
+            else if (has(q, /\bvendor/)) dimKey = 'vendor';
+            else if (has(q, /\buser\b/)) dimKey = 'user';
+            if (!dimKey) return null;
+            const counts = groupCount(ds, d => d[spec[dimKey].field]);
+            const sorted = rankEntries(counts);
+            const dispFn = dimKey === 'user' ? (k => esc(getDisplayName(k))) : (k => esc(k));
+            const list = sorted.slice(0, limit).map((r, i) => (i + 1) + '. ' + dispFn(r[0]) + ' — ' + bold(fmt(r[1]) + ' poles')).join('<br>');
+            return '<div class="ai-head">' + esc(spec[dimKey].label) + 's in ' + esc(titleCase(ctx.label)) + ' (' + sorted.length + ' total)</div>' +
+                list + (sorted.length > limit ? '<br><small>…showing top ' + limit + '.</small>' : '') + contextNote(ctx);
+        }
+
+        function slrnAnswer(q, rawQuery, data) {
+            // Look for an SLRN-like token and match a pole.
+            const tokens = rawQuery.toUpperCase().match(/[A-Z]{2,}\d{3,}\d*/g) || [];
+            for (const tok of tokens) {
+                const rec = data.find(d => String(d['Lt PoleSLRN'] || '').toUpperCase() === tok)
+                    || data.find(d => String(d['Lt PoleSLRN'] || '').toUpperCase().includes(tok));
+                if (rec) {
+                    const bldg = String(rec['Associated Buildings SLRN'] || '').trim();
+                    return '<div class="ai-head">📍 Pole ' + esc(rec['Lt PoleSLRN']) + '</div>' +
+                        'Type: ' + bold(titleCase(rec['Type of Pole'] || 'Unknown')) + '<br>' +
+                        'Feeder: ' + bold(rec['Feeder'] || '—') + '<br>' +
+                        'DT: ' + bold(rec['DT Name'] || '—') + '<br>' +
+                        'Undertaking: ' + bold(rec['Undertaking'] || '—') + '<br>' +
+                        'Buildings connected: ' + bold(rec['No of Buildings Connected to the Pole'] || '0') + '<br>' +
+                        'Building SLRN: ' + (bldg ? bold(bldg) : '<em>none linked</em>') + '<br>' +
+                        'Tagged by: ' + bold(getDisplayName(rec['User'])) + ' on ' + esc(dayOf(rec) || '—') +
+                        (rec['Location address'] ? '<br>Address: ' + esc(rec['Location address']) : '');
+                }
+            }
+            return null;
+        }
+
+        function profileAnswer(ctx) {
+            // Deep-dive when exactly one entity filter is set.
+            if (ctx.filters.length !== 1) return null;
+            const f = ctx.filters[0], ds = ctx.data, rr = runRate(ds), bs = buildingsStats(ds), lk = linkage(ds);
+            const head = '<div class="ai-head">🔎 ' + esc(ctx.spec[f.dim].label) + ': ' + esc(ctx.spec[f.dim].disp(f.value)) + '</div>';
+            if (f.dim === 'user') {
+                const vendor = ds[0] ? ds[0].Vendor_Name : '—';
+                return head + 'Vendor: ' + bold(vendor) + '<br>' +
+                    'Poles tagged: ' + bold(fmt(ds.length)) + ' · run rate ' + bold(rr.rate + '/day') + ' (' + rr.days + ' active days)<br>' +
+                    'Buildings connected: ' + bold(fmt(bs.total)) + ' · linkage ' + bold(pct1(lk.linked, lk.n)) + '<br>' +
+                    'Undertakings covered: ' + bold(uniqCount(ds, 'Undertaking')) + ' · feeders: ' + bold(uniqCount(ds, 'Feeder'));
+            }
+            return head + 'Poles: ' + bold(fmt(ds.length)) + ' · run rate ' + bold(rr.rate + '/day') + '<br>' +
+                'Field officers: ' + bold(uniqCount(ds, 'User')) + ' · DTs: ' + bold(uniqCount(ds, 'DT Name')) + '<br>' +
+                'Buildings: ' + bold(fmt(bs.total)) + ' (avg ' + bs.avg + '/pole) · linkage ' + bold(pct1(lk.linked, lk.n));
+        }
+
+        const HELP = '<div class="ai-head">🤖 What I can answer</div>' +
+            'I analyse the live pole-tagging data. Try:<br>' +
+            '• ' + bold('Summary') + ' or "summary for ETC"<br>' +
+            '• ' + bold('Top 10 field officers') + ' / "top feeders by run rate"<br>' +
+            '• ' + bold('Run rate by vendor') + ' · ' + bold('Activity last 7 days') + '<br>' +
+            '• ' + bold('Concrete vs wooden') + ' · ' + bold('Buildings connected') + '<br>' +
+            '• ' + bold('Feeders behind on BOQ') + ' · ' + bold('Building-SLRN linkage') + '<br>' +
+            '• A ' + bold('field officer, feeder, DT or SLRN') + ' name for a deep-dive';
+
+        function issueHonestAnswer(ctx) {
+            return '<div class="ai-head">⚠️ Condition data not captured</div>' +
+                'This dataset records pole <em>tagging</em>, not condition grading — every record is logged as ' + bold('COMPLETE') +
+                ', and no defect/quality field is collected. I won\'t invent a defect rate.<br><br>' +
+                'What I <em>can</em> tell you for ' + bold(titleCase(ctx.label)) + ':<br>' +
+                '• Pole types (concrete vs wooden)<br>• Buildings connected & SLRN linkage<br>• Run rate, coverage and BOQ completion' +
+                contextNote(ctx);
+        }
+
+        function fallback(q, qTokens, rawQuery, data) {
+            // Fuzzy match a user / feeder / DT name, else generic text search.
+            const users = [...new Set(data.map(d => d.User).filter(Boolean))];
+            const userNames = users.map(getDisplayName);
+            const fu = fuzzyBest(qTokens, userNames);
+            if (fu) {
+                const uid = users.find(u => getDisplayName(u) === fu.value) || fu.value;
+                const ds = data.filter(d => d.User === uid);
+                if (ds.length) {
+                    const rr = runRate(ds), bs = buildingsStats(ds);
+                    return '<div class="ai-head">🔎 ' + esc(getDisplayName(uid)) + ' (closest match)</div>' +
+                        'Vendor: ' + bold(ds[0].Vendor_Name || '—') + '<br>' +
+                        'Poles: ' + bold(fmt(ds.length)) + ' · run rate ' + bold(rr.rate + '/day') + '<br>' +
+                        'Buildings: ' + bold(fmt(bs.total)) + ' · undertakings ' + bold(uniqCount(ds, 'Undertaking'));
+                }
+            }
+            const feeders = [...new Set(data.map(d => d.Feeder).filter(Boolean))];
+            const ff = fuzzyBest(qTokens, feeders);
+            if (ff) {
+                const ds = data.filter(d => d.Feeder === ff.value), rr = runRate(ds);
+                return '<div class="ai-head">🔌 Feeder ' + esc(ff.value) + ' (closest match)</div>' +
+                    'Poles: ' + bold(fmt(ds.length)) + ' · DTs ' + bold(uniqCount(ds, 'DT Name')) +
+                    ' · officers ' + bold(uniqCount(ds, 'User')) + ' · run rate ' + bold(rr.rate + '/day');
+            }
+            // generic text search
+            const nq = norm(rawQuery);
+            if (nq.length >= 3) {
+                const matches = data.filter(d => Object.values(d).some(v => v && String(v).toLowerCase().includes(nq)));
+                if (matches.length) {
+                    return 'Found ' + bold(fmt(matches.length)) + ' records matching "' + esc(rawQuery) + '" — ' +
+                        bold(uniqCount(matches, 'User')) + ' officers, run rate ' + bold(runRate(matches).rate + '/day') + '.';
+                }
+            }
+            return '<div class="ai-head">🤔 I didn\'t catch that</div>' +
+                'I couldn\'t map "' + esc(rawQuery) + '" to the data.' + '<br>' + HELP.replace('<div class="ai-head">🤖 What I can answer</div>', '');
+        }
+
+        // ---------- main dispatcher ----------
+        function runQuery(raw) {
+            const rawQuery = String(raw || '').trim();
+            if (!rawQuery) { if (thinkTimer) clearTimeout(thinkTimer); responseEl.classList.remove('visible'); return; }
+            const data = (Array.isArray(filteredData) && filteredData.length) ? filteredData : globalData;
+            if (!data || !data.length) { show('The dashboard is still loading its data — give it a moment, then ask again.'); return; }
+
+            const q = normalize(rawQuery);
+            const qTokens = q.split(' ').filter(Boolean);
+
+            // greeting / help
+            if (has(q, /^(hi|hello|hey|help|what can you|how do you|examples?)\b/) || q === 'help') { show(HELP); return; }
+
+            // SLRN lookup (before context, so a specific pole isn't mistaken for a filter)
+            const slrn = slrnAnswer(q, rawQuery, data);
+            if (slrn) { show(slrn); return; }
+
+            const ctx = detectContext(q, qTokens, data);
+            let out = null;
+
+            if (has(q, /\bissue\b/)) out = issueHonestAnswer(ctx);
+            // Pole-type before "compare" so "concrete vs wooden" isn't read as a vendor
+            // comparison; but let count/percentage phrasing fall through to those handlers.
+            else if (has(q, /\bpole ?type|material|concrete|wooden\b/) && !has(q, /\bhow many|count|number of|percent|percentage|share|proportion\b/)) out = poleTypeAnswer(ctx);
+            else if (has(q, /\bcompare\b|\bvs\b|\bversus\b|\bdifference\b/)) out = compareAnswer(q, ctx);
+            else if (has(q, /\bpercent|percentage|share|proportion|what fraction\b/)) out = shareAnswer(q, ctx);
+            // "behind" (and its kin) only routes to BOQ alongside real BOQ/feeder context,
+            // so "which officers are lagging" isn't answered with a feeder-BOQ ranking.
+            else if (has(q, /\bboq|target|bill of quant|completion|complete\b/) || (BEHIND_RE.test(q) && has(q, /\bfeeder\b/))) out = boqAnswer(q, ctx);
+            else if (has(q, /\btrend|over time|timeline|history|progress|momentum|last \d+ day|per day|daily|this week|yesterday|today\b/)) out = trendAnswer(q, ctx);
+            else if (has(q, /\bwhich pole\b|\bbusiest pole\b|\bsingle pole\b/)) out = buildingsAnswer(ctx);
+            else if (has(q, /\btop\b|\bbest\b|\bhighest\b|\bmost\b|\bleading\b|\blead\b/)) out = rankAnswer(q, ctx, false);
+            else if (has(q, /\bbottom\b|\bworst\b|\blowest\b|\bleast\b|\bslowest\b/)) out = rankAnswer(q, ctx, true);
+            else if (has(q, /\brun rate\b/)) out = runRateAnswer(ctx);
+            else if (has(q, /\blink|associated building|building slrn|unlinked\b/)) out = linkageAnswer(ctx);
+            else if (has(q, /\bbuildings\b/)) out = buildingsAnswer(ctx);
+            else if (has(q, /\barea|\blocation|\baddress|\bstreet|\bwhere\b/)) out = rankAnswer('top areas ' + q, ctx, false);
+            else if (has(q, /\bsummary|overview|snapshot|status|report|brief|recap|how (are|is) we\b/)) out = summaryAnswer(ctx);
+            else if (has(q, /\blist|show me|which\b/)) out = listAnswer(q, ctx);
+            else if (has(q, /\bhow many|count|number of|total\b/)) out = countAnswer(q, ctx);
+
+            // Entity-only queries → profile or count.
+            if (!out && ctx.filters.length) out = profileAnswer(ctx) || countAnswer(q, ctx);
+            if (!out) out = fallback(q, qTokens, rawQuery, data);
+            show(out);
+        }
+    })();
 
     function updateExecutiveSummary() {
         const container = document.getElementById('exec-dynamic-content');

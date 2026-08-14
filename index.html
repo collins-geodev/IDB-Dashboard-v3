@@ -46,7 +46,7 @@
     <link rel="stylesheet" href="style.css?v=20260811a">
     <link rel="stylesheet" href="sidebar.css?v=20260531a">
     <link rel="stylesheet" href="insights.css?v=20260405w">
-    <link rel="stylesheet" href="ai-styles.css?v=20260405w">
+    <link rel="stylesheet" href="ai-styles.css?v=20260814a">
     <link rel="stylesheet" href="switch_styles.css?v=20260405w">
     <style>
         html {
@@ -138,15 +138,16 @@
                                         <span class="ai-icon">🤖</span>
                                         <div>
                                             <h3>AI Data Assistant</h3>
-                                            <p>Ask sophisticated questions about your data</p>
+                                            <p>Ask about run rate, rankings, BOQ, buildings, feeders &amp; more</p>
                                         </div>
                                     </div>
                                     <div class="ai-input-wrapper">
                                         <input type="text" id="ai-query"
-                                            placeholder="Try 'Avg run rate for Jesom' or 'Top 3 users'..."
+                                            placeholder="e.g. 'Top 5 feeders', 'Run rate by vendor', 'Feeders behind on BOQ'…"
                                             autocomplete="off">
                                         <button id="ai-ask-btn">Ask</button>
                                     </div>
+                                    <div id="ai-suggestions" class="ai-suggestions"></div>
                                     <div id="ai-response" class="ai-response"></div>
                                 </div>
                             </li>
@@ -987,7 +988,7 @@
     <script src="convex-client.js?v=20260710a"></script>
     <script src="auth-footprint.js?v=20260705a"></script>
     <script src="dashboard-auth.js?v=20260707b"></script>
-    <script src="script.js?v=20260811f"></script>
+    <script src="script.js?v=20260814a"></script>
 </body>
 
 </html>

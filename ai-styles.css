@@ -162,3 +162,55 @@
     color: hsl(var(--primary));
     font-weight: 600;
 }
+
+/* Suggestion chips (clickable example questions) */
+.ai-suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin-top: 0.75rem;
+}
+
+.ai-chip {
+    background: hsl(var(--secondary));
+    color: hsl(var(--foreground));
+    border: 1px solid hsl(var(--border));
+    border-radius: 999px;
+    padding: 0.32rem 0.75rem;
+    font-size: 0.78rem;
+    font-family: inherit;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.18s ease;
+    white-space: nowrap;
+}
+
+.ai-chip:hover {
+    background: hsl(var(--primary) / 0.12);
+    border-color: hsl(var(--primary) / 0.5);
+    color: hsl(var(--primary));
+    transform: translateY(-1px);
+}
+
+/* Structured answer bits */
+.ai-response .ai-head {
+    font-weight: 700;
+    color: hsl(var(--foreground));
+    margin-bottom: 0.5rem;
+    font-size: 1rem;
+    line-height: 1.35;
+}
+
+.ai-response .ai-row {
+    padding: 0.15rem 0;
+}
+
+.ai-response small {
+    color: hsl(var(--muted-foreground));
+    font-size: 0.82rem;
+}
+
+.ai-response em {
+    color: hsl(var(--muted-foreground));
+    font-style: italic;
+}
