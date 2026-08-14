@@ -5321,6 +5321,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (dtHlLegendDiv) renderDtHighlightLegendBody(dtHlLegendDiv, highlightedDtName);
     }
 
+    // Legend "Select all" / "Clear" — show every vendor with poles, or none.
+    function setDtVendorSelection(selectAll) {
+        if (!dtHlSelected || !dtHlCounts) return;
+        dtHlSelected = selectAll
+            ? new Set(Object.keys(dtHlCounts).filter(k => dtHlCounts[k] > 0))
+            : new Set();
+        drawDtHighlightMarkers();
+        if (dtHlLegendDiv) renderDtHighlightLegendBody(dtHlLegendDiv, highlightedDtName);
+    }
+
     // Render/refresh the legend contents from the current selection state.
     function renderDtHighlightLegendBody(div, dtName) {
         const rowHtml = (label, key) => {
@@ -5335,11 +5345,17 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>`;
         };
         // Preserve keyboard focus across the innerHTML rebuild so a keyboard user
-        // toggling vendors doesn't get bounced back to <body> each time.
-        const focusedKey = div.contains(document.activeElement) ? document.activeElement.dataset.key : null;
+        // toggling vendors (or using the action buttons) isn't bounced to <body>.
+        const active = document.activeElement;
+        const inDiv = div.contains(active);
+        const focusedKey = inDiv ? (active.dataset.key || null) : null;
+        const focusedAct = inDiv ? (active.dataset.act || null) : null;
         let rows = VENDOR_HL_ORDER.map(v => rowHtml(v, VENDOR_HL[v].key)).join('');
         if (dtHlCounts && dtHlCounts.other) rows += rowHtml('Other vendor', 'other');
         const shown = dtHlPoles.reduce((n, p) => n + (dtHlSelected && dtHlSelected.has(p.key) ? 1 : 0), 0);
+        const selectable = dtHlCounts ? Object.keys(dtHlCounts).filter(k => dtHlCounts[k] > 0) : [];
+        const allSelected = selectable.length === 0 || selectable.every(k => dtHlSelected && dtHlSelected.has(k));
+        const noneSelected = !(dtHlSelected && selectable.some(k => dtHlSelected.has(k)));
         div.innerHTML = `
             <div class="dt-hl-legend-head">
                 <span class="dt-hl-legend-title">Connected poles by vendor</span>
@@ -5348,6 +5364,10 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="dt-hl-legend-dt">${hlEsc(dtName)}</div>
             <div class="dt-hl-legend-hint">Click a vendor to show / hide its poles</div>
             ${rows}
+            <div class="dt-hl-legend-actions">
+                <button type="button" class="dt-hl-legend-act" data-act="all"${allSelected ? ' disabled' : ''}>Select all</button>
+                <button type="button" class="dt-hl-legend-act" data-act="clear"${noneSelected ? ' disabled' : ''}>Clear</button>
+            </div>
             <div class="dt-hl-legend-total"><span class="dt-hl-legend-total-num">${shown.toLocaleString()}</span> of ${dtHlPoles.length.toLocaleString()} pole${dtHlPoles.length === 1 ? '' : 's'} shown</div>
         `;
         div.querySelector('.dt-hl-legend-close').addEventListener('click', clearDtHighlight);
@@ -5356,7 +5376,11 @@ document.addEventListener('DOMContentLoaded', () => {
             row.addEventListener('click', act);
             row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); act(); } });
         });
+        div.querySelectorAll('.dt-hl-legend-act').forEach(btn => {
+            btn.addEventListener('click', () => setDtVendorSelection(btn.dataset.act === 'all'));
+        });
         if (focusedKey) div.querySelector(`.dt-hl-legend-row[data-key="${focusedKey}"]`)?.focus();
+        else if (focusedAct) div.querySelector(`.dt-hl-legend-act[data-act="${focusedAct}"]:not(:disabled)`)?.focus();
     }
 
     function showDtHighlightLegend(dtName) {
@@ -5576,6 +5600,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Count unique pole SLRNs only — the SAME basis the highlight
                 // legend uses — so the badge and legend totals can never diverge.
                 const poleCount = g.poles.size;
+                // A DT with captures but no identifiable poles (all SLRN-less)
+                // has nothing to badge or highlight — skip it entirely.
+                if (poleCount === 0) continue;
                 const badge = poleCount > 999 ? '999+' : String(poleCount);
 
                 const marker = L.marker([clat, clon], {
@@ -5842,29 +5869,37 @@ document.addEventListener('DOMContentLoaded', () => {
                         utGeo.resetStyle(e.target);
                     });
 
+                    // An undertaking spans many feeders/DTs/vendors/officers, so
+                    // show an AGGREGATE summary — not one pole's fields. (The old
+                    // version picked each field independently via first-non-empty,
+                    // so Feeder/DT/Vendor/User could each come from a different
+                    // pole, e.g. showing a single vendor for a multi-vendor area.)
                     const buildUtPopup = () => {
                         const utRows = (filteredData || []).filter(r => (r["Undertaking"] || '').toString().toUpperCase() === name.toUpperCase());
-                        const first = (arr) => {
-                            const v = arr.find(x => x !== undefined && x !== null && x !== '');
-                            return v === undefined ? 'N/A' : String(v);
-                        };
-                        const feeder = first(utRows.map(r => r.Feeder));
-                        const dtName = first(utRows.map(r => r["DT Name"]));
-                        const vendor = first(utRows.map(r => r.Vendor_Name));
-                        const userName = first(utRows.map(r => getDisplayName(r.User)));
-                        const date = first(utRows.map(r => r["Date/timestamp"] ? String(r["Date/timestamp"]).split(' ')[0] : ''));
+                        const buVal = bu || (utRows.find(r => r["Bussines Unit"]) || {})["Bussines Unit"] || 'N/A';
+                        const row = (lbl, val, last) => `<div class="asset-popup-row${last ? ' asset-popup-row-last' : ''}"><div class="asset-popup-label">${lbl}</div><div class="asset-popup-value">${val}</div></div>`;
+                        if (!utRows.length) {
+                            return `<div class="asset-popup"><div class="asset-popup-title">${hlEsc(name) || 'N/A'}</div><div class="asset-popup-subtitle">UNDERTAKING</div><div class="asset-popup-divider"></div><div class="asset-popup-table">${row('Business Unit', hlEsc(buVal))}${row('Poles Tagged', 'None in the current filter', true)}</div></div>`;
+                        }
+                        const poles = countUniquePoles(utRows);
+                        const feeders = new Set(utRows.map(r => r.Feeder).filter(Boolean)).size;
+                        const dts = new Set(utRows.map(r => r["DT Name"]).filter(Boolean)).size;
+                        const officers = new Set(utRows.map(r => r.User).filter(Boolean)).size;
+                        const vendorCounts = uniquePolesByGroupExclusive(utRows, r => r.Vendor_Name || 'Other');
+                        const vendorStr = Object.entries(vendorCounts).sort((a, b) => b[1] - a[1])
+                            .map(([v, c]) => `${hlEsc(v)} (${c.toLocaleString()})`).join('<br>') || 'N/A';
                         return `
                             <div class="asset-popup">
-                                <div class="asset-popup-title">${name || 'N/A'}</div>
+                                <div class="asset-popup-title">${hlEsc(name) || 'N/A'}</div>
+                                <div class="asset-popup-subtitle">UNDERTAKING</div>
                                 <div class="asset-popup-divider"></div>
                                 <div class="asset-popup-table">
-                                    <div class="asset-popup-row"><div class="asset-popup-label">Business Unit</div><div class="asset-popup-value">${bu || 'N/A'}</div></div>
-                                    <div class="asset-popup-row"><div class="asset-popup-label">Undertaking</div><div class="asset-popup-value">${name || 'N/A'}</div></div>
-                                    <div class="asset-popup-row"><div class="asset-popup-label">Feeder</div><div class="asset-popup-value">${feeder}</div></div>
-                                    <div class="asset-popup-row"><div class="asset-popup-label">DT Name</div><div class="asset-popup-value">${dtName}</div></div>
-                                    <div class="asset-popup-row"><div class="asset-popup-label">Vendor</div><div class="asset-popup-value">${vendor}</div></div>
-                                    <div class="asset-popup-row"><div class="asset-popup-label">User</div><div class="asset-popup-value">${userName}</div></div>
-                                    <div class="asset-popup-row asset-popup-row-last"><div class="asset-popup-label">Date</div><div class="asset-popup-value">${date}</div></div>
+                                    ${row('Business Unit', hlEsc(buVal))}
+                                    ${row('Feeders', feeders.toLocaleString())}
+                                    ${row('Distribution Transformers', dts.toLocaleString())}
+                                    ${row('Poles Tagged', poles.toLocaleString())}
+                                    ${row('Field Officers', officers.toLocaleString())}
+                                    ${row('Vendors', vendorStr, true)}
                                 </div>
                             </div>
                         `;
@@ -5886,7 +5921,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         keyboard: false,
                         icon: L.divIcon({
                             className: 'ut-label-wrapper',
-                            html: `<div class="ut-label" style="border-color:${col};">${name}</div>`,
+                            html: `<div class="ut-label" style="border-color:${col};">${hlEsc(name)}</div>`,
                             iconSize: [0, 0]
                         })
                     }).addTo(utLabelLayer);
