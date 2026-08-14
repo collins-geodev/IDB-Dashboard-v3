@@ -643,6 +643,65 @@ document.addEventListener('DOMContentLoaded', () => {
         return pt.indexOf('new') >= 0 || it.indexOf('new') >= 0;
     }
 
+    // ── Canonical pole counting ─────────────────────────────────────────────
+    // A "pole" is a unique SLRN (a pole captured twice is still one pole) — this
+    // is how the KPI cards count. The executive summary and vendor recommendations
+    // use these so every headline on the page agrees.
+    function poleSlrn(item) {
+        return String((item && (item["Lt PoleSLRN"] || item["LT Pole No"])) || "").trim();
+    }
+    function countUniquePoles(arr) {
+        var s = new Set();
+        arr.forEach(function (d) { var x = poleSlrn(d); if (x) s.add(x); });
+        return s.size;
+    }
+    // { key: uniquePoleCount } grouped by keyFn (blank keys and SLRN-less rows skipped).
+    function uniquePolesByGroup(arr, keyFn) {
+        var m = {};
+        arr.forEach(function (d) {
+            var k = keyFn(d); if (k == null || k === '') return;
+            var x = poleSlrn(d); if (!x) return;
+            (m[k] = m[k] || new Set()).add(x);
+        });
+        var out = {};
+        Object.keys(m).forEach(function (k) { out[k] = m[k].size; });
+        return out;
+    }
+    // Like uniquePolesByGroup, but each unique pole is attributed to ONE group (the
+    // first row that carries it) — so the group counts sum to the total. Used for
+    // "contribution" splits (e.g. vendor bars) that must add up to 100%.
+    function uniquePolesByGroupExclusive(arr, keyFn) {
+        var assigned = new Set(), out = {};
+        arr.forEach(function (d) {
+            var x = poleSlrn(d); if (!x || assigned.has(x)) return;
+            var k = keyFn(d); if (k == null || k === '') return;
+            assigned.add(x); out[k] = (out[k] || 0) + 1;
+        });
+        return out;
+    }
+    // Building-SLRN linkage over unique poles: how many poles carry an associated
+    // building SLRN (a real data-completeness signal, unlike the simulated Issue_Type).
+    function buildingLinkage(arr) {
+        var all = new Set(), linked = new Set();
+        arr.forEach(function (d) {
+            var x = poleSlrn(d); if (!x) return;
+            all.add(x);
+            if (String(d["Associated Buildings SLRN"] || "").trim()) linked.add(x);
+        });
+        var total = all.size, l = linked.size;
+        return { total: total, linked: l, unlinked: total - l, pct: total ? (l / total * 100) : 0 };
+    }
+    // Count of distinct building SLRNs (semicolon-separated) connected across the set.
+    function uniqueBuildings(arr) {
+        var s = new Set();
+        arr.forEach(function (d) {
+            String(d["Associated Buildings SLRN"] || "").split(";").forEach(function (b) {
+                var t = b.trim(); if (t) s.add(t);
+            });
+        });
+        return s.size;
+    }
+
     // Initialize Dashboard
     // Initialize Dashboard - Auto Fetch
     // CRITICAL: Data now lives in Convex file storage. To update it, run:
@@ -2660,10 +2719,10 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateExecutiveSummary() {
         const container = document.getElementById('exec-dynamic-content');
         if (!container) return;
-        const data = filteredData.length > 0 ? filteredData : globalData;
+        const data = filteredData; // empty selection → empty state (consistent with the KPI cards)
         if (!data || data.length === 0) { container.innerHTML = '<p style="color:var(--text-secondary);">No data available.</p>'; return; }
 
-        const total = data.length;
+        const total = countUniquePoles(data); // unique SLRN — matches the KPI cards
         const fmt = n => typeof n === 'number' ? n.toLocaleString() : n;
 
         // Dates & velocity
@@ -2684,15 +2743,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const trending = trendPct > 5 ? 'accelerating' : trendPct < -5 ? 'decelerating' : 'holding steady';
         const trendColor = trendPct > 5 ? '#10b981' : trendPct < -5 ? '#ef4444' : '#eab308';
 
-        // Vendors
-        const vendorCounts = {};
-        data.forEach(d => { vendorCounts[d.Vendor_Name || 'Other'] = (vendorCounts[d.Vendor_Name || 'Other'] || 0) + 1; });
+        // Vendors — each pole attributed to one vendor so the bars sum to the total
+        const vendorCounts = uniquePolesByGroupExclusive(data, d => d.Vendor_Name || 'Other');
         const sortedVendors = Object.entries(vendorCounts).sort((a, b) => b[1] - a[1]);
         const vColors = { 'ETC Workforce': '#0EA5E9', 'Jesom Technology': '#f97316', 'Ikeja Electric': '#eab308' };
 
-        // Officers
-        const userCounts = {};
-        data.forEach(d => { if (d.User) userCounts[d.User] = (userCounts[d.User] || 0) + 1; });
+        // Officers (unique poles per officer)
+        const userCounts = uniquePolesByGroup(data, d => d.User);
         const totalUsers = Object.keys(userCounts).length;
         const sortedUsers = Object.entries(userCounts).sort((a, b) => b[1] - a[1]);
         const topOfficer = sortedUsers[0];
@@ -2703,10 +2760,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const utCount = new Set(data.map(d => d.Undertaking).filter(Boolean)).size;
         const buCount = new Set(data.map(d => d["Bussines Unit"]).filter(Boolean)).size;
 
-        // Defects
-        const defects = data.filter(d => d.Issue_Type && d.Issue_Type !== 'Good Condition').length;
-        const defectPct = ((defects / total) * 100).toFixed(1);
-        const healthColor = parseFloat(defectPct) > 25 ? '#ef4444' : parseFloat(defectPct) > 15 ? '#eab308' : '#10b981';
+        // Building-SLRN linkage — a real data-completeness signal (condition/defect
+        // grading isn't captured in this dataset, so it isn't reported).
+        const link = buildingLinkage(data);
+        const linkColor = link.pct >= 80 ? '#10b981' : link.pct >= 60 ? '#eab308' : '#ef4444';
 
         // BOQ
         let activeBoqData = boqData;
@@ -2723,9 +2780,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const boqTotal = activeBoqData.length > 0 ? activeBoqData.reduce((s, d) => s + (parseInt(d["POLES Grand Total"]) || 0), 0) : 0;
         const completionPct = boqTotal > 0 ? Math.min(((total / boqTotal) * 100), 100).toFixed(1) : null;
 
-        // Pole types
-        const poleTypes = {};
-        data.forEach(d => { const t = (d["Type of Pole"] || 'Unknown').toUpperCase(); poleTypes[t] = (poleTypes[t] || 0) + 1; });
+        // Pole types (unique poles)
+        const poleTypes = uniquePolesByGroup(data, d => (d["Type of Pole"] || 'Unknown').toUpperCase());
         const dominantPole = Object.entries(poleTypes).sort((a, b) => b[1] - a[1])[0];
         const dominantPolePct = dominantPole ? ((dominantPole[1] / total) * 100).toFixed(0) : 0;
 
@@ -2745,7 +2801,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const color = vColors[name] || '#6b7280';
             return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
                 <span style="font-size:0.8rem;min-width:110px;color:${color};font-weight:600;">${name}</span>
-                <div style="flex:1;height:6px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden;">
+                <div style="flex:1;height:6px;background:hsl(var(--muted) / 0.45);border-radius:3px;overflow:hidden;">
                     <div style="height:100%;width:${pct}%;background:${color};border-radius:3px;"></div>
                 </div>
                 <span style="font-size:0.78rem;color:var(--text-secondary);min-width:65px;text-align:right;">${fmt(count)} (${pct}%)</span>
@@ -2772,7 +2828,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <span style="font-size:0.85rem;font-weight:600;color:var(--text-secondary);">BOQ Progress</span>
                     <span style="font-size:0.95rem;font-weight:700;color:${parseFloat(completionPct) >= 50 ? '#10b981' : '#eab308'};">${completionPct}%</span>
                 </div>
-                <div style="height:8px;background:rgba(255,255,255,0.06);border-radius:4px;overflow:hidden;">
+                <div style="height:8px;background:hsl(var(--muted) / 0.45);border-radius:4px;overflow:hidden;">
                     <div style="height:100%;width:${completionPct}%;background:${parseFloat(completionPct) >= 50 ? '#10b981' : '#eab308'};border-radius:4px;transition:width 0.5s;"></div>
                 </div>
                 <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:3px;">${fmt(total)} of ${fmt(boqTotal)} target poles</div>
@@ -2795,19 +2851,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
             <!-- Insights Row -->
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:0.82rem;">
-                <div style="background:rgba(255,255,255,0.02);padding:8px 10px;border-radius:6px;border-left:3px solid ${healthColor};">
-                    <div style="color:var(--text-secondary);font-size:0.75rem;">Asset Health</div>
-                    <div style="font-weight:700;color:${healthColor};">${(100 - parseFloat(defectPct)).toFixed(1)}% Good <span style="font-weight:400;color:var(--text-secondary);">/ ${defectPct}% defects</span></div>
+                <div style="background:hsl(var(--secondary) / 0.5);padding:8px 10px;border-radius:6px;border-left:3px solid ${linkColor};">
+                    <div style="color:var(--text-secondary);font-size:0.75rem;">Building Linkage</div>
+                    <div style="font-weight:700;color:${linkColor};">${link.pct.toFixed(1)}% linked <span style="font-weight:400;color:var(--text-secondary);">/ ${fmt(link.unlinked)} to tag</span></div>
                 </div>
-                <div style="background:rgba(255,255,255,0.02);padding:8px 10px;border-radius:6px;border-left:3px solid hsl(var(--primary));">
+                <div style="background:hsl(var(--secondary) / 0.5);padding:8px 10px;border-radius:6px;border-left:3px solid hsl(var(--primary));">
                     <div style="color:var(--text-secondary);font-size:0.75rem;">Top Officer</div>
                     <div style="font-weight:700;color:hsl(var(--foreground));">${topOfficer ? getDisplayName(topOfficer[0]) : 'N/A'} <span style="font-weight:400;color:var(--text-secondary);">(${topOfficer ? fmt(topOfficer[1]) : 0} poles)</span></div>
                 </div>
-                <div style="background:rgba(255,255,255,0.02);padding:8px 10px;border-radius:6px;border-left:3px solid #eab308;">
+                <div style="background:hsl(var(--secondary) / 0.5);padding:8px 10px;border-radius:6px;border-left:3px solid #eab308;">
                     <div style="color:var(--text-secondary);font-size:0.75rem;">Dominant Material</div>
                     <div style="font-weight:700;color:hsl(var(--foreground));">${dominantPole ? dominantPole[0].charAt(0) + dominantPole[0].slice(1).toLowerCase() : 'N/A'} <span style="font-weight:400;color:var(--text-secondary);">(${dominantPolePct}%)</span></div>
                 </div>
-                <div style="background:rgba(255,255,255,0.02);padding:8px 10px;border-radius:6px;border-left:3px solid #f97316;">
+                <div style="background:hsl(var(--secondary) / 0.5);padding:8px 10px;border-radius:6px;border-left:3px solid #f97316;">
                     <div style="color:var(--text-secondary);font-size:0.75rem;">Avg per Officer</div>
                     <div style="font-weight:700;color:hsl(var(--foreground));">${totalUsers > 0 ? Math.round(total / totalUsers) : 0} poles <span style="font-weight:400;color:var(--text-secondary);">/ ${totalUsers} officers</span></div>
                 </div>
@@ -3371,29 +3427,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const actRecordsExNew = Math.max(0, actRecords - actNew);
         updateModernCard('records-exnew', boqRecordsExNew, actRecordsExNew);
 
-        // --- B. Good Poles (Concrete/Good) — unique by SLRN ---
-        const boqGood = activeBoqData.reduce((sum, d) => sum + (parseInt(d["GOOD"]) || 0), 0);
-        const goodPoleSLRNs = new Set();
-        filteredData.forEach(item => {
-            if (item.Issue_Type === 'Good Condition') {
-                const slrn = (item["Lt PoleSLRN"] || item["LT Pole No"] || "").toString().trim();
-                if (slrn) goodPoleSLRNs.add(slrn);
-            }
-        });
-        const actGood = goodPoleSLRNs.size;
-        updateModernCard('concrete', boqGood, actGood);
+        // --- B. Building Linkage (real) — poles carrying an associated building SLRN,
+        //     unique by pole SLRN. Replaces the old simulated "Good Condition" card. ---
+        const linkStats = buildingLinkage(filteredData);
+        updateModernCard('concrete', actRecords, linkStats.linked);
 
-        // --- C. Bad Poles (Wooden/Replace) — unique by SLRN ---
-        const boqBad = activeBoqData.reduce((sum, d) => sum + (parseInt(d["BAD"]) || 0), 0);
-        const badPoleSLRNs = new Set();
+        // --- C. Concrete Poles (real) — unique concrete poles by SLRN.
+        //     Replaces the old simulated "Bad Poles" card. ---
+        const concreteSLRNs = new Set();
         filteredData.forEach(item => {
-            if (item.Issue_Type !== 'Good Condition') {
+            if (String(item["Type of Pole"] || "").toUpperCase().includes("CONCRETE")) {
                 const slrn = (item["Lt PoleSLRN"] || item["LT Pole No"] || "").toString().trim();
-                if (slrn) badPoleSLRNs.add(slrn);
+                if (slrn) concreteSLRNs.add(slrn);
             }
         });
-        const actBad = badPoleSLRNs.size;
-        updateModernCard('wooden', boqBad, actBad);
+        updateModernCard('wooden', actRecords, concreteSLRNs.size);
 
         updateModernCard('users', boqNew, actNew);
 
@@ -5335,8 +5383,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const container = document.getElementById('keyInsightsContent');
         if (!container) return;
         const data = filteredData;
-        const total = data.length;
-        if (total === 0) { container.innerHTML = '<p style="color:var(--text-secondary);">No data to display.</p>'; return; }
+        if (data.length === 0) { container.innerHTML = '<p style="color:var(--text-secondary);">No data to display.</p>'; return; }
+        const total = countUniquePoles(data); // unique SLRN — matches the KPI cards
 
         // --- Velocity ---
         const dateStrings = data.map(d => d["Date/timestamp"] ? d["Date/timestamp"].split(' ')[0] : '').filter(Boolean);
@@ -5355,34 +5403,37 @@ document.addEventListener('DOMContentLoaded', () => {
         const trendIcon = trendPct > 5 ? '▲' : trendPct < -5 ? '▼' : '►';
         const trendColor = trendPct > 5 ? '#10b981' : trendPct < -5 ? '#ef4444' : '#eab308';
 
-        // --- Vendor race ---
-        const vendorCounts = {};
-        data.forEach(d => { vendorCounts[d.Vendor_Name || 'Other'] = (vendorCounts[d.Vendor_Name || 'Other'] || 0) + 1; });
+        // --- Vendor race — each pole attributed to one vendor (sums to total) ---
+        const vendorCounts = uniquePolesByGroupExclusive(data, d => d.Vendor_Name || 'Other');
         const sortedVendors = Object.entries(vendorCounts).sort((a, b) => b[1] - a[1]);
         const vendorColors = { 'ETC Workforce': '#0EA5E9', 'Jesom Technology': '#f97316', 'Ikeja Electric': '#eab308' };
 
-        // --- Officers ---
-        const userCounts = {};
-        data.forEach(d => { if (d.User) userCounts[d.User] = (userCounts[d.User] || 0) + 1; });
+        // --- Officers (unique poles) ---
+        const userCounts = uniquePolesByGroup(data, d => d.User);
         const totalUsers = Object.keys(userCounts).length;
 
-        // --- Defects ---
-        const defects = data.filter(d => d.Issue_Type && d.Issue_Type !== 'Good Condition').length;
-        const defectPct = ((defects / total) * 100).toFixed(1);
-        const healthPct = (100 - parseFloat(defectPct)).toFixed(1);
+        // --- Building-SLRN linkage (real data-completeness signal) ---
+        const link = buildingLinkage(data);
+        const linkPct = link.pct.toFixed(1);
+        const linkColor = link.pct >= 80 ? '#10b981' : link.pct >= 60 ? '#eab308' : '#ef4444';
 
         // --- Coverage ---
         const feederCount = new Set(data.map(d => d.Feeder).filter(Boolean)).size;
         const dtCount = new Set(data.map(d => d["DT Name"]).filter(Boolean)).size;
         const utCount = new Set(data.map(d => d.Undertaking).filter(Boolean)).size;
 
-        // --- BOQ completion ---
-        const boqTotal = boqData.length > 0 ? boqData.reduce((s, d) => s + (parseInt(d["POLES Grand Total"]) || 0), 0) : 0;
+        // --- BOQ completion (scope the target by the active feeder/DT filter, so it
+        //     matches the KPI cards and exec summary instead of dividing by the whole BOQ) ---
+        let kiBoqData = boqData;
+        const kiFeederVals = multiSelects.feederFilter?.getValues();
+        if (kiFeederVals && kiFeederVals.length > 0) kiBoqData = kiBoqData.filter(d => kiFeederVals.includes(d["FEEDER NAME"]));
+        const kiDtVals = multiSelects.dtFilter?.getValues();
+        if (kiDtVals && kiDtVals.length > 0) kiBoqData = kiBoqData.filter(d => kiDtVals.includes(d["DT NAME"]));
+        const boqTotal = kiBoqData.length > 0 ? kiBoqData.reduce((s, d) => s + (parseInt(d["POLES Grand Total"]) || 0), 0) : 0;
         const completionPct = boqTotal > 0 ? Math.min(((total / boqTotal) * 100), 100).toFixed(1) : null;
 
-        // --- Pole types ---
-        const poleTypes = {};
-        data.forEach(d => { const t = (d["Type of Pole"] || 'Unknown').toUpperCase(); poleTypes[t] = (poleTypes[t] || 0) + 1; });
+        // --- Pole types (unique poles) ---
+        const poleTypes = uniquePolesByGroup(data, d => (d["Type of Pole"] || 'Unknown').toUpperCase());
         const sortedPoles = Object.entries(poleTypes).sort((a, b) => b[1] - a[1]);
 
         // --- Date range ---
@@ -5490,19 +5541,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>` : '';
             })()}
 
-            <!-- Asset Health -->
+            <!-- Building-SLRN Linkage -->
             <div class="insight-item" style="flex-direction:column;align-items:stretch;">
                 <div style="display:flex;justify-content:space-between;align-items:center;">
-                    <span class="insight-label">Asset Health</span>
-                    <span style="font-size:0.85rem;font-weight:600;color:${parseFloat(defectPct) > 25 ? '#ef4444' : '#10b981'};">${healthPct}% Good</span>
+                    <span class="insight-label">Building Linkage</span>
+                    <span style="font-size:0.85rem;font-weight:600;color:${linkColor};">${linkPct}% linked</span>
                 </div>
-                <div style="display:flex;height:6px;border-radius:3px;overflow:hidden;margin-top:6px;">
-                    <div style="width:${healthPct}%;background:#10b981;"></div>
-                    <div style="width:${defectPct}%;background:#ef4444;"></div>
+                <div style="display:flex;height:6px;border-radius:3px;overflow:hidden;margin-top:6px;background:hsl(var(--muted) / 0.45);">
+                    <div style="width:${linkPct}%;background:${linkColor};"></div>
                 </div>
                 <div style="display:flex;justify-content:space-between;font-size:0.75rem;margin-top:3px;">
-                    <span style="color:#10b981;">${(total - defects).toLocaleString()} good</span>
-                    <span style="color:#ef4444;">${defects.toLocaleString()} defects (${defectPct}%)</span>
+                    <span style="color:hsl(var(--foreground));">${link.linked.toLocaleString()} linked</span>
+                    <span style="color:var(--text-secondary);">${link.unlinked.toLocaleString()} to tag</span>
                 </div>
             </div>
 
@@ -5602,8 +5652,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 };
             }
             fieldGroups[key].actualTotal++;
-            if (d.Issue_Type === 'Good Condition') fieldGroups[key].actualGood++;
-            else fieldGroups[key].actualBad++;
             fieldGroups[key].users.add(d.User);
         });
 
@@ -5717,14 +5765,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const dtLabels = topDTs.map(d => d.dtName);
 
         const options2 = {
+            // BOQ condition profile per DT (real BOQ survey figures). The field
+            // "actual good/bad" split isn't captured, so it isn't shown here.
             series: [
-                { name: 'Total Bad', data: topDTs.map(d => d.boqBad) },
-                { name: 'Actual Bad', data: topDTs.map(d => d.actualBad) },
-                { name: 'Total Good', data: topDTs.map(d => d.boqGood) },
-                { name: 'Actual Good', data: topDTs.map(d => d.actualGood) }
+                { name: 'Good (BOQ)', data: topDTs.map(d => d.boqGood) },
+                { name: 'Bad — Replace (BOQ)', data: topDTs.map(d => d.boqBad) }
             ],
             chart: { type: 'bar', height: 400, toolbar: { show: false }, background: 'transparent' },
-            colors: ['rgba(239, 68, 68, 0.4)', '#ef4444', 'rgba(16, 185, 129, 0.4)', '#10b981'], // Transp Red, Solid Red, Transp Green, Solid Green
+            colors: ['#10b981', '#ef4444'], // Good = green, Bad = red
             plotOptions: {
                 bar: { horizontal: false, columnWidth: '55%', endingShape: 'rounded' }
             },
@@ -5748,11 +5796,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const vendors = ['ETC Workforce', 'Jesom Technology', 'Ikeja Electric'];
         const TARGET_RATE = 50;
 
-        // Use filteredData so cards react to filter changes; globalData as benchmark
-        const activeData = filteredData.length > 0 ? filteredData : globalData;
-        const globalTotal = activeData.length;
-        const globalDefects = activeData.filter(d => d.Issue_Type && d.Issue_Type !== 'Good Condition').length;
-        const globalDefectPct = globalTotal > 0 ? ((globalDefects / globalTotal) * 100) : 0;
+        // Use filteredData so cards react to filter changes (empty selection → empty cards,
+        // consistent with the KPI cards, rather than silently showing the whole project).
+        const activeData = filteredData;
+        const globalTotal = countUniquePoles(activeData);
+        const globalLinkPct = buildingLinkage(activeData).pct; // project-wide building-SLRN linkage
+        // Each pole attributed to one vendor, so per-vendor totals sum to globalTotal and
+        // match the exec-summary / key-insights vendor bars.
+        const vendorPoleCounts = uniquePolesByGroupExclusive(activeData, d => d.Vendor_Name || 'Other');
 
         // BOQ target for completion context
         const boqTotal = boqData.length > 0
@@ -5772,7 +5823,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // --- Deep Metrics ---
-            const totalRecords = vData.length;
+            const totalRecords = vendorPoleCounts[vendor] || 0; // one pole → one vendor (sums to total)
             const shareOfTotal = ((totalRecords / globalTotal) * 100).toFixed(1);
 
             // Dates & velocity
@@ -5794,9 +5845,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const trendDir = recentRate > prevRate ? 'accelerating' : recentRate < prevRate ? 'decelerating' : 'steady';
             const trendDelta = prevRate > 0 ? Math.abs(Math.round(((recentRate - prevRate) / prevRate) * 100)) : 0;
 
-            // Users
-            const userCounts = {};
-            vData.forEach(d => { if (d.User) userCounts[d.User] = (userCounts[d.User] || 0) + 1; });
+            // Users (unique poles per officer)
+            const userCounts = uniquePolesByGroup(vData, d => d.User);
             const sortedUsers = Object.entries(userCounts).sort((a, b) => b[1] - a[1]);
             const totalUsers = sortedUsers.length;
             const topUser = sortedUsers[0];
@@ -5808,9 +5858,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // Top user contribution %
             const topUserPct = topUser ? ((topUser[1] / totalRecords) * 100).toFixed(1) : 0;
 
-            // Undertakings & concentration
-            const utCounts = {};
-            vData.forEach(d => { if (d.Undertaking) utCounts[d.Undertaking] = (utCounts[d.Undertaking] || 0) + 1; });
+            // Undertakings & concentration (unique poles per undertaking)
+            const utCounts = uniquePolesByGroup(vData, d => d.Undertaking);
             const sortedUTs = Object.entries(utCounts).sort((a, b) => b[1] - a[1]);
             const activeUTs = sortedUTs.length;
             const topUT = sortedUTs[0];
@@ -5821,19 +5870,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const dtCount = new Set(vData.map(d => d["DT Name"])).size;
             const feederCount = new Set(vData.map(d => d.Feeder)).size;
 
-            // Defect analysis
-            const badPoles = vData.filter(d => d.Issue_Type && d.Issue_Type !== 'Good Condition').length;
-            const defectPct = ((badPoles / totalRecords) * 100).toFixed(1);
-            const defectDiff = (parseFloat(defectPct) - globalDefectPct).toFixed(1);
-            const defectAboveAvg = parseFloat(defectDiff) > 0;
-
-            // Pole types
-            const poleTypes = {};
-            vData.forEach(d => { const t = (d["Type of Pole"] || 'Unknown').toUpperCase(); poleTypes[t] = (poleTypes[t] || 0) + 1; });
-            const concreteCount = Object.entries(poleTypes).filter(([k]) => k.includes('CONCRETE')).reduce((s, [, v]) => s + v, 0);
-            const woodCount = Object.entries(poleTypes).filter(([k]) => k.includes('WOOD')).reduce((s, [, v]) => s + v, 0);
-            const concretePct = totalRecords > 0 ? ((concreteCount / totalRecords) * 100).toFixed(0) : 0;
-            const woodPct = totalRecords > 0 ? ((woodCount / totalRecords) * 100).toFixed(0) : 0;
+            // Building-SLRN linkage & connected buildings (real data-completeness signals)
+            const link = buildingLinkage(vData);
+            const linkPct = link.pct;
+            const linkDiff = (linkPct - globalLinkPct).toFixed(1);
+            const linkAboveAvg = parseFloat(linkDiff) >= 0;
+            const buildingsConnected = uniqueBuildings(vData);
+            const avgBuildingsPerPole = totalRecords > 0 ? (buildingsConnected / totalRecords).toFixed(2) : '0.00';
 
             // Data freshness
             const lastDateObj = lastDateISO ? new Date(lastDateISO) : new Date();
@@ -5846,7 +5889,7 @@ document.addEventListener('DOMContentLoaded', () => {
             let statusScore = 0;
             if (avgRate >= TARGET_RATE) statusScore += 2;
             else if (avgRate >= 35) statusScore += 1;
-            if (parseFloat(defectPct) <= globalDefectPct) statusScore += 1;
+            if (linkPct >= globalLinkPct) statusScore += 1;
             if (trendDir === 'accelerating') statusScore += 1;
             if (activeUTs >= 4) statusScore += 1;
             if (diffDays <= 2) statusScore += 1;
@@ -5922,31 +5965,33 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             }
 
-            // 4. Quality & Defect Intelligence
-            const defectCompare = defectAboveAvg
-                ? `<strong>${Math.abs(parseFloat(defectDiff))}% above</strong> the project average of ${globalDefectPct.toFixed(1)}%`
-                : `<strong>${Math.abs(parseFloat(defectDiff))}% below</strong> the project average of ${globalDefectPct.toFixed(1)}%`;
-            if (parseFloat(defectPct) > 25) {
+            // 4. Data Completeness & Coverage (building-SLRN linkage — a real signal)
+            const linkCompare = linkAboveAvg
+                ? `<strong>${Math.abs(parseFloat(linkDiff))} pts above</strong> the project average of ${globalLinkPct.toFixed(1)}%`
+                : `<strong>${Math.abs(parseFloat(linkDiff))} pts below</strong> the project average of ${globalLinkPct.toFixed(1)}%`;
+            if (linkPct < 60) {
                 recs.push({
-                    icon: '🔍', title: 'High Defect Rate — Investigation Needed',
-                    text: `<strong>${defectPct}% defect rate</strong> (${badPoles.toLocaleString()} of ${totalRecords.toLocaleString()} poles flagged) — ${defectCompare}. ` +
-                        `Pole mix: ${concretePct}% concrete, ${woodPct}% wood. ` +
-                        `${parseFloat(woodPct) > 40 ? 'High proportion of wooden poles may explain elevated defects — wooden poles degrade faster.' : ''} ` +
-                        `Recommend field verification audits to confirm defect accuracy and prioritize replacement scheduling.`
+                    icon: '🔗', title: 'Data Completeness Gap — Building Tagging',
+                    text: `Only <strong>${linkPct.toFixed(1)}% of poles</strong> carry an associated building SLRN ` +
+                        `(${link.linked.toLocaleString()} linked, <strong>${link.unlinked.toLocaleString()} unlinked</strong>) — ${linkCompare}. ` +
+                        `${buildingsConnected.toLocaleString()} buildings connected so far (avg ${avgBuildingsPerPole}/pole). ` +
+                        `Prioritise building-tagging on the ${link.unlinked.toLocaleString()} unlinked poles to complete the customer-to-asset mapping.`
                 });
-            } else if (parseFloat(defectPct) < 5) {
+            } else if (linkPct >= 85) {
                 recs.push({
-                    icon: '🎯', title: 'Low Defect Rate — Verify Accuracy',
-                    text: `Only <strong>${defectPct}% defect rate</strong> (${badPoles} flagged) — ${defectCompare}. ` +
-                        `Pole mix: ${concretePct}% concrete, ${woodPct}% wood. ` +
-                        `Unusually low defect reporting may indicate under-detection. Conduct random spot-check audits on ${Math.min(20, Math.ceil(totalRecords * 0.05))} poles to validate.`
+                    icon: '✅', title: 'Strong Data Completeness',
+                    text: `<strong>${linkPct.toFixed(1)}% of poles</strong> are linked to a building SLRN ` +
+                        `(${link.linked.toLocaleString()} of ${totalRecords.toLocaleString()}) — ${linkCompare}. ` +
+                        `${buildingsConnected.toLocaleString()} buildings connected (avg ${avgBuildingsPerPole}/pole). ` +
+                        `${link.unlinked > 0 ? `Close out the remaining ${link.unlinked.toLocaleString()} unlinked poles to reach full coverage.` : 'Every captured pole is linked — excellent completeness.'}`
                 });
             } else {
                 recs.push({
-                    icon: '📊', title: 'Defect & Asset Quality',
-                    text: `<strong>${defectPct}% defect rate</strong> (${badPoles.toLocaleString()} of ${totalRecords.toLocaleString()}) — ${defectCompare}. ` +
-                        `Pole mix: ${concretePct}% concrete, ${woodPct}% wood. ` +
-                        `${defectAboveAvg ? 'Slightly above project norm — monitor for trending upward and investigate concentrated areas.' : 'Within acceptable range. Maintain current inspection standards.'}`
+                    icon: '🔗', title: 'Building-SLRN Linkage & Coverage',
+                    text: `<strong>${linkPct.toFixed(1)}% of poles</strong> carry a building SLRN ` +
+                        `(${link.linked.toLocaleString()} linked, ${link.unlinked.toLocaleString()} unlinked) — ${linkCompare}. ` +
+                        `${buildingsConnected.toLocaleString()} buildings connected (avg ${avgBuildingsPerPole}/pole). ` +
+                        `${linkAboveAvg ? 'Above the project norm — maintain the tagging discipline.' : 'Below the project norm — schedule follow-up tagging on unlinked poles.'}`
                 });
             }
 
@@ -6476,22 +6521,21 @@ document.addEventListener('DOMContentLoaded', () => {
                     dtBoq: kpiGet('kpi-boq-dts'), dtAct: kpiGet('kpi-act-dts'), dtProg: kpiGet('kpi-prog-dts'),
                     activeUsers: kpiGet('topCardActiveUsers'), completionRate: kpiGet('topCardCompletionRate')
                 };
-                const vendorCounts = {};
-                filteredData.forEach(d => { vendorCounts[d.Vendor_Name || 'Other'] = (vendorCounts[d.Vendor_Name || 'Other'] || 0) + 1; });
+                const pdfTotal = countUniquePoles(filteredData); // unique SLRN — matches the KPI cards
+                const vendorCounts = uniquePolesByGroupExclusive(filteredData, d => d.Vendor_Name || 'Other');
                 const sortedVendors = Object.entries(vendorCounts).sort((a, b) => b[1] - a[1]);
-                const userCounts = {};
-                filteredData.forEach(d => { if (d.User) userCounts[d.User] = (userCounts[d.User] || 0) + 1; });
+                const userCounts = uniquePolesByGroup(filteredData, d => d.User);
                 const sortedUsers = Object.entries(userCounts).sort((a, b) => b[1] - a[1]);
-                const defects = filteredData.filter(d => d.Issue_Type && d.Issue_Type !== 'Good Condition').length;
-                const defectPct = filteredData.length > 0 ? ((defects / filteredData.length) * 100).toFixed(1) : '0';
-                const healthPct = filteredData.length > 0 ? (((filteredData.length - defects) / filteredData.length) * 100).toFixed(1) : '0';
+                const pdfLink = buildingLinkage(filteredData);
+                const pdfLinkPct = pdfLink.pct.toFixed(1);
+                const pdfBuildings = uniqueBuildings(filteredData);
                 const dtData = getEnhancedDTData();
                 const dtRows = dtData.sort((a, b) => b.actualTotal - a.actualTotal).slice(0, 40);
                 // Velocity
                 const pdfDateStrings = filteredData.map(d => d["Date/timestamp"] ? d["Date/timestamp"].split(' ')[0] : '').filter(Boolean);
                 const pdfDates = [...new Set(pdfDateStrings)].sort();
                 const pdfActiveDays = pdfDates.length || 1;
-                const pdfRunRate = (filteredData.length / pdfActiveDays).toFixed(1);
+                const pdfRunRate = (pdfTotal / pdfActiveDays).toFixed(1);
                 const pdfRecent3 = pdfDates.slice(-3);
                 const pdfPrev3 = pdfDates.slice(-6, -3);
                 const pdfRecentCount = filteredData.filter(d => pdfRecent3.includes((d["Date/timestamp"] || '').split(' ')[0])).length;
@@ -6510,12 +6554,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 const pdfUtCount = new Set(filteredData.map(d => d.Undertaking).filter(Boolean)).size;
                 const pdfBuCount = new Set(filteredData.map(d => d["Bussines Unit"]).filter(Boolean)).size;
                 const pdfTotalUsers = Object.keys(userCounts).length;
-                const pdfBoqTotal = boqData.length > 0 ? boqData.reduce((s, d) => s + (parseInt(d["POLES Grand Total"]) || 0), 0) : 0;
-                const pdfCompletionPct = pdfBoqTotal > 0 ? Math.min(((filteredData.length / pdfBoqTotal) * 100), 100).toFixed(1) : null;
-                const pdfPoleTypes = {};
-                filteredData.forEach(d => { const t = (d["Type of Pole"] || 'Unknown').toUpperCase(); pdfPoleTypes[t] = (pdfPoleTypes[t] || 0) + 1; });
+                // Scope the BOQ target by the active feeder/DT filter so completion matches the KPI cards.
+                let pdfBoqData = boqData;
+                const pdfFeederVals = multiSelects.feederFilter?.getValues();
+                if (pdfFeederVals && pdfFeederVals.length > 0) pdfBoqData = pdfBoqData.filter(d => pdfFeederVals.includes(d["FEEDER NAME"]));
+                const pdfDtVals = multiSelects.dtFilter?.getValues();
+                if (pdfDtVals && pdfDtVals.length > 0) pdfBoqData = pdfBoqData.filter(d => pdfDtVals.includes(d["DT NAME"]));
+                const pdfBoqTotal = pdfBoqData.length > 0 ? pdfBoqData.reduce((s, d) => s + (parseInt(d["POLES Grand Total"]) || 0), 0) : 0;
+                const pdfCompletionPct = pdfBoqTotal > 0 ? Math.min(((pdfTotal / pdfBoqTotal) * 100), 100).toFixed(1) : null;
+                const pdfPoleTypes = uniquePolesByGroup(filteredData, d => (d["Type of Pole"] || 'Unknown').toUpperCase());
                 const pdfDominantPole = Object.entries(pdfPoleTypes).sort((a, b) => b[1] - a[1])[0];
-                const pdfDominantPolePct = pdfDominantPole ? ((pdfDominantPole[1] / filteredData.length) * 100).toFixed(0) : 0;
+                const pdfDominantPolePct = pdfDominantPole ? ((pdfDominantPole[1] / pdfTotal) * 100).toFixed(0) : 0;
                 // DT status
                 const pdfDtCompleted = dtData.filter(r => r.boqTotal > 0 && (r.actualTotal / r.boqTotal) >= 1).length;
                 const pdfDtNearComplete = dtData.filter(r => r.boqTotal > 0 && (r.actualTotal / r.boqTotal) >= 0.9 && (r.actualTotal / r.boqTotal) < 1).length;
@@ -6627,21 +6676,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // Project overview
                 writeParagraph(
-                    `The IDB 2.0 Asset Enumeration project has captured a total of ${filteredData.length.toLocaleString()} pole assets across ${pdfBuCount} Business Unit${pdfBuCount > 1 ? 's' : ''}, covering ${pdfFeederCount} feeders, ${pdfDtCount} distribution transformers, and ${pdfUtCount} undertaking${pdfUtCount > 1 ? 's' : ''}. A workforce of ${pdfTotalUsers} active field officers has been deployed across all vendor teams. Data collection spans from ${pdfFirstDate} to ${pdfLastDate} (${pdfActiveDays} active working days).`
+                    `The IDB 2.0 Asset Enumeration project has captured a total of ${pdfTotal.toLocaleString()} pole assets across ${pdfBuCount} Business Unit${pdfBuCount > 1 ? 's' : ''}, covering ${pdfFeederCount} feeders, ${pdfDtCount} distribution transformers, and ${pdfUtCount} undertaking${pdfUtCount > 1 ? 's' : ''}. A workforce of ${pdfTotalUsers} active field officers has been deployed across all vendor teams. Data collection spans from ${pdfFirstDate} to ${pdfLastDate} (${pdfActiveDays} active working days).`
                 );
 
                 // Velocity
                 writeParagraph(
-                    `Project Velocity: The current run rate stands at ${pdfRunRate} poles/day, which is ${pdfVelocityVerdict} against the benchmark of ${TARGET_RATE} poles/day. The recent 3-day trend is ${pdfTrending}${Math.abs(pdfTrendPct) > 0 ? ` (${pdfTrendPct > 0 ? '+' : ''}${pdfTrendPct}% compared to the prior 3-day period)` : ''}.${pdfCompletionPct !== null ? ` Overall BOQ completion stands at ${pdfCompletionPct}% (${filteredData.length.toLocaleString()} of ${pdfBoqTotal.toLocaleString()} target poles).` : ''}`
+                    `Project Velocity: The current run rate stands at ${pdfRunRate} poles/day, which is ${pdfVelocityVerdict} against the benchmark of ${TARGET_RATE} poles/day. The recent 3-day trend is ${pdfTrending}${Math.abs(pdfTrendPct) > 0 ? ` (${pdfTrendPct > 0 ? '+' : ''}${pdfTrendPct}% compared to the prior 3-day period)` : ''}.${pdfCompletionPct !== null ? ` Overall BOQ completion stands at ${pdfCompletionPct}% (${pdfTotal.toLocaleString()} of ${pdfBoqTotal.toLocaleString()} target poles).` : ''}`
                 );
 
-                // Asset health
+                // Data completeness & coverage
                 writeParagraph(
-                    `Asset Health Assessment: Of the ${filteredData.length.toLocaleString()} poles surveyed, ${healthPct}% are in good condition while ${defects.toLocaleString()} poles (${defectPct}%) require attention (replacement or repair).${pdfDominantPole ? ` The dominant pole material is ${pdfDominantPole[0].charAt(0) + pdfDominantPole[0].slice(1).toLowerCase()}, accounting for ${pdfDominantPolePct}% of all surveyed assets.` : ''} ${parseFloat(defectPct) > 25 ? 'The defect rate is elevated and warrants immediate field review.' : parseFloat(defectPct) > 15 ? 'The defect rate is moderate; targeted maintenance is recommended.' : 'The asset health ratio is within acceptable parameters.'}`
+                    `Data Completeness & Coverage: Of ${pdfLink.total.toLocaleString()} poles captured, ${pdfLinkPct}% (${pdfLink.linked.toLocaleString()}) carry an associated building SLRN, while ${pdfLink.unlinked.toLocaleString()} remain unlinked. ${pdfBuildings.toLocaleString()} buildings are connected across the network.${pdfDominantPole ? ` The dominant pole material is ${pdfDominantPole[0].charAt(0) + pdfDominantPole[0].slice(1).toLowerCase()}, accounting for ${pdfDominantPolePct}% of all captured assets.` : ''} ${pdfLink.pct < 60 ? 'Building-tagging completeness is low; prioritise linking the outstanding poles to their buildings.' : pdfLink.pct < 85 ? 'Building-tagging is progressing; schedule follow-up on unlinked poles.' : 'Building-SLRN linkage is strong across the captured assets.'}`
                 );
 
                 // Vendor performance
-                const vendorText = sortedVendors.map(([name, count]) => `${name} has tagged ${count.toLocaleString()} assets (${((count / filteredData.length) * 100).toFixed(1)}%)`).join(', ');
+                const vendorText = sortedVendors.map(([name, count]) => `${name} has tagged ${count.toLocaleString()} assets (${((count / (pdfTotal || 1)) * 100).toFixed(1)}%)`).join(', ');
                 writeParagraph(`Vendor Performance: ${vendorText}.${sortedVendors.length > 1 ? ` ${sortedVendors[0][0]} leads the enumeration effort.` : ''}`);
 
                 // Officer performance
@@ -6661,7 +6710,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const recs = [];
                 if (parseFloat(pdfRunRate) < TARGET_RATE) recs.push(`Increase daily run rate from ${pdfRunRate} to meet the ${TARGET_RATE} poles/day target.`);
                 else recs.push(`Maintain current run rate of ${pdfRunRate} poles/day which meets the project target.`);
-                if (parseFloat(defectPct) > 15) recs.push(`Investigate the ${defectPct}% defect rate. Prioritize replacement of damaged poles.`);
+                if (pdfLink.pct < 80 && pdfLink.unlinked > 0) recs.push(`Improve building-SLRN linkage (currently ${pdfLinkPct}%) by tagging the ${pdfLink.unlinked.toLocaleString()} unlinked poles to their buildings.`);
                 if (pdfDtNotStarted > 0) recs.push(`Mobilize resources for the ${pdfDtNotStarted} unstarted DTs to prevent timeline slippage.`);
                 if (pdfVendorOfficerInsights.some(v => v.worst.count < v.avg * 0.5)) recs.push('Address performance gaps among lower-performing officers via training.');
                 recs.push('Continue daily monitoring and schedule weekly vendor review meetings.');
@@ -6692,11 +6741,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 const kpiColW = [cw * 0.30, cw * 0.17, cw * 0.17, cw * 0.18, cw * 0.18];
                 const kpiRows = [
                     ['Total Poles', kpis.totalBoq, kpis.totalAct, kpis.totalProg, kpis.totalRem],
-                    ['Good Condition', kpis.goodBoq, kpis.goodAct, kpis.goodProg, kpis.goodRem],
-                    ['Bad Poles (Replace)', kpis.badBoq, kpis.badAct, kpis.badProg, kpis.badRem],
                     ['New Poles (Install)', kpis.newBoq, kpis.newAct, kpis.newProg, kpis.newRem],
                     ['Feeders', kpis.feederBoq, kpis.feederAct, kpis.feederProg, '-'],
-                    ['DTs', kpis.dtBoq, kpis.dtAct, kpis.dtProg, '-']
+                    ['DTs', kpis.dtBoq, kpis.dtAct, kpis.dtProg, '-'],
+                    ['Building Linkage', '100%', pdfLinkPct + '%', pdfLinkPct + '%', pdfLink.unlinked.toLocaleString() + ' to tag'],
+                    ['Buildings Connected', '-', pdfBuildings.toLocaleString(), '-', '-']
                 ];
                 drawTable(kpiHeaders, kpiRows, kpiColW);
 
@@ -6706,8 +6755,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const metrics = [
                     { label: 'Active Users', val: kpis.activeUsers, bg: [239, 246, 255], color: '#1e40af' },
                     { label: 'Completion Rate', val: kpis.completionRate, bg: [240, 253, 244], color: '#059669' },
-                    { label: 'Asset Health', val: healthPct + '%', bg: [254, 252, 232], color: '#d97706' },
-                    { label: 'Defects Found', val: defects.toLocaleString(), bg: [254, 242, 242], color: '#dc2626' }
+                    { label: 'Building Linkage', val: pdfLinkPct + '%', bg: [254, 252, 232], color: '#d97706' },
+                    { label: 'Buildings Linked', val: pdfBuildings.toLocaleString(), bg: [236, 253, 245], color: '#059669' }
                 ];
                 metrics.forEach((m, i) => {
                     const bx = ml + i * metricBoxW;
@@ -6725,8 +6774,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 doc.text('VENDOR PERFORMANCE BREAKDOWN', ml, y); y += 2; drawLine(y); y += 4;
                 const vHeaders = ['Vendor', 'Assets Tagged', 'Share'];
                 const vColW = [cw * 0.45, cw * 0.30, cw * 0.25];
-                const vRows = sortedVendors.map(([name, count]) => [name, count.toLocaleString(), ((count / filteredData.length) * 100).toFixed(1) + '%']);
-                vRows.push(['TOTAL', filteredData.length.toLocaleString(), '100%']);
+                const vRows = sortedVendors.map(([name, count]) => [name, count.toLocaleString(), ((count / (pdfTotal || 1)) * 100).toFixed(1) + '%']);
+                vRows.push(['TOTAL', pdfTotal.toLocaleString(), '100%']);
                 drawTable(vHeaders, vRows, vColW);
 
                 // === TOP OFFICERS ===
@@ -6736,7 +6785,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const uHeaders = ['#', 'Officer', 'Assets', 'Share'];
                 const uColW = [cw * 0.08, cw * 0.50, cw * 0.22, cw * 0.20];
                 const uRows = sortedUsers.slice(0, 20).map(([user, count], i) => [
-                    String(i + 1), getDisplayName(user), count.toLocaleString(), ((count / filteredData.length) * 100).toFixed(1) + '%'
+                    String(i + 1), getDisplayName(user), count.toLocaleString(), ((count / (pdfTotal || 1)) * 100).toFixed(1) + '%'
                 ]);
                 drawTable(uHeaders, uRows, uColW);
 
