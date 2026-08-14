@@ -42,6 +42,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let tcnLayer = null;            // TCN transmission station markers
     let dtLayer = null;             // Distribution Transformer markers (derived centroids)
     let mapLayersControl = null;    // base/overlay layer switcher (for adding DT overlay)
+    let dtHighlightLayer = null;    // animated "connected poles" highlight for a clicked DT
+    let dtHighlightControl = null;  // vendor legend shown while a DT is highlighted
+    let highlightedDtName = null;   // which DT is currently highlighted (toggle state)
     let boundariesLoaded = false;   // one-time load guard
     let utBoundsCache = null;       // UT-only bounds (fallback when no data)
     let mapInitiallyFitted = false; // first-render fit guard
@@ -5214,6 +5217,103 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // 7. Render Map (Leaflet)
+    // ═══════════════════════════════════════════════════════════════════════
+    //  DT → connected-pole highlight
+    //  Clicking a DT badge lights up every pole tagged under that DT with an
+    //  animated (zooming in/out) marker, colour-coded by the vendor that tagged
+    //  it: ETC Workforce = blue, Jesom Technology = black, Ikeja Electric =
+    //  white. Poles derive from the current filtered set, so the highlight
+    //  respects the active filters. Each colour carries a contrasting outline so
+    //  black and white stay visible on both the light and dark basemaps.
+    // ═══════════════════════════════════════════════════════════════════════
+    const VENDOR_HL = {
+        'ETC Workforce':    { key: 'blue',  label: 'ETC Workforce' },
+        'Jesom Technology': { key: 'black', label: 'Jesom Technology' },
+        'Ikeja Electric':   { key: 'white', label: 'Ikeja Electric' }
+    };
+    const VENDOR_HL_ORDER = ['ETC Workforce', 'Jesom Technology', 'Ikeja Electric'];
+    const hlEsc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]
+    ));
+
+    function clearDtHighlight() {
+        if (dtHighlightLayer) dtHighlightLayer.clearLayers();
+        highlightedDtName = null;
+        if (dtHighlightControl && map) { map.removeControl(dtHighlightControl); dtHighlightControl = null; }
+    }
+
+    function toggleDtHighlight(dtName) {
+        if (highlightedDtName === dtName) { clearDtHighlight(); return; }
+        renderDtHighlight(dtName);
+    }
+
+    function renderDtHighlight(dtName) {
+        if (!dtHighlightLayer) return;
+        dtHighlightLayer.clearLayers();
+
+        // Collect the DT's poles from the filtered set (dedupe by SLRN so a
+        // pole captured on several rows lights up once), tallying by vendor.
+        const seen = new Set();
+        const counts = { blue: 0, black: 0, white: 0, other: 0 };
+        let total = 0;
+        (filteredData || []).forEach(d => {
+            if (String(d['DT Name'] || '').trim() !== dtName) return;
+            const lat = parseFloat(d.Latitude), lon = parseFloat(d.Longitude);
+            if (isNaN(lat) || isNaN(lon)) return;
+            const pid = poleSlrn(d);
+            const dedupeKey = pid || (lat + ',' + lon);
+            if (seen.has(dedupeKey)) return;
+            seen.add(dedupeKey);
+            const info = VENDOR_HL[d.Vendor_Name];
+            const key = info ? info.key : 'other';
+            counts[key]++; total++;
+            const marker = L.marker([lat, lon], {
+                icon: L.divIcon({
+                    className: 'dt-hl-wrapper',
+                    html: `<span class="dt-hl dt-hl-${key}"><span class="dt-hl-ring"></span><span class="dt-hl-core"></span></span>`,
+                    iconSize: [22, 22],
+                    iconAnchor: [11, 11]
+                }),
+                zIndexOffset: 1000,
+                interactive: false,
+                keyboard: false
+            });
+            dtHighlightLayer.addLayer(marker);
+        });
+
+        highlightedDtName = dtName;
+        showDtHighlightLegend(dtName, counts, total);
+    }
+
+    function showDtHighlightLegend(dtName, counts, total) {
+        if (dtHighlightControl && map) { map.removeControl(dtHighlightControl); dtHighlightControl = null; }
+        const Ctrl = L.Control.extend({
+            options: { position: 'bottomleft' },
+            onAdd: function () {
+                const div = L.DomUtil.create('div', 'dt-hl-legend');
+                const rows = VENDOR_HL_ORDER.map(v => {
+                    const key = VENDOR_HL[v].key;
+                    return `<div class="dt-hl-legend-row"><span class="dt-hl-swatch dt-hl-swatch-${key}"></span><span class="dt-hl-legend-name">${hlEsc(v)}</span><span class="dt-hl-legend-count">${counts[key].toLocaleString()}</span></div>`;
+                }).join('');
+                const otherRow = counts.other ? `<div class="dt-hl-legend-row"><span class="dt-hl-swatch dt-hl-swatch-other"></span><span class="dt-hl-legend-name">Other vendor</span><span class="dt-hl-legend-count">${counts.other.toLocaleString()}</span></div>` : '';
+                div.innerHTML = `
+                    <div class="dt-hl-legend-head">
+                        <span class="dt-hl-legend-title">Connected poles by vendor</span>
+                        <button class="dt-hl-legend-close" type="button" title="Clear highlight" aria-label="Clear highlight">&times;</button>
+                    </div>
+                    <div class="dt-hl-legend-dt">${hlEsc(dtName)}</div>
+                    ${rows}${otherRow}
+                    <div class="dt-hl-legend-total">${total.toLocaleString()} pole${total === 1 ? '' : 's'} highlighted</div>
+                `;
+                L.DomEvent.disableClickPropagation(div);
+                div.querySelector('.dt-hl-legend-close').addEventListener('click', clearDtHighlight);
+                return div;
+            }
+        });
+        dtHighlightControl = new Ctrl();
+        map.addControl(dtHighlightControl);
+    }
+
     function renderMap() {
         if (!map) {
             // Init map — default view centers on Lagos; boundary fit will take over once loaded
@@ -5272,6 +5372,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 mapLayersControl.addOverlay(dtLayer, '<span class="dt-legend-swatch"></span>Distribution Transformers');
             }
 
+            // Animated highlight of the poles connected to a clicked DT (sits on
+            // top of everything). Clears on empty-map click or Escape.
+            dtHighlightLayer = L.layerGroup().addTo(map);
+            map.on('click', () => clearDtHighlight());
+            document.addEventListener('keydown', (e) => { if (e.key === 'Escape') clearDtHighlight(); });
+
             // Hide UT text labels at far-out zooms to avoid clutter
             const mapEl = document.getElementById('map');
             const updateLabelVisibility = () => {
@@ -5290,6 +5396,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Render data markers (rebuilt on every filter change)
         markersLayer.clearLayers();
+        clearDtHighlight(); // a filter/theme re-render invalidates any active highlight
         let count = 0;
         const limit = 3000; // Performance limit for rendered markers
         const dataLatLngs = []; // ALL valid filtered points (used to frame the map)
@@ -5437,6 +5544,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         </div>
                     </div>
                 `, { className: 'asset-popup-wrapper', maxWidth: 320, minWidth: 250 });
+
+                // Click a DT to light up its connected poles (colour = vendor).
+                marker.on('click', () => toggleDtHighlight(g.name));
 
                 dtLayer.addLayer(marker);
             }

@@ -3448,6 +3448,84 @@ header.exec-header img.exec-header-logo,
     vertical-align: middle;
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+   DT → connected-pole highlight
+   Clicking a DT pulses each of its poles (a "zoom in/out" core + an
+   expanding ring), colour-coded by the vendor that tagged it:
+   ETC = blue, Jesom = black, Ikeja = white. A contrasting outline keeps
+   black and white legible on both the light and dark basemaps.
+   ══════════════════════════════════════════════════════════════════════ */
+.dt-hl-wrapper { background: transparent !important; border: none !important; }
+.dt-hl { position: relative; display: block; width: 22px; height: 22px; }
+.dt-hl-core {
+    position: absolute; top: 50%; left: 50%;
+    width: 11px; height: 11px; border-radius: 50%;
+    transform: translate(-50%, -50%);
+    animation: dtHlPulse 1.15s ease-in-out infinite;
+}
+.dt-hl-ring {
+    position: absolute; top: 50%; left: 50%;
+    width: 12px; height: 12px; border-radius: 50%;
+    transform: translate(-50%, -50%);
+    animation: dtHlRing 1.5s ease-out infinite;
+    pointer-events: none;
+}
+@keyframes dtHlPulse {
+    0%, 100% { transform: translate(-50%, -50%) scale(0.68); }
+    50%      { transform: translate(-50%, -50%) scale(1.4); }
+}
+@keyframes dtHlRing {
+    0%   { transform: translate(-50%, -50%) scale(0.55); opacity: 0.9; }
+    100% { transform: translate(-50%, -50%) scale(3.4); opacity: 0; }
+}
+/* Vendor colours + contrasting outline (visible on any basemap) */
+.dt-hl-blue  .dt-hl-core { background: #2563eb; box-shadow: 0 0 0 1.6px #fff, 0 0 9px 2px rgba(37, 99, 235, 0.85); }
+.dt-hl-blue  .dt-hl-ring { border: 2px solid #2563eb; }
+.dt-hl-black .dt-hl-core { background: #0b0b0b; box-shadow: 0 0 0 1.6px #fff, 0 0 9px 2px rgba(0, 0, 0, 0.75); }
+.dt-hl-black .dt-hl-ring { border: 2px solid #0b0b0b; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.75); }
+.dt-hl-white .dt-hl-core { background: #fff; box-shadow: 0 0 0 1.6px #1e293b, 0 0 9px 2px rgba(255, 255, 255, 0.9); }
+.dt-hl-white .dt-hl-ring { border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(30, 41, 59, 0.6); }
+.dt-hl-other .dt-hl-core { background: #94a3b8; box-shadow: 0 0 0 1.6px #fff, 0 0 8px 2px rgba(148, 163, 184, 0.7); }
+.dt-hl-other .dt-hl-ring { border: 2px solid #94a3b8; }
+
+/* Vendor legend shown while a DT is highlighted */
+.dt-hl-legend {
+    background: rgba(15, 23, 42, 0.92);
+    color: #e2e8f0;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    border-radius: 10px;
+    padding: 9px 11px 8px;
+    font-family: 'Inter', 'Segoe UI', sans-serif;
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.5);
+    min-width: 196px;
+    max-width: 240px;
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
+}
+.dt-hl-legend-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
+.dt-hl-legend-title { font-size: 10px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase; color: #cbd5e1; }
+.dt-hl-legend-close {
+    background: transparent; border: none; color: #94a3b8; cursor: pointer;
+    font-size: 18px; line-height: 1; padding: 0 2px; border-radius: 4px;
+}
+.dt-hl-legend-close:hover { color: #f8fafc; background: rgba(148, 163, 184, 0.2); }
+.dt-hl-legend-dt {
+    font-size: 11px; font-weight: 700; color: #22d3ee;
+    margin: 1px 0 7px; word-break: break-word; line-height: 1.3;
+}
+.dt-hl-legend-row { display: flex; align-items: center; gap: 7px; padding: 2.5px 0; font-size: 11.5px; }
+.dt-hl-legend-name { flex: 1; color: #e2e8f0; }
+.dt-hl-legend-count { font-weight: 800; color: #f1f5f9; font-variant-numeric: tabular-nums; }
+.dt-hl-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.6); flex: none; }
+.dt-hl-swatch-blue  { background: #2563eb; }
+.dt-hl-swatch-black { background: #0b0b0b; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.5); }
+.dt-hl-swatch-white { background: #fff; border-color: #1e293b; }
+.dt-hl-swatch-other { background: #94a3b8; }
+.dt-hl-legend-total {
+    margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(148, 163, 184, 0.25);
+    font-size: 10px; color: #94a3b8; text-align: right;
+}
+
 /* Respect reduced motion for these layers too */
 @media (prefers-reduced-motion: reduce) {
     .ht-feeder-line,
@@ -3455,7 +3533,9 @@ header.exec-header img.exec-header-logo,
     .tcn-marker,
     .tcn-marker::before,
     .dt-marker-core,
-    .dt-marker-ring {
+    .dt-marker-ring,
+    .dt-hl-core,
+    .dt-hl-ring {
         animation: none !important;
     }
 }
