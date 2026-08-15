@@ -5592,7 +5592,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         feeder: String(d["Feeder"] || '').trim(),
                         undertaking: String(d["Undertaking"] || '').trim(),
                         bu: String(d["Bussines Unit"] || '').trim(),
-                        sumLat: 0, sumLon: 0, n: 0, poles: new Set(), uprisers: new Set()
+                        sumLat: 0, sumLon: 0, n: 0, poles: new Set(), uprisers: new Set(), addr: new Map()
                     };
                     dtGroups.set(name, g);
                 }
@@ -5604,6 +5604,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 // A DT can span several uprisers — collect the distinct numbers.
                 const up = String(d["UpriserNo"] ?? '').trim();
                 if (up) g.uprisers.add(up);
+                // Tally pole addresses so the popup can show the DT's modal address.
+                const addr = String(d["Location address"] || '').trim();
+                if (addr) g.addr.set(addr, (g.addr.get(addr) || 0) + 1);
             });
 
             // Draw the biggest DTs first, and cap the count so dense filters
@@ -5631,6 +5634,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 const upriserStr = [...g.uprisers]
                     .sort((a, b) => (parseFloat(a) || 0) - (parseFloat(b) || 0))
                     .join(', ');
+                // Representative address = the most common one among the DT's poles
+                // (first-seen wins ties, since we only replace on a strictly higher count).
+                let dtAddr = '', dtAddrN = 0;
+                for (const [a, cnt] of g.addr) { if (cnt > dtAddrN) { dtAddrN = cnt; dtAddr = a; } }
                 const badge = poleCount > 999 ? '999+' : String(poleCount);
 
                 const marker = L.marker([clat, clon], {
@@ -5666,6 +5673,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             ${row('DT Number', g.dtNo)}
                             ${row('Upriser', upriserStr)}
                             <div class="asset-popup-row"><div class="asset-popup-label">Tagged Poles</div><div class="asset-popup-value">${poleCount.toLocaleString()}</div></div>
+                            ${row('Address', dtAddr)}
                             <div class="asset-popup-row asset-popup-row-last"><div class="asset-popup-label">Centroid</div><div class="asset-popup-value">${clat.toFixed(5)}, ${clon.toFixed(5)}</div></div>
                         </div>
                     </div>
