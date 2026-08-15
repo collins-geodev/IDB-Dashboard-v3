@@ -5592,7 +5592,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         feeder: String(d["Feeder"] || '').trim(),
                         undertaking: String(d["Undertaking"] || '').trim(),
                         bu: String(d["Bussines Unit"] || '').trim(),
-                        sumLat: 0, sumLon: 0, n: 0, poles: new Set()
+                        sumLat: 0, sumLon: 0, n: 0, poles: new Set(), uprisers: new Set()
                     };
                     dtGroups.set(name, g);
                 }
@@ -5601,6 +5601,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 g.n++;
                 const pid = poleSlrn(d);
                 if (pid) g.poles.add(pid);
+                // A DT can span several uprisers — collect the distinct numbers.
+                const up = String(d["UpriserNo"] ?? '').trim();
+                if (up) g.uprisers.add(up);
             });
 
             // Draw the biggest DTs first, and cap the count so dense filters
@@ -5624,6 +5627,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 // A DT with captures but no identifiable poles (all SLRN-less)
                 // has nothing to badge or highlight — skip it entirely.
                 if (poleCount === 0) continue;
+                // Distinct upriser numbers for this DT, sorted numerically.
+                const upriserStr = [...g.uprisers]
+                    .sort((a, b) => (parseFloat(a) || 0) - (parseFloat(b) || 0))
+                    .join(', ');
                 const badge = poleCount > 999 ? '999+' : String(poleCount);
 
                 const marker = L.marker([clat, clon], {
@@ -5653,10 +5660,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div class="asset-popup-subtitle">DISTRIBUTION TRANSFORMER</div>
                         <div class="asset-popup-divider"></div>
                         <div class="asset-popup-table">
-                            ${row('DT Number', g.dtNo)}
-                            ${row('Feeder', g.feeder)}
-                            ${row('Undertaking', g.undertaking)}
                             ${row('Business Unit', g.bu)}
+                            ${row('Undertaking', g.undertaking)}
+                            ${row('Feeder Name', g.feeder)}
+                            ${row('DT Number', g.dtNo)}
+                            ${row('Upriser', upriserStr)}
                             <div class="asset-popup-row"><div class="asset-popup-label">Tagged Poles</div><div class="asset-popup-value">${poleCount.toLocaleString()}</div></div>
                             <div class="asset-popup-row asset-popup-row-last"><div class="asset-popup-label">Centroid</div><div class="asset-popup-value">${clat.toFixed(5)}, ${clon.toFixed(5)}</div></div>
                         </div>
