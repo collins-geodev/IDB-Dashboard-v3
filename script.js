@@ -315,7 +315,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const jesomUsers = new Set([
             'sbolaji', 'omukaila', 'ojamiu', 'jemmanuel', 'foluwafisayo',
             'yakin', 'ysalaudeen', 'shodimu', 'ajemmanuel', 'ajumobi',
-            'adamilare', 'kismail', 'aakinbode', 'fmohammed'
+            'adamilare', 'kismail', 'aakinbode', 'fmohammed', 'oolubunmi'
         ]);
         // Ikeja Electric users — matched by system username (as stored in the data)
         const ikejaUsers = new Set([
