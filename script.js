@@ -1834,6 +1834,9 @@ document.addEventListener('DOMContentLoaded', () => {
         let added = 0, updated = 0, addedNoKey = 0;
         records.forEach(rec => {
             if (rec && rec.__source !== 'template-upload') rec.__source = 'template-upload';
+            // Stored uploads carry the Vendor_Name computed when they were
+            // published; re-derive it so user→vendor remaps apply to them too.
+            rec.Vendor_Name = inferVendor(rec['User']);
             const k = String(rec['Lt PoleSLRN'] || '').trim().toLowerCase();
             if (k && bySlrn.has(k)) { globalData[bySlrn.get(k)] = rec; updated++; }
             else if (k) { bySlrn.set(k, globalData.length); globalData.push(rec); added++; }
