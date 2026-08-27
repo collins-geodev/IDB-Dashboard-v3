@@ -1724,6 +1724,32 @@ document.addEventListener('DOMContentLoaded', () => {
         return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
     }
 
+    // SheetJS hands date-formatted cells over as raw Excel serials (days since
+    // 1899-12-30), not strings. Convert to the dataset's 'DD/MM/YYYY HH:MM'
+    // form so date filters and every `.split(' ')` consumer keep working.
+    function excelSerialToTimestamp(n) {
+        if (typeof n !== 'number' || !isFinite(n)) return n;
+        const d = new Date(Math.round((n - 25569) * 86400000));
+        const p = (x) => String(x).padStart(2, '0');
+        return `${p(d.getUTCDate())}/${p(d.getUTCMonth() + 1)}/${d.getUTCFullYear()} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+    }
+
+    const TEMPLATE_DATE_KEYS = ['Date/timestamp', 'Date Installed'];
+
+    // The canonical dataset is all-strings; uploads must match it. Dates come
+    // in as Excel serials, other numeric cells (DT Number, Upriser No, counts)
+    // as numbers — normalize both, leaving booleans (__gisCaptured) alone.
+    function normalizeUploadRecord(rec) {
+        if (!rec || typeof rec !== 'object') return rec;
+        Object.keys(rec).forEach(k => {
+            if (typeof rec[k] !== 'number') return;
+            rec[k] = (TEMPLATE_DATE_KEYS.indexOf(k) !== -1)
+                ? excelSerialToTimestamp(rec[k])
+                : String(rec[k]);
+        });
+        return rec;
+    }
+
     // ── Dropdown open/close ──
     const templateDropdown = document.getElementById('templateDropdown');
     const templateToggle = document.getElementById('templateDropdownToggle');
@@ -1834,6 +1860,9 @@ document.addEventListener('DOMContentLoaded', () => {
         let added = 0, updated = 0, addedNoKey = 0;
         records.forEach(rec => {
             if (rec && rec.__source !== 'template-upload') rec.__source = 'template-upload';
+            // Uploads published before the serial-date fix are stored with raw
+            // Excel serials / numeric cells — normalize them at merge time too.
+            normalizeUploadRecord(rec);
             // Stored uploads carry the Vendor_Name computed when they were
             // published; re-derive it so user→vendor remaps apply to them too.
             rec.Vendor_Name = inferVendor(rec['User']);
@@ -1985,6 +2014,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (val == null) val = '';
                     rec[colToKey[ci]] = (typeof val === 'string') ? val.trim() : val;
                 });
+                normalizeUploadRecord(rec);
 
                 const slrn = String(rec['Lt PoleSLRN'] || '').trim();
                 const feeder = String(rec['Feeder'] || '').trim();
