@@ -2480,7 +2480,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // Clickable example chips — one tap fills the box and runs the query.
         const CHIPS = ['Scorecard', 'Summary', 'Top 5 field officers', 'Run rate by vendor',
             'Concrete vs wooden', 'New poles installed', 'Activity last 7 days',
-            'Feeders behind on BOQ', 'Building-SLRN linkage'];
+            'Feeders behind on BOQ', 'Building-SLRN linkage',
+            '✨ Why is velocity dropping?', '✨ What should we prioritize this week?'];
         if (chipsEl) {
             chipsEl.innerHTML = CHIPS.map(c => '<button type="button" class="ai-chip">' + esc(c) + '</button>').join('');
             chipsEl.querySelectorAll('.ai-chip').forEach(btnEl => btnEl.addEventListener('click', () => {
@@ -3187,33 +3188,18 @@ document.addEventListener('DOMContentLoaded', () => {
                         bold(uniqCount(matches, 'User')) + ' officers, run rate ' + bold(runRate(matches).rate + '/day') + '.';
                 }
             }
+            return null; // nothing matched — caller decides (Gemini, or the help text)
+        }
+
+        // The old dead-end message, kept as the last resort when Gemini can't help.
+        function didntCatch(rawQuery) {
             return '<div class="ai-head">🤔 I didn\'t catch that</div>' +
                 'I couldn\'t map "' + esc(rawQuery) + '" to the data.' + '<br>' + HELP.replace('<div class="ai-head">🤖 What I can answer</div>', '');
         }
 
-        // ---------- main dispatcher ----------
-        function runQuery(raw) {
-            const rawQuery = String(raw || '').trim();
-            if (!rawQuery) { if (thinkTimer) clearTimeout(thinkTimer); responseEl.classList.remove('visible'); return; }
-            const data = (Array.isArray(filteredData) && filteredData.length) ? filteredData : globalData;
-            if (!data || !data.length) { show('The dashboard is still loading its data — give it a moment, then ask again.'); return; }
-
-            const q = normalize(rawQuery);
-            const qTokens = q.split(' ').filter(Boolean);
-
-            // greeting / help
-            if (has(q, /^(hi|hello|hey|help|what can you|how do you|examples?)\b/) || q === 'help') { show(HELP); return; }
-
-            // SLRN lookup (before context, so a specific pole isn't mistaken for a filter)
-            const slrn = slrnAnswer(q, rawQuery, data);
-            if (slrn) { show(slrn); return; }
-
-            const ctx = detectContext(q, qTokens, data);
-            if (!ctx.data.length) {
-                show('<div class="ai-head">🔍 No records in that scope</div>Nothing matches ' + bold(ctx.label) +
-                    ' in the current view. Try clearing a dashboard filter, or ask about a different feeder / officer.');
-                return;
-            }
+        // ---------- deterministic router (offline analytics engine) ----------
+        // Returns answer HTML, or null when no rule matched the question.
+        function routeOffline(q, qTokens, rawQuery, ctx, data) {
             let out = null;
 
             if (has(q, /\bissue\b/)) out = issueHonestAnswer(ctx);
@@ -3244,7 +3230,201 @@ document.addEventListener('DOMContentLoaded', () => {
             // Entity-only queries → profile or count.
             if (!out && ctx.filters.length) out = profileAnswer(ctx) || countAnswer(q, ctx);
             if (!out) out = fallback(q, qTokens, rawQuery, data);
-            show(out);
+            return out;
+        }
+
+        // ---------- Gemini AI layer (server-side key via /api/gemini) ----------
+        // Free-form analytical questions ("why…", "what should we…", "recommend…")
+        // go to Gemini with a compact JSON summary of the real, in-scope numbers;
+        // everything else keeps the instant offline engine. When the endpoint or
+        // key is missing, the offline engine answers everything, as before.
+        let geminiState = 'unknown'; // 'unknown' | 'ok' | 'off' (endpoint/key absent)
+        const SMART_RE = /^(why\b|how\s+(should|can|could|do\s+we|might)\b|what\s+(should|would|could|might|if|do\s+you|are\s+your)\b|explain\b|recommend\b|suggest\b|advi[cs]e\b|analy[sz]e\b|assess\b|evaluate\b|draft\b|write\b|compose\b|predict\b|forecast\b|improve\b|optimi[sz]e\b)/;
+        const SMART_ANY_RE = /\b(recommendation|insight|advice|strateg|prioriti[sz]e|risk|bottleneck|takeaway)\w*\b/;
+
+        function showThinking() {
+            if (thinkTimer) clearTimeout(thinkTimer);
+            responseEl.classList.add('visible');
+            responseEl.innerHTML = '<div class="ai-loading"><span></span><span></span><span></span></div>' +
+                '<small class="ai-thinking-note">✨ Asking Gemini…</small>';
+        }
+        function renderNow(html) {
+            if (thinkTimer) clearTimeout(thinkTimer);
+            responseEl.classList.add('visible');
+            responseEl.innerHTML = html;
+        }
+
+        // Minimal, safe markdown → HTML. Everything is escaped first; only the
+        // structures the server prompt allows (headers, lists, bold/italic/code)
+        // are re-introduced, so model output can never inject markup.
+        function mdToHtml(md) {
+            const inline = (s) => esc(s)
+                .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+                .replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,;:!?]|$)/g, '$1<em>$2</em>')
+                .replace(/`([^`]+)`/g, '<code>$1</code>');
+            let html = '', list = null;
+            const closeList = () => { if (list) { html += '</' + list + '>'; list = null; } };
+            String(md || '').split(/\r?\n/).forEach(line => {
+                const t = line.trim();
+                if (!t) { closeList(); return; }
+                let m;
+                if ((m = t.match(/^#{1,4}\s+(.*)/))) { closeList(); html += '<div class="ai-head">' + inline(m[1]) + '</div>'; }
+                else if ((m = t.match(/^[-*•]\s+(.*)/))) {
+                    if (list !== 'ul') { closeList(); html += '<ul class="ai-md-list">'; list = 'ul'; }
+                    html += '<li>' + inline(m[1]) + '</li>';
+                } else if ((m = t.match(/^\d+[.)]\s+(.*)/))) {
+                    if (list !== 'ol') { closeList(); html += '<ol class="ai-md-list">'; list = 'ol'; }
+                    html += '<li>' + inline(m[1]) + '</li>';
+                } else { closeList(); html += '<p class="ai-md-p">' + inline(t) + '</p>'; }
+            });
+            closeList();
+            return html;
+        }
+
+        // Compact JSON summary of the in-scope data — real fields only, so the
+        // model reasons over exact numbers instead of hallucinating its own.
+        function buildAIContext(ctx) {
+            const ds = ctx.data;
+            const rr = runRate(ds), bs = buildingsStats(ds), lk = linkage(ds), k = kpiStats(ctx);
+            const days = activeDates(ds).sort();
+
+            const uniquePerKey = (keyFn) => {
+                const m = {};
+                ds.forEach(d => {
+                    const key = keyFn(d); const s = slrnOf(d);
+                    if (!key) return;
+                    (m[key] = m[key] || new Set()).add(s || ('rec' + Math.random()));
+                });
+                return Object.entries(m).map(([key, set]) => [key, set.size]).sort((a, b) => b[1] - a[1]);
+            };
+
+            const vendors = uniquePerKey(d => d.Vendor_Name).map(([v, n]) => {
+                const sub = ds.filter(d => d.Vendor_Name === v); const vr = runRate(sub);
+                return { vendor: v, poles: n, officers: uniqCount(sub, 'User'), runRatePerDay: vr.rate, activeDays: vr.days };
+            });
+            const officers = uniquePerKey(d => d.User);
+            const topOfficers = officers.slice(0, 8).map(([u, n]) => ({ officer: getDisplayName(u), vendor: (ds.find(d => d.User === u) || {}).Vendor_Name || '', poles: n }));
+            const bottomOfficers = officers.slice(-5).map(([u, n]) => ({ officer: getDisplayName(u), poles: n }));
+
+            // Daily counts (last 14 active days) + recent-vs-prior momentum.
+            const daily = groupCount(ds, dayOf);
+            const last14 = days.slice(-14).map(d => ({ date: d, poles: daily[d] || 0 }));
+            const avg = (arr) => arr.length ? +(arr.reduce((s, d) => s + (daily[d] || 0), 0) / arr.length).toFixed(1) : 0;
+            const trend = { recent5dayAvg: avg(days.slice(-5)), prior5dayAvg: avg(days.slice(-10, -5)), dailyLast14: last14 };
+
+            // Per-feeder BOQ standing (top gaps) within scope.
+            const boqRows = boqScopeRows(ds);
+            const targetByFeeder = {};
+            boqRows.forEach(r => {
+                const f = String(r['FEEDER NAME'] || '').trim();
+                if (f) targetByFeeder[f] = (targetByFeeder[f] || 0) + (parseInt(r['POLES Grand Total']) || 0);
+            });
+            const taggedByFeeder = {};
+            ds.forEach(d => {
+                const f = norm(d.Feeder), s = slrnOf(d);
+                if (f && s) (taggedByFeeder[f] = taggedByFeeder[f] || new Set()).add(s);
+            });
+            const feederBoq = Object.entries(targetByFeeder).map(([f, target]) => {
+                const tagged = (taggedByFeeder[norm(f)] || new Set()).size;
+                return { feeder: f, target, tagged, gap: target - tagged };
+            }).sort((a, b) => b.gap - a.gap);
+
+            return {
+                project: 'LT pole tagging — Shomolu Business Unit (Ikeja Electric)',
+                scope: ctx.label,
+                filtersApplied: ctx.filters.map(f => f.dim + '=' + f.value),
+                period: { firstDay: days[0] || null, lastDay: days[days.length - 1] || null, activeDays: days.length },
+                totals: {
+                    uniquePoles: k.actPoles, newInstallPoles: k.actNew, records: ds.length,
+                    fieldOfficers: k.actUsers, feeders: k.actFeeders, dts: k.actDTs,
+                    undertakings: uniqCount(ds, 'Undertaking'), buildingsConnected: bs.total,
+                    buildingSlrnsLinked: k.actBuildings,
+                },
+                velocity: { polesPerDay: rr.rate, targetPerDay: 50 },
+                trend,
+                poleTypes: poleTypes(ds),
+                buildingLinkage: { linkedRecords: lk.linked, unlinkedRecords: lk.unlinked, pctLinked: +pctOf(lk.linked, lk.n).toFixed(1) },
+                boq: {
+                    targetPoles: k.boqTot, taggedPoles: k.actPoles,
+                    pctComplete: +pctOf(k.actPoles, k.boqTot).toFixed(1),
+                    feedersMostBehind: feederBoq.slice(0, 8), feedersInScope: k.boqFeeders,
+                },
+                vendors, topOfficers, bottomOfficers,
+                dataNotes: 'Pole condition/defect/quality fields are simulated placeholders, not real captures.',
+            };
+        }
+
+        async function geminiAnswer(rawQuery, ctx, backupFn) {
+            showThinking();
+            try {
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), 25000);
+                const resp = await fetch('/api/gemini', {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ question: rawQuery, context: buildAIContext(ctx) }),
+                    signal: controller.signal,
+                });
+                clearTimeout(timer);
+                if (resp.status === 503 || resp.status === 404 || resp.status === 405) {
+                    geminiState = 'off'; // endpoint or key not configured — stop trying this session
+                    throw new Error('gemini_unavailable');
+                }
+                if (!resp.ok) throw new Error('gemini_http_' + resp.status);
+                const data = await resp.json();
+                if (!data || !data.answer) throw new Error('gemini_empty');
+                geminiState = 'ok';
+                renderNow('<div class="ai-gemini-badge">✨ Gemini insight</div>' + mdToHtml(data.answer) + contextNote(ctx));
+            } catch (e) {
+                let backup = backupFn() || didntCatch(rawQuery);
+                if (geminiState === 'off') {
+                    backup += '<br><small class="ai-thinking-note">✨ AI answers are off — set GEMINI_API_KEY in Vercel to enable Gemini.</small>';
+                } else {
+                    backup += '<br><small class="ai-thinking-note">✨ Gemini didn\'t respond just now — this is the offline engine\'s answer.</small>';
+                }
+                renderNow(backup);
+            }
+        }
+
+        // ---------- main dispatcher ----------
+        function runQuery(raw) {
+            const rawQuery = String(raw || '').trim();
+            if (!rawQuery) { if (thinkTimer) clearTimeout(thinkTimer); responseEl.classList.remove('visible'); return; }
+            const data = (Array.isArray(filteredData) && filteredData.length) ? filteredData : globalData;
+            if (!data || !data.length) { show('The dashboard is still loading its data — give it a moment, then ask again.'); return; }
+
+            const q = normalize(rawQuery);
+            const qTokens = q.split(' ').filter(Boolean);
+
+            // greeting / help
+            if (has(q, /^(hi|hello|hey|help|what can you|how do you|examples?)\b/) || q === 'help') { show(HELP); return; }
+
+            // SLRN lookup (before context, so a specific pole isn't mistaken for a filter)
+            const slrn = slrnAnswer(q, rawQuery, data);
+            if (slrn) { show(slrn); return; }
+
+            const ctx = detectContext(q, qTokens, data);
+            if (!ctx.data.length) {
+                show('<div class="ai-head">🔍 No records in that scope</div>Nothing matches ' + bold(ctx.label) +
+                    ' in the current view. Try clearing a dashboard filter, or ask about a different feeder / officer.');
+                return;
+            }
+
+            // Analytical / open-ended questions → Gemini (offline router as backup).
+            // Leading non-letters (e.g. the ✨ on the smart chips) are stripped so
+            // the anchored SMART_RE still sees the first word.
+            const lq = rawQuery.toLowerCase().replace(/^[^a-z]+/, '');
+            if (geminiState !== 'off' && (SMART_RE.test(lq) || SMART_ANY_RE.test(lq))) {
+                geminiAnswer(rawQuery, ctx, () => routeOffline(q, qTokens, rawQuery, ctx, data));
+                return;
+            }
+
+            const out = routeOffline(q, qTokens, rawQuery, ctx, data);
+            if (out) { show(out); return; }
+
+            // Nothing in the rulebook matched — let Gemini take a shot before giving up.
+            if (geminiState !== 'off') geminiAnswer(rawQuery, ctx, () => null);
+            else show(didntCatch(rawQuery));
         }
     })();
 
