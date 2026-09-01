@@ -3191,12 +3191,6 @@ document.addEventListener('DOMContentLoaded', () => {
             return null; // nothing matched — caller decides (Gemini, or the help text)
         }
 
-        // The old dead-end message, kept as the last resort when Gemini can't help.
-        function didntCatch(rawQuery) {
-            return '<div class="ai-head">🤔 I didn\'t catch that</div>' +
-                'I couldn\'t map "' + esc(rawQuery) + '" to the data.' + '<br>' + HELP.replace('<div class="ai-head">🤖 What I can answer</div>', '');
-        }
-
         // ---------- deterministic router (offline analytics engine) ----------
         // Returns answer HTML, or null when no rule matched the question.
         function routeOffline(q, qTokens, rawQuery, ctx, data) {
@@ -3234,13 +3228,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // ---------- Gemini AI layer (server-side key via /api/gemini) ----------
-        // Free-form analytical questions ("why…", "what should we…", "recommend…")
-        // go to Gemini with a compact JSON summary of the real, in-scope numbers;
-        // everything else keeps the instant offline engine. When the endpoint or
-        // key is missing, the offline engine answers everything, as before.
-        let geminiState = 'unknown'; // 'unknown' | 'ok' | 'off' (endpoint/key absent)
-        const SMART_RE = /^(why\b|how\s+(should|can|could|do\s+we|might)\b|what\s+(should|would|could|might|if|do\s+you|are\s+your)\b|explain\b|recommend\b|suggest\b|advi[cs]e\b|analy[sz]e\b|assess\b|evaluate\b|draft\b|write\b|compose\b|predict\b|forecast\b|improve\b|optimi[sz]e\b)/;
-        const SMART_ANY_RE = /\b(recommendation|insight|advice|strateg|prioriti[sz]e|risk|bottleneck|takeaway)\w*\b/;
+        // EVERY question goes to Gemini with a compact JSON summary of the real,
+        // in-scope numbers. The offline rule engine (routeOffline) is retained
+        // only to pre-compute a draft answer that is passed to Gemini as extra
+        // grounding — it never answers the user directly. On failure the
+        // assistant shows an explicit error card, not an offline answer.
 
         function showThinking() {
             if (thinkTimer) clearTimeout(thinkTimer);
@@ -3354,36 +3346,47 @@ document.addEventListener('DOMContentLoaded', () => {
             };
         }
 
-        async function geminiAnswer(rawQuery, ctx, backupFn) {
+        // Every answer comes from Gemini. `engineDraft` (the offline engine's
+        // computed answer, stripped to text) rides along as extra grounding so
+        // chip queries like "Scorecard" keep their exact structure and numbers.
+        // Transient failures retry once; a real failure shows an error card —
+        // never a silent offline answer.
+        async function geminiAnswer(rawQuery, ctx, engineDraft) {
             showThinking();
-            try {
-                const controller = new AbortController();
-                const timer = setTimeout(() => controller.abort(), 25000);
-                const resp = await fetch('/api/gemini', {
-                    method: 'POST',
-                    headers: { 'content-type': 'application/json' },
-                    body: JSON.stringify({ question: rawQuery, context: buildAIContext(ctx) }),
-                    signal: controller.signal,
-                });
-                clearTimeout(timer);
-                if (resp.status === 503 || resp.status === 404 || resp.status === 405) {
-                    geminiState = 'off'; // endpoint or key not configured — stop trying this session
-                    throw new Error('gemini_unavailable');
+            const payload = { question: rawQuery, context: buildAIContext(ctx) };
+            if (engineDraft) payload.context.offlineEngineDraft = engineDraft;
+            let lastErr = 'unknown error';
+            for (let attempt = 1; attempt <= 2; attempt++) {
+                try {
+                    const controller = new AbortController();
+                    const timer = setTimeout(() => controller.abort(), 25000);
+                    const resp = await fetch('/api/gemini', {
+                        method: 'POST',
+                        headers: { 'content-type': 'application/json' },
+                        body: JSON.stringify(payload),
+                        signal: controller.signal,
+                    });
+                    clearTimeout(timer);
+                    if (resp.status === 503) { lastErr = 'not_configured'; break; }
+                    if (!resp.ok) {
+                        let detail = '';
+                        try { const j = await resp.json(); detail = j.detail || j.error || ''; } catch (e2) { /* keep '' */ }
+                        lastErr = 'HTTP ' + resp.status + (detail ? ' — ' + String(detail).slice(0, 160) : '');
+                        continue; // transient? one more try
+                    }
+                    const data = await resp.json();
+                    if (!data || !data.answer) { lastErr = 'empty answer'; continue; }
+                    renderNow('<div class="ai-gemini-badge">✨ Gemini insight</div>' + mdToHtml(data.answer) + contextNote(ctx));
+                    return;
+                } catch (e) {
+                    lastErr = (e && e.name === 'AbortError') ? 'timed out after 25s' : 'network error';
                 }
-                if (!resp.ok) throw new Error('gemini_http_' + resp.status);
-                const data = await resp.json();
-                if (!data || !data.answer) throw new Error('gemini_empty');
-                geminiState = 'ok';
-                renderNow('<div class="ai-gemini-badge">✨ Gemini insight</div>' + mdToHtml(data.answer) + contextNote(ctx));
-            } catch (e) {
-                let backup = backupFn() || didntCatch(rawQuery);
-                if (geminiState === 'off') {
-                    backup += '<br><small class="ai-thinking-note">✨ AI answers are off — set GEMINI_API_KEY in Vercel to enable Gemini.</small>';
-                } else {
-                    backup += '<br><small class="ai-thinking-note">✨ Gemini didn\'t respond just now — this is the offline engine\'s answer.</small>';
-                }
-                renderNow(backup);
             }
+            renderNow('<div class="ai-head">⚠️ Gemini couldn\'t answer</div>' +
+                (lastErr === 'not_configured'
+                    ? 'The AI endpoint has no <code>GEMINI_API_KEY</code> configured — add it in Vercel (both dashboard projects) and redeploy.'
+                    : 'The request failed after a retry (' + esc(lastErr) + ').') +
+                '<br><small class="ai-thinking-note">Hit Ask again to retry, or check the Vercel function logs for /api/gemini.</small>');
         }
 
         // ---------- main dispatcher ----------
@@ -3410,21 +3413,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            // Analytical / open-ended questions → Gemini (offline router as backup).
-            // Leading non-letters (e.g. the ✨ on the smart chips) are stripped so
-            // the anchored SMART_RE still sees the first word.
-            const lq = rawQuery.toLowerCase().replace(/^[^a-z]+/, '');
-            if (geminiState !== 'off' && (SMART_RE.test(lq) || SMART_ANY_RE.test(lq))) {
-                geminiAnswer(rawQuery, ctx, () => routeOffline(q, qTokens, rawQuery, ctx, data));
-                return;
-            }
-
-            const out = routeOffline(q, qTokens, rawQuery, ctx, data);
-            if (out) { show(out); return; }
-
-            // Nothing in the rulebook matched — let Gemini take a shot before giving up.
-            if (geminiState !== 'off') geminiAnswer(rawQuery, ctx, () => null);
-            else show(didntCatch(rawQuery));
+            // Everything goes to Gemini. The offline engine's answer (if any)
+            // is stripped to plain text and sent along as grounding only.
+            let engineDraft = '';
+            try {
+                const draftHtml = routeOffline(q, qTokens, rawQuery, ctx, data);
+                if (draftHtml) {
+                    const tmp = document.createElement('div');
+                    tmp.innerHTML = draftHtml;
+                    engineDraft = (tmp.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 2000);
+                }
+            } catch (e) { /* draft is optional — never block the Gemini call */ }
+            geminiAnswer(rawQuery, ctx, engineDraft);
         }
     })();
 

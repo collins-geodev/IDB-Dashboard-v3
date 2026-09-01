@@ -24,6 +24,10 @@ current dashboard scope, then a QUESTION. Rules:
   Status=COMPLETE; any issue fields are simulated placeholders). If asked about defects,
   condition or quality, say that condition data is not captured in this dataset and pivot
   to what IS known.
+- The context may include "offlineEngineDraft": a plain-text draft computed by the
+  dashboard's deterministic analytics engine for this exact question. When present,
+  treat its figures as authoritative grounding — improve the wording, structure and
+  insight, but keep its numbers.
 - Format in simple markdown only: "### " section headers, "- " bullet lists, numbered
   lists, **bold** for key numbers and names. No tables, no code blocks, no links, no HTML.
 - Keep it under ~200 words unless the user explicitly asks for a detailed report.`;
@@ -53,7 +57,9 @@ module.exports = async (req, res) => {
         return;
     }
 
-    const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+    // gemini-2.5-flash is retired for new API keys (upstream 404s pointing at
+    // the newer model), so default to the current flash generation.
+    const model = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
     const url = 'https://generativelanguage.googleapis.com/v1beta/models/' +
         encodeURIComponent(model) + ':generateContent';
 
@@ -67,7 +73,9 @@ module.exports = async (req, res) => {
                     role: 'user',
                     parts: [{ text: 'DASHBOARD CONTEXT (JSON):\n' + contextStr + '\n\nQUESTION: ' + question }],
                 }],
-                generationConfig: { temperature: 0.3, maxOutputTokens: 1024 },
+                // Roomy cap: newer flash models spend output tokens on internal
+                // reasoning before the visible answer, so 1024 could come back empty.
+                generationConfig: { temperature: 0.3, maxOutputTokens: 4096 },
             }),
         });
         if (!upstream.ok) {
