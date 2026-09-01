@@ -418,22 +418,55 @@
     color: hsl(var(--muted-foreground));
 }
 .ai-response .ai-md-p {
-    margin: 0.35rem 0;
-    line-height: 1.55;
+    margin: 0.4rem 0;
+    line-height: 1.6;
+    font-size: 0.92rem;
+    display: block;
 }
 .ai-response ul.ai-md-list,
 .ai-response ol.ai-md-list {
-    margin: 0.35rem 0 0.5rem;
-    padding-left: 1.25rem;
+    margin: 0.4rem 0 0.6rem;
+    padding-left: 1.3rem;
+    display: block;
 }
-.ai-response .ai-md-list li {
-    margin: 0.25rem 0;
-    line-height: 1.5;
-}
+.ai-response ul.ai-md-list { list-style: disc outside; }
+.ai-response ol.ai-md-list { list-style: decimal outside; }
 .ai-response .ai-md-p code,
 .ai-response .ai-md-list code {
     font-size: 0.85em;
     background: hsl(var(--muted) / 0.5);
     border-radius: 4px;
     padding: 0.08em 0.35em;
+}
+
+/* The assistant lives inside a `.parameter-list <li>`, so that section's
+   generic rules leak into Gemini's markdown and shatter the layout:
+   `.parameter-list li {display:flex}` turns each answer bullet into flex
+   columns, and `.parameter-list div strong {display:block; 1.1rem}` blows
+   bold numbers up into tiles. These higher-specificity rules restore
+   normal document flow inside the response box. */
+#ai-response .ai-md-list li {
+    display: list-item;
+    margin: 0.3rem 0;
+    padding-left: 0.15rem;
+    line-height: 1.6;
+    font-size: 0.92rem;
+    gap: 0;
+}
+#ai-response .ai-md-list li::marker {
+    color: hsl(var(--primary));
+}
+#ai-response strong {
+    display: inline;
+    margin: 0;
+    font-size: inherit;
+    font-weight: 600;
+    color: hsl(var(--primary));
+}
+/* Breathing room between answer sections: any header that follows content. */
+.ai-response .ai-md-p + .ai-head,
+.ai-response .ai-md-list + .ai-head {
+    margin-top: 1rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid hsl(var(--border) / 0.6);
 }
