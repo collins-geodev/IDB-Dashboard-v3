@@ -1191,9 +1191,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const vendors = Object.entries(vendorCounts).sort((a, b) => b[1] - a[1])
             .map(([name, count]) => ({ name, count, pct: totalUnique ? (count / totalUnique) * 100 : 0 }));
 
-        const userCounts = uniquePolesByGroup(data, d => d.User);
+        // Officers are keyed by display name so several logins of one officer
+        // (e.g. gakhimien + agoddey) roll up into a single row; the Username
+        // column lists every login that contributed.
+        const userCounts = uniquePolesByGroup(data, userFacetKey);
+        const loginsByOfficer = {};
+        data.forEach(d => {
+            if (!d.User) return;
+            const k = userFacetKey(d);
+            (loginsByOfficer[k] = loginsByOfficer[k] || new Set()).add(String(d.User));
+        });
         const officers = Object.entries(userCounts).sort((a, b) => b[1] - a[1])
-            .map(([user, count]) => ({ user, name: getDisplayName(user) || user, count, pct: totalUnique ? (count / totalUnique) * 100 : 0 }));
+            .map(([name, count]) => ({ user: [...(loginsByOfficer[name] || [])].join(', '), name, count, pct: totalUnique ? (count / totalUnique) * 100 : 0 }));
 
         const linkage = buildingLinkage(data);
         const buildings = uniqueBuildings(data);
@@ -2703,7 +2712,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 dt: { field: 'DT Name', label: 'DT', disp: v => v },
                 undertaking: { field: 'Undertaking', label: 'Undertaking', disp: v => v },
                 businessunit: { field: 'Bussines Unit', label: 'Business Unit', disp: v => v },
-                user: { field: 'User', label: 'Field Officer', disp: v => getDisplayName(v) },
+                user: { field: 'User', key: userFacetKey, label: 'Field Officer', disp: v => getDisplayName(v) },
             };
         }
 
@@ -2750,16 +2759,29 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (hit) filters.push({ dim, value: hit });
                 });
 
-            // Users — username or full-name substring.
-            const usersAll = [...new Set(data.map(d => d.User).filter(Boolean))];
-            const userHit = usersAll.find(u => {
-                const un = norm(u), fn = norm(getDisplayName(u));
-                return (un.length >= 4 && wordIn(q, un)) || (fn.length >= 5 && wordIn(q, fn));
+            // Users — full-name or any-login substring. The filter value is the
+            // officer's display name so every login of that officer is included.
+            const loginsByOfficer = new Map();
+            data.forEach(d => {
+                if (!d.User) return;
+                const k = userFacetKey(d);
+                if (!loginsByOfficer.has(k)) loginsByOfficer.set(k, new Set());
+                loginsByOfficer.get(k).add(String(d.User));
+            });
+            const userHit = [...loginsByOfficer.keys()].find(name => {
+                const fn = norm(name);
+                if (fn.length >= 5 && wordIn(q, fn)) return true;
+                return [...loginsByOfficer.get(name)].some(u => { const un = norm(u); return un.length >= 4 && wordIn(q, un); });
             });
             if (userHit) filters.push({ dim: 'user', value: userHit });
 
             let sub = data, label = [];
-            filters.forEach(f => { sub = sub.filter(d => d[spec[f.dim].field] === f.value); label.push(spec[f.dim].disp(f.value)); });
+            filters.forEach(f => {
+                const sp = spec[f.dim];
+                const keyOf = sp.key ? sp.key : (d => d[sp.field]);
+                sub = sub.filter(d => keyOf(d) === f.value);
+                label.push(sp.disp(f.value));
+            });
             return { filters, data: sub, label: label.join(' › ') || 'all data', vendorsHit, spec, vendorsAll };
         }
 
@@ -2781,7 +2803,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (bt > 0) out += meter(pctOf(nPoles, bt), 'BOQ completion', 'Poles tagged ' + bold(fmt(nPoles)) + ' of ' + bold(fmt(bt)) + ' target');
             out += tiles([
                 { val: bold(fmt(nPoles)), label: 'Poles tagged' },
-                { val: bold(uniqCount(ds, 'User')), label: 'Field officers' },
+                { val: bold(uniqueOfficers(ds)), label: 'Field officers' },
                 { val: bold(rr.rate), label: 'Poles / day' },
                 { val: bold(uniqCount(ds, 'Feeder')), label: 'Feeders' },
                 { val: bold(uniqCount(ds, 'DT Name')), label: 'DTs' },
@@ -2812,7 +2834,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const actPoles = poleSet.size, actNew = newSet.size;
             return {
                 actPoles, actNew, actExNew: Math.max(0, actPoles - actNew),
-                actUsers: new Set(captured.map(d => d.User).filter(Boolean)).size,
+                actUsers: uniqueOfficers(captured),
                 actFeeders: new Set(captured.map(d => d.Feeder).filter(Boolean)).size,
                 actDTs: new Set(captured.map(d => d['DT Name']).filter(Boolean)).size,
                 actBuildings: bldgSet.size,
@@ -3174,12 +3196,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         function fallback(q, qTokens, rawQuery, data) {
             // Fuzzy match a user / feeder / DT name, else generic text search.
-            const users = [...new Set(data.map(d => d.User).filter(Boolean))];
-            const userNames = users.map(getDisplayName);
+            const userNames = [...new Set(data.map(userFacetKey).filter(Boolean))];
             const fu = fuzzyBest(qTokens, userNames);
             if (fu) {
-                const uid = users.find(u => getDisplayName(u) === fu.value) || fu.value;
-                const ds = data.filter(d => d.User === uid);
+                const uid = fu.value;
+                const ds = data.filter(d => userFacetKey(d) === uid);
                 if (ds.length) {
                     const rr = runRate(ds), bs = buildingsStats(ds);
                     return '<div class="ai-head">🔎 ' + esc(getDisplayName(uid)) + ' (closest match)</div>' +
@@ -3309,10 +3330,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const vendors = uniquePerKey(d => d.Vendor_Name).map(([v, n]) => {
                 const sub = ds.filter(d => d.Vendor_Name === v); const vr = runRate(sub);
-                return { vendor: v, poles: n, officers: uniqCount(sub, 'User'), runRatePerDay: vr.rate, activeDays: vr.days };
+                return { vendor: v, poles: n, officers: uniqueOfficers(sub), runRatePerDay: vr.rate, activeDays: vr.days };
             });
-            const officers = uniquePerKey(d => d.User);
-            const topOfficers = officers.slice(0, 8).map(([u, n]) => ({ officer: getDisplayName(u), vendor: (ds.find(d => d.User === u) || {}).Vendor_Name || '', poles: n }));
+            const officers = uniquePerKey(userFacetKey);
+            const topOfficers = officers.slice(0, 8).map(([u, n]) => ({ officer: getDisplayName(u), vendor: (ds.find(d => userFacetKey(d) === u) || {}).Vendor_Name || '', poles: n }));
             const bottomOfficers = officers.slice(-5).map(([u, n]) => ({ officer: getDisplayName(u), poles: n }));
 
             // Daily counts (last 14 active days) + recent-vs-prior momentum.
@@ -3477,8 +3498,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const sortedVendors = Object.entries(vendorCounts).sort((a, b) => b[1] - a[1]);
         const vColors = { 'ETC Workforce': '#0EA5E9', 'Jesom Technology': '#f97316', 'Ikeja Electric': '#eab308' };
 
-        // Officers (unique poles per officer)
-        const userCounts = uniquePolesByGroup(data, d => d.User);
+        // Officers (unique poles per officer, all logins of an officer merged)
+        const userCounts = uniquePolesByGroup(data, userFacetKey);
         const totalUsers = Object.keys(userCounts).length;
         const sortedUsers = Object.entries(userCounts).sort((a, b) => b[1] - a[1]);
         const topOfficer = sortedUsers[0];
@@ -3677,6 +3698,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // fall back to the raw username (getDisplayName returns it unchanged).
     function userFacetKey(d) {
         return getDisplayName(d["User"]) || '';
+    }
+
+    // Number of distinct officers in a set of rows, counting every login that
+    // resolves to the same display name as ONE officer.
+    function uniqueOfficers(rows) {
+        return new Set(rows.map(userFacetKey).filter(Boolean)).size;
     }
 
     // ── Faceted cascade ──────────────────────────────────────────────────────
@@ -3989,7 +4016,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Update Top Cards
         const topActiveEl = document.getElementById('topCardActiveUsers');
         if (topActiveEl) {
-            const activeUsersCount = new Set(capturedData.map(d => d.User).filter(Boolean)).size;
+            const activeUsersCount = uniqueOfficers(capturedData);
             topActiveEl.textContent = activeUsersCount.toLocaleString();
         }
 
@@ -4136,8 +4163,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const userVendors = {};
 
         filteredData.forEach(d => {
-            userCounts[d.User] = (userCounts[d.User] || 0) + 1;
-            if (!userVendors[d.User]) userVendors[d.User] = d.Vendor_Name;
+            const officer = userFacetKey(d);
+            if (!officer) return;
+            userCounts[officer] = (userCounts[officer] || 0) + 1;
+            if (!userVendors[officer]) userVendors[officer] = d.Vendor_Name;
         });
 
         const sortedUsers = Object.entries(userCounts).sort((a, b) => b[1] - a[1]);
@@ -4363,7 +4392,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const issuesSet = new Set();
 
         filteredData.forEach(d => {
-            const user = d.User;
+            const user = userFacetKey(d);
             const issue = d.Issue_Type;
             if (issue === 'Good Condition') return; // Filter out 'Good' to focus on issues? Or keep all? Prompt implies distinct issues. Let's filter 'Good' to make it look like the example "Reported Issues".
 
@@ -4449,7 +4478,7 @@ document.addEventListener('DOMContentLoaded', () => {
         filteredData.forEach(d => {
             const vendor = d.Vendor_Name;
             const date = d["Date/timestamp"] ? d["Date/timestamp"].split(' ')[0] : 'Unknown';
-            const user = d.User;
+            const user = userFacetKey(d);
 
             if (vendorData[vendor]) {
                 vendorData[vendor].records++;
@@ -4616,7 +4645,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             map[key].actualTotal++;
-            map[key].users.add(d.User);
+            if (userFacetKey(d)) map[key].users.add(userFacetKey(d));
 
             // New Poles (Install)
             if (isNewInstallPole(d)) map[key].newPoles++;
@@ -6157,7 +6186,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         const poles = countUniquePoles(utRows);
                         const feeders = new Set(utRows.map(r => r.Feeder).filter(Boolean)).size;
                         const dts = new Set(utRows.map(r => r["DT Name"]).filter(Boolean)).size;
-                        const officers = new Set(utRows.map(r => r.User).filter(Boolean)).size;
+                        const officers = uniqueOfficers(utRows);
                         const vendorCounts = uniquePolesByGroupExclusive(utRows, r => r.Vendor_Name || 'Other');
                         const vendorStr = Object.entries(vendorCounts).sort((a, b) => b[1] - a[1])
                             .map(([v, c]) => `${hlEsc(v)} (${c.toLocaleString()})`).join('<br>') || 'N/A';
@@ -6360,8 +6389,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const sortedVendors = Object.entries(vendorCounts).sort((a, b) => b[1] - a[1]);
         const vendorColors = { 'ETC Workforce': '#0EA5E9', 'Jesom Technology': '#f97316', 'Ikeja Electric': '#eab308' };
 
-        // --- Officers (unique poles) ---
-        const userCounts = uniquePolesByGroup(data, d => d.User);
+        // --- Officers (unique poles, all logins of an officer merged) ---
+        const userCounts = uniquePolesByGroup(data, userFacetKey);
         const totalUsers = Object.keys(userCounts).length;
 
         // --- Building-SLRN linkage (real data-completeness signal) ---
@@ -6461,7 +6490,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const vShort = { 'ETC Workforce': 'ETC', 'Jesom Technology': 'Jesom', 'Ikeja Electric': 'Ikeja' };
                 const rows = vendorNames.map(v => {
                     const vUsers = {};
-                    data.filter(d => d.Vendor_Name === v).forEach(d => { if (d.User) vUsers[d.User] = (vUsers[d.User] || 0) + 1; });
+                    data.filter(d => d.Vendor_Name === v).forEach(d => { const o = userFacetKey(d); if (o) vUsers[o] = (vUsers[o] || 0) + 1; });
                     const sorted = Object.entries(vUsers).sort((a, b) => b[1] - a[1]);
                     if (sorted.length === 0) return '';
                     const best = sorted[0];
@@ -6604,7 +6633,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 };
             }
             fieldGroups[key].actualTotal++;
-            fieldGroups[key].users.add(d.User);
+            if (userFacetKey(d)) fieldGroups[key].users.add(userFacetKey(d));
         });
 
         // 2. Iterate BOQ and Merge
@@ -6797,8 +6826,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const trendDir = recentRate > prevRate ? 'accelerating' : recentRate < prevRate ? 'decelerating' : 'steady';
             const trendDelta = prevRate > 0 ? Math.abs(Math.round(((recentRate - prevRate) / prevRate) * 100)) : 0;
 
-            // Users (unique poles per officer)
-            const userCounts = uniquePolesByGroup(vData, d => d.User);
+            // Users (unique poles per officer, all logins of an officer merged)
+            const userCounts = uniquePolesByGroup(vData, userFacetKey);
             const sortedUsers = Object.entries(userCounts).sort((a, b) => b[1] - a[1]);
             const totalUsers = sortedUsers.length;
             const topUser = sortedUsers[0];
