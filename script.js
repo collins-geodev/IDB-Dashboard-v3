@@ -3641,10 +3641,12 @@ document.addEventListener('DOMContentLoaded', () => {
         'oolumuyiwa', 'oolorunfemi', 'osadejo'
     ];
 
-    // Rebuild the User <select> options from a data subset, preserving the display-
-    // name dedup (one entry per name, preferring the id that has records) and the
-    // Ikeja roster padding when nothing narrows the scope. Mirrors the User logic in
-    // populateDependentFilters so the faceted cascade can rebuild this facet alone.
+    // Rebuild the User <select> options from a data subset. Options are keyed by
+    // DISPLAY NAME (not raw login), so an officer with several logins (e.g.
+    // gakhimien + agoddey) is one entry that matches every login resolving to that
+    // name — see userFacetKey. Ikeja roster padding applies when nothing narrows
+    // the scope. Mirrors the User logic in populateDependentFilters so the faceted
+    // cascade can rebuild this facet alone.
     function populateUserSelect(data) {
         const userSelect = document.getElementById('userFilter');
         if (!userSelect) return;
@@ -3656,23 +3658,25 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!narrowingActive && (!vendorVals || vendorVals.includes('Ikeja Electric'))) {
             IKEJA_USER_ROSTER.forEach(n => userSet.add(n));
         }
-        const usersWithData = new Set(data.map(item => item['User']).filter(Boolean));
-        const seenDisplayNames = new Map();
+        const names = new Set();
         [...userSet].filter(Boolean).forEach(username => {
-            const displayName = getDisplayName(username);
-            if (!displayName) return;
-            const hasData = usersWithData.has(username);
-            const existing = seenDisplayNames.get(displayName);
-            if (!existing) seenDisplayNames.set(displayName, { id: username, name: displayName, hasData });
-            else if (!existing.hasData && hasData) seenDisplayNames.set(displayName, { id: username, name: displayName, hasData });
+            const displayName = userFacetKey({ User: username });
+            if (displayName) names.add(displayName);
         });
-        const users = [...seenDisplayNames.values()].sort((a, b) => a.name.localeCompare(b.name));
+        const users = [...names].sort((a, b) => a.localeCompare(b));
         userSelect.innerHTML = '<option value="All">All Users</option>';
-        users.forEach(u => {
+        users.forEach(name => {
             const opt = document.createElement('option');
-            opt.value = u.id; opt.textContent = u.name;
+            opt.value = name; opt.textContent = name;
             userSelect.appendChild(opt);
         });
+    }
+
+    // The User filter's key for a record: the officer's display name, so every
+    // login mapped to the same name is selected/matched together. Unmapped logins
+    // fall back to the raw username (getDisplayName returns it unchanged).
+    function userFacetKey(d) {
+        return getDisplayName(d["User"]) || '';
     }
 
     // ── Faceted cascade ──────────────────────────────────────────────────────
@@ -3685,7 +3689,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { id: 'vendorFilter', val: d => d["Vendor_Name"] },
         { id: 'buFilter', val: d => d["Bussines Unit"] },
         { id: 'utFilter', val: d => d["Undertaking"] },
-        { id: 'userFilter', val: d => d["User"] },
+        { id: 'userFilter', val: userFacetKey },
         { id: 'feederFilter', val: d => d["Feeder"] },
         { id: 'dtFilter', val: d => d["DT Name"] },
         { id: 'upriserFilter', val: d => String(d["UpriserNo"]) },
@@ -3911,7 +3915,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return (!vendorVals || vendorVals.includes(item["Vendor_Name"])) &&
                 (!buVals || buVals.includes(item["Bussines Unit"])) &&
                 (!utVals || utVals.includes(item["Undertaking"])) &&
-                (!userVals || userVals.includes(item["User"])) &&
+                (!userVals || userVals.includes(userFacetKey(item))) &&
                 (!dtVals || dtVals.includes(item["DT Name"])) &&
                 (!upriserVals || upriserVals.includes(String(item["UpriserNo"]))) &&
                 (!feederVals || feederVals.includes(item["Feeder"])) &&
@@ -5233,14 +5237,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 { key: 'user',   label: 'User',          filterId: 'userFilter' }
             ];
 
-            // Map each map-panel filter to its underlying data field.
-            const fieldFor = {
-                buFilter:     'Bussines Unit',
-                utFilter:     'Undertaking',
-                feederFilter: 'Feeder',
-                dtFilter:     'DT Name',
-                vendorFilter: 'Vendor_Name',
-                userFilter:   'User'
+            // Map each map-panel filter to the value a record contributes to it.
+            // User is keyed by display name (same as the sidebar facet).
+            const valueFor = {
+                buFilter:     d => d['Bussines Unit'],
+                utFilter:     d => d['Undertaking'],
+                feederFilter: d => d['Feeder'],
+                dtFilter:     d => d['DT Name'],
+                vendorFilter: d => d['Vendor_Name'],
+                userFilter:   userFacetKey
             };
 
             // Symmetric faceting: a group's options are the values that co-occur
@@ -5249,10 +5254,10 @@ document.addEventListener('DOMContentLoaded', () => {
             // panel narrows the same way the sidebar does, not just by "upstream"
             // filters in a fixed order.
             const optionsForFilter = (targetFilterId) => {
-                const fld = fieldFor[targetFilterId];
+                const getVal = valueFor[targetFilterId];
                 const out = new Set();
                 dataMatchingFacetsExcept(targetFilterId).forEach(d => {
-                    const v = d[fld];
+                    const v = getVal(d);
                     if (v !== undefined && v !== null && v !== '') out.add(String(v));
                 });
                 return [...out].sort((a, b) => a.localeCompare(b));
@@ -5266,8 +5271,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const checks = values.map(v => {
                         const safe = String(v).replace(/"/g, '&quot;');
                         const checked = ms.selectedValues.has(v) ? 'checked' : '';
-                        const label = src.filterId === 'userFilter' ? getDisplayName(v) : v;
-                        return `<label class="map-filter-check"><input type="checkbox" data-filter="${src.filterId}" value="${safe}" ${checked}><span>${label}</span></label>`;
+                        return `<label class="map-filter-check"><input type="checkbox" data-filter="${src.filterId}" value="${safe}" ${checked}><span>${v}</span></label>`;
                     }).join('');
                     return `
                         <div class="map-filter-group" data-filter="${src.filterId}">
