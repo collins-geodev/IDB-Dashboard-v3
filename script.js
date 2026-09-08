@@ -335,6 +335,8 @@ document.addEventListener('DOMContentLoaded', () => {
             'akinbode quadri', 'alowolodu julius', 'david gabriel', 'chioma ogochukwu', 'mustapha ajao',
             'chika ejindu', 'osaretin edobor', 'olumuyiwa oladapo', 'eunice odiana',
             'john mark', 'akinyele ezekiel', 'pius onwubiko',
+            'oluwadara obademi', 'omotoyosi oluwole', 'seun fatope', 'goddey akhimen',
+            'grace nwofili', 'samuel ofinni', 'olorunfemi ola', 'ojonumi adejo',
             // System usernames from the field data (as they actually appear in the dataset)
             'kadebayo', 'ttope', 'rakinloye', 'vifeanyi', 'osunday', 'wadegoke', 'omoses',
             'doluwaseun', 'dowoicho', 'uifeanyichukwu', 'dekpe', 'odtaiwo', 'iakintola',
@@ -346,7 +348,10 @@ document.addEventListener('DOMContentLoaded', () => {
             'aluqman', 'ustephen', 'jutibe', 'oolawaiye', 'aadeola', 'cfonatius', 'bbankole',
             'gabefe', 'madedayo', 'smartins', 'aabbul', 'sthompson', 'aomotoyo', 'aquadri',
             'ajulius', 'dgabriel', 'cogochukwu', 'majao', 'cejindu', 'oedobor', 'ooladapo',
-            'dolujide', 'eodiana', 'jmark', 'aezekiel', 'ponwubiko'
+            'dolujide', 'eodiana', 'jmark', 'aezekiel', 'ponwubiko',
+            // Ikeja Electric Plc profiling batch (Sep 2026)
+            'ooluwadara', 'oomotoyosi', 'sfatope', 'agoddey', 'ngrace', 'sofinni',
+            'oolumuyiwa', 'oolorunfemi', 'osadejo'
         ]);
 
         if (etcUsers.has(user)) return 'ETC Workforce';
@@ -468,7 +473,17 @@ document.addEventListener('DOMContentLoaded', () => {
         'eodiana': 'Eunice Odiana',
         'jmark': 'John Mark',
         'aezekiel': 'Akinyele Ezekiel',
-        'ponwubiko': 'Pius Onwubiko'
+        'ponwubiko': 'Pius Onwubiko',
+        // Ikeja Electric Plc profiling batch (Sep 2026)
+        'ooluwadara': 'Oluwadara Obademi',
+        'oomotoyosi': 'Omotoyosi Oluwole',
+        'sfatope': 'Seun Fatope',
+        'agoddey': 'Goddey Akhimen',
+        'ngrace': 'Grace Nwofili',
+        'sofinni': 'Samuel Ofinni',
+        'oolumuyiwa': 'Olumuyiwa Oladapo',
+        'oolorunfemi': 'Olorunfemi Ola',
+        'osadejo': 'Ojonumi Adejo'
     };
 
     // Also register Ikeja Electric display names (for legacy data stored as full names)
@@ -487,7 +502,9 @@ document.addEventListener('DOMContentLoaded', () => {
         'Moses Adedayo', 'Somadina Martins', 'Akande Abdulwasiu', 'Solomon Thompson', 'Alawode Omotoyosi',
         'Akinbode Quadri', 'Alowolodu Julius', 'David Gabriel', 'Chioma Ogochukwu', 'Mustapha Ajao',
         'Chika Ejindu', 'Osaretin Edobor', 'Olumuyiwa Oladapo', 'Eunice Odiana',
-        'John Mark', 'Akinyele Ezekiel', 'Pius Onwubiko'
+        'John Mark', 'Akinyele Ezekiel', 'Pius Onwubiko',
+        'Oluwadara Obademi', 'Omotoyosi Oluwole', 'Seun Fatope', 'Goddey Akhimen',
+        'Grace Nwofili', 'Samuel Ofinni', 'Olorunfemi Ola', 'Ojonumi Adejo'
     ].forEach(name => {
         userFullNames[name.toLowerCase()] = name;
         userFullNames[name] = name;
@@ -3619,7 +3636,9 @@ document.addEventListener('DOMContentLoaded', () => {
         'aluqman', 'ustephen', 'jutibe', 'oolawaiye', 'aadeola', 'cfonatius', 'bbankole',
         'gabefe', 'madedayo', 'smartins', 'aabbul', 'sthompson', 'aomotoyo', 'aquadri',
         'ajulius', 'dgabriel', 'cogochukwu', 'majao', 'cejindu', 'oedobor', 'ooladapo',
-        'dolujide', 'eodiana', 'jmark', 'aezekiel', 'ponwubiko'
+        'dolujide', 'eodiana', 'jmark', 'aezekiel', 'ponwubiko',
+        'ooluwadara', 'oomotoyosi', 'sfatope', 'agoddey', 'ngrace', 'sofinni',
+        'oolumuyiwa', 'oolorunfemi', 'osadejo'
     ];
 
     // Rebuild the User <select> options from a data subset, preserving the display-
