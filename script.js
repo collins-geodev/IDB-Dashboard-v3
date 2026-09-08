@@ -335,7 +335,7 @@ document.addEventListener('DOMContentLoaded', () => {
             'akinbode quadri', 'alowolodu julius', 'david gabriel', 'chioma ogochukwu', 'mustapha ajao',
             'chika ejindu', 'osaretin edobor', 'olumuyiwa oladapo', 'eunice odiana',
             'john mark', 'akinyele ezekiel', 'pius onwubiko',
-            'oluwadara obademi', 'omotoyosi oluwole', 'seun fatope', 'goddey akhimen',
+            'oluwadara obademi', 'omotoyosi oluwole', 'seun fatope',
             'grace nwofili', 'samuel ofinni', 'olorunfemi ola', 'ojonumi adejo',
             // System usernames from the field data (as they actually appear in the dataset)
             'kadebayo', 'ttope', 'rakinloye', 'vifeanyi', 'osunday', 'wadegoke', 'omoses',
@@ -478,7 +478,7 @@ document.addEventListener('DOMContentLoaded', () => {
         'ooluwadara': 'Oluwadara Obademi',
         'oomotoyosi': 'Omotoyosi Oluwole',
         'sfatope': 'Seun Fatope',
-        'agoddey': 'Goddey Akhimen',
+        'agoddey': 'Goddey Akhimien',
         'ngrace': 'Grace Nwofili',
         'sofinni': 'Samuel Ofinni',
         'oolumuyiwa': 'Olumuyiwa Oladapo',
@@ -503,7 +503,7 @@ document.addEventListener('DOMContentLoaded', () => {
         'Akinbode Quadri', 'Alowolodu Julius', 'David Gabriel', 'Chioma Ogochukwu', 'Mustapha Ajao',
         'Chika Ejindu', 'Osaretin Edobor', 'Olumuyiwa Oladapo', 'Eunice Odiana',
         'John Mark', 'Akinyele Ezekiel', 'Pius Onwubiko',
-        'Oluwadara Obademi', 'Omotoyosi Oluwole', 'Seun Fatope', 'Goddey Akhimen',
+        'Oluwadara Obademi', 'Omotoyosi Oluwole', 'Seun Fatope',
         'Grace Nwofili', 'Samuel Ofinni', 'Olorunfemi Ola', 'Ojonumi Adejo'
     ].forEach(name => {
         userFullNames[name.toLowerCase()] = name;
