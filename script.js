@@ -5415,18 +5415,18 @@ document.addEventListener('DOMContentLoaded', () => {
             let lensTile = null;
 
             // Mirror whichever base layer the main map is currently showing,
-            // so the lens content always matches (OSM / Satellite / Hybrid).
-            const currentBase = {
-                url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-                opts: { subdomains: 'abcd', maxZoom: 20 }
-            };
+            // so the lens content always matches (Dark / Light / Satellite / Hybrid).
+            const baseOpts = (layer) => ({
+                subdomains: layer.options.subdomains,
+                maxZoom: layer.options.maxZoom || 20,
+                maxNativeZoom: layer.options.maxNativeZoom
+            });
+            const startBase = Object.values(mapBases).find(l => map.hasLayer(l)) || mapBases.dark;
+            const currentBase = { url: startBase._url, opts: baseOpts(startBase) };
             map.on('baselayerchange', (e) => {
                 if (e.layer && e.layer._url) {
                     currentBase.url = e.layer._url;
-                    currentBase.opts = {
-                        subdomains: e.layer.options.subdomains,
-                        maxZoom: e.layer.options.maxZoom || 20
-                    };
+                    currentBase.opts = baseOpts(e.layer);
                     if (lensMap && lensTile) {
                         lensMap.removeLayer(lensTile);
                         lensTile = L.tileLayer(currentBase.url, currentBase.opts).addTo(lensMap);
@@ -5744,17 +5744,32 @@ document.addEventListener('DOMContentLoaded', () => {
             // Init map — default view centers on Lagos; boundary fit will take over once loaded
             map = L.map('map', { zoomControl: true }).setView([6.55, 3.45], 10);
 
-            // Base layers — Dark (default) & Light (CartoDB), Google Satellite/Hybrid.
-            const darkLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-                subdomains: 'abcd',
-                attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-                maxZoom: 20
-            });
-            const lightLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-                subdomains: 'abcd',
-                attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-                maxZoom: 20
-            });
+            // Base layers — Dark (default) & Light (Esri Canvas), Google Satellite/Hybrid.
+            // Esri replaces CARTO, whose keyless tiles have been an "API KEY
+            // REQUIRED" watermark since September 2026. Canvas tiles stop at
+            // z16 (deeper requests return a placeholder), so Leaflet upscales
+            // past that. Each Canvas base is label-free; its Reference (place
+            // names) layer rides along with it in a pane above the UT polygons,
+            // keeping Dark/Light single tile layers for the zoom lens.
+            const ESRI_CANVAS = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/';
+            const esriOpts = {
+                attribution: 'Tiles &copy; Esri &mdash; Esri, HERE, Garmin, &copy; OpenStreetMap contributors',
+                maxZoom: 20,
+                maxNativeZoom: 16
+            };
+            map.createPane('basemapLabels');
+            map.getPane('basemapLabels').style.zIndex = 450;          // over UT fills, under markers
+            map.getPane('basemapLabels').style.pointerEvents = 'none';
+            const esriCanvas = (base, reference) => {
+                const layer = L.tileLayer(ESRI_CANVAS + base + '/MapServer/tile/{z}/{y}/{x}', esriOpts);
+                const labels = L.tileLayer(ESRI_CANVAS + reference + '/MapServer/tile/{z}/{y}/{x}',
+                    { ...esriOpts, attribution: '', pane: 'basemapLabels' });
+                layer.on('add', () => labels.addTo(map));
+                layer.on('remove', () => map.removeLayer(labels));
+                return layer;
+            };
+            const darkLayer = esriCanvas('World_Dark_Gray_Base', 'World_Dark_Gray_Reference');
+            const lightLayer = esriCanvas('World_Light_Gray_Base', 'World_Light_Gray_Reference');
             const satLayer = L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
                 subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
                 attribution: '&copy; Google',
