@@ -35,9 +35,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const rowsPerPage = 25;
     let map = null;
     let markersLayer = null;
-    let boundaryLayer = null;       // Lagos + UT polygon layers
+    let boundaryLayer = null;       // Lagos + 2026 UT polygon layers
+    let buLayer = null;             // 2026 Business Unit outlines + labels (5 BUs)
     let utLabelLayer = null;        // UT name labels (permanent)
-    let htFeederLayer = null;       // Shomolu HT feeder polylines
+    let htFeederLayer = null;       // Shomolu-network 11kV feeder polylines (2026 UT/BU tagged)
     let issLayer = null;            // Injection Substation point markers
     let tcnLayer = null;            // TCN transmission station markers
     let dtLayer = null;             // Distribution Transformer markers (derived centroids)
@@ -72,8 +73,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // still matches hundreds of DTs should not expand a whole page of registers.
     const AUTO_EXPAND_MAX_DTS = 10;
 
-    // Generate a visually distinct color for each UT via golden-angle HSL.
-    // 54 UTs need 54 colors that are easy to tell apart at a glance.
+    // Fallback UT color (golden-angle HSL) for a boundary without the 2026
+    // pack's FILL color — the 2026 UTs are shaded within their BU's hue.
     const utColorFor = (i) => `hsl(${((i * 137.508) % 360).toFixed(0)}, 72%, 52%)`;
 
     // ── Multi-Select Dropdown Component ──
@@ -792,7 +793,14 @@ document.addEventListener('DOMContentLoaded', () => {
         // has no uploads or the query isn't available — never blocks the load.
         (window.IDB && IDB.query)
             ? IDB.query('poleUploads:list').catch(() => [])
-            : Promise.resolve([])
+            : Promise.resolve([]),
+        // 2026 UT boundaries — the field data is re-attributed to them below.
+        // Never blocks the load: without them the old→new lookup is used.
+        (window.IDB_REALIGNMENT && !IDB_REALIGNMENT.hasBoundaries())
+            ? fetch('./data/ut_boundaries.geojson').then(r => r.ok ? r.json() : null)
+                .then(geo => { if (geo) IDB_REALIGNMENT.setBoundaries(geo); })
+                .catch(err => console.warn('[Realignment 2026] UT boundaries unavailable — using the old→new UT lookup only.', err))
+            : Promise.resolve()
     ])
     .catch(error => {
         // True network / fetch failures land here — log silently, never
@@ -838,6 +846,13 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } else {
             console.log(`[${_cfgVariant}] No feeder allowlist — showing all feeders in the dataset.`);
+        }
+        // 2026 UT/BU realignment (5 BUs / 38 UTs): re-attribute every record's
+        // Undertaking and Business Unit from its legacy values — see
+        // realignment-2026.js. The legacy values are kept on each record.
+        if (window.IDB_REALIGNMENT && Array.isArray(fieldData)) {
+            const _rs = IDB_REALIGNMENT.realignRecords(fieldData);
+            console.log(`[Realignment 2026] ${_rs.total} records: ${_rs.changedUt} UT / ${_rs.changedBu} BU re-attributed`, _rs.byMethod, _rs.byBu);
         }
         try {
             // Process Field Data
@@ -1132,8 +1147,10 @@ document.addEventListener('DOMContentLoaded', () => {
         { header: 'LT Pole SLRN', key: 'Lt PoleSLRN', type: 's', width: 16 },
         { header: 'LT Pole No', key: 'LT Pole No', type: 's', width: 11 },
         { header: 'LT Pole ID', key: 'LT Pole ID', type: 's', width: 11 },
-        { header: 'Business Unit', key: 'Bussines Unit', type: 's', width: 14 },
-        { header: 'Undertaking', key: 'Undertaking', type: 's', width: 15 },
+        { header: 'Business Unit (2026)', key: 'Bussines Unit', type: 's', width: 14 },
+        { header: 'Undertaking (2026)', key: 'Undertaking', type: 's', width: 15 },
+        { header: 'Business Unit (pre-2026)', key: 'Business Unit (pre-2026)', type: 's', width: 14 },
+        { header: 'Undertaking (pre-2026)', key: 'Undertaking (pre-2026)', type: 's', width: 15 },
         { header: 'Feeder', key: 'Feeder', type: 's', width: 26 },
         { header: 'DT Name', key: 'DT Name', type: 's', width: 34 },
         { header: 'DT Number', key: 'DT Number', type: 's', width: 13 },
@@ -1889,6 +1906,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // Uploads published before the serial-date fix are stored with raw
             // Excel serials / numeric cells — normalize them at merge time too.
             normalizeUploadRecord(rec);
+            // Uploads are captured against legacy UT/BU names too.
+            if (window.IDB_REALIGNMENT) IDB_REALIGNMENT.realignRecords([rec]);
             // Stored uploads carry the Vendor_Name computed when they were
             // published; re-derive it so user→vendor remaps apply to them too.
             rec.Vendor_Name = inferVendor(rec['User']);
@@ -5687,6 +5706,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const officer = val(getDisplayName(d["User"]) || d["User"]);
         const latStr = (typeof lat === 'number' && !isNaN(lat)) ? lat.toFixed(6) : val(d["Latitude"]);
         const lonStr = (typeof lon === 'number' && !isNaN(lon)) ? lon.toFixed(6) : val(d["Longitude"]);
+        // BU / Undertaking above are the 2026 realignment; show what the pole
+        // was captured under when that differs.
+        const legacyUt = String(d["Undertaking (pre-2026)"] || '').trim();
+        const legacyBu = String(d["Business Unit (pre-2026)"] || '').trim();
+        const legacyChanged = (legacyUt && legacyUt.toUpperCase() !== String(d["Undertaking"] || '').toUpperCase()) ||
+            (legacyBu && legacyBu.toUpperCase() !== String(d["Bussines Unit"] || '').toUpperCase());
+        const legacyRow = legacyChanged
+            ? `<div class="asset-popup-row"><div class="asset-popup-label">Pre-2026 BU / UT</div><div class="asset-popup-value">${val(legacyBu)} / ${val(legacyUt)}</div></div>`
+            : '';
         return `
             <div class="asset-popup">
                 <div class="asset-popup-title">${poleSLRN}</div>
@@ -5695,6 +5723,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="asset-popup-table">
                     <div class="asset-popup-row"><div class="asset-popup-label">Business Unit</div><div class="asset-popup-value">${val(d["Bussines Unit"])}</div></div>
                     <div class="asset-popup-row"><div class="asset-popup-label">Undertaking</div><div class="asset-popup-value">${val(d["Undertaking"])}</div></div>
+                    ${legacyRow}
                     <div class="asset-popup-row"><div class="asset-popup-label">Upriser No</div><div class="asset-popup-value">${val(d["UpriserNo"])}</div></div>
                     <div class="asset-popup-row"><div class="asset-popup-label">Feeder Name</div><div class="asset-popup-value">${val(d["Feeder"])}</div></div>
                     <div class="asset-popup-row"><div class="asset-popup-label">DT Name</div><div class="asset-popup-value">${val(d["DT Name"])}</div></div>
@@ -5752,9 +5781,10 @@ document.addEventListener('DOMContentLoaded', () => {
             addMapZoomLensControl();
 
             // Layer order: boundaries (bottom) → labels → data markers (top)
-            // Layer order (bottom → top): polygons → HT lines → UT labels
+            // Layer order (bottom → top): UT polygons → BU outlines → HT lines → UT labels
             //                              → ISS markers → TCN markers → data point markers
             boundaryLayer = L.layerGroup().addTo(map);
+            buLayer = L.layerGroup().addTo(map);
             htFeederLayer = L.layerGroup().addTo(map);
             utLabelLayer = L.layerGroup().addTo(map);
             issLayer = L.layerGroup().addTo(map);
@@ -5765,6 +5795,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Expose the DT layer as a toggleable overlay so users can hide the
             // transformer badges when they want an unobstructed pole view.
             if (mapLayersControl) {
+                mapLayersControl.addOverlay(buLayer, '<span class="bu-legend-swatch"></span>Business Units (2026)');
                 mapLayersControl.addOverlay(dtLayer, '<span class="dt-legend-swatch"></span>Distribution Transformers');
             }
 
@@ -6105,9 +6136,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (boundariesLoaded) return;
         try {
             const bust = '?v=' + Date.now();
-            const [lagosData, utData, htData, issData, tcnData] = await Promise.all([
+            const [lagosData, utData, buData, htData, issData, tcnData] = await Promise.all([
                 fetch('./data/lagos_boundary.geojson' + bust).then(r => r.json()),
                 fetch('./data/ut_boundaries.geojson' + bust).then(r => r.json()),
+                fetch('./data/bu_boundaries.geojson' + bust).then(r => r.json()),
                 fetch('./data/shomolu_ht_feeders.geojson' + bust).then(r => r.json()),
                 fetch('./data/iss_substations.geojson' + bust).then(r => r.json()),
                 fetch('./data/tcn_stations.geojson' + bust).then(r => r.json())
@@ -6139,13 +6171,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 })
             }).addTo(boundaryLayer);
 
-            // Assign a distinct color per UT up front so style() and onEachFeature
-            // read from a single source of truth.
+            // Assign each UT its color up front so style() and onEachFeature read
+            // from a single source of truth: the 2026 pack's FILL (a shade of the
+            // UT's BU color), falling back to a generated hue.
             utData.features.forEach((f, i) => {
-                f.properties._color = utColorFor(i);
+                f.properties._color = f.properties.FILL || utColorFor(i);
             });
 
-            // UT boundaries — 54 distinct colors, visible fill, bold outline
+            // 2026 UT boundaries (38 UTs in 5 BUs) — visible fill, bold outline
             const utGeo = L.geoJSON(utData, {
                 style: (feat) => {
                     const col = feat.properties._color;
@@ -6162,6 +6195,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     const name = feat.properties.Name || feat.properties.UT || '';
                     const bu = feat.properties.BU || '';
                     const col = feat.properties._color;
+                    const utCode = feat.properties.UT_CODE || '';
+                    const fromOld = feat.properties.FROM_OLD_UTS || '';
+                    const areaKm2 = feat.properties.AREA_KM2;
 
                     layer.on('mouseover', e => {
                         e.target.setStyle({ fillOpacity: 0.45, weight: 3.2 });
@@ -6180,8 +6216,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         const utRows = (filteredData || []).filter(r => (r["Undertaking"] || '').toString().toUpperCase() === name.toUpperCase());
                         const buVal = bu || (utRows.find(r => r["Bussines Unit"]) || {})["Bussines Unit"] || 'N/A';
                         const row = (lbl, val, last) => `<div class="asset-popup-row${last ? ' asset-popup-row-last' : ''}"><div class="asset-popup-label">${lbl}</div><div class="asset-popup-value">${val}</div></div>`;
+                        const subtitle = `UNDERTAKING · 2026${utCode ? ' · ' + hlEsc(utCode) : ''}`;
+                        const boundaryRows =
+                            (fromOld ? row('Formed From (pre-2026 UTs)', fromOld.split(/,\s*/).map(s => `<span style="white-space:nowrap">${hlEsc(s)}</span>`).join('<br>')) : '') +
+                            (areaKm2 != null ? row('Area', `${Number(areaKm2).toLocaleString()} km²`) : '');
                         if (!utRows.length) {
-                            return `<div class="asset-popup"><div class="asset-popup-title">${hlEsc(name) || 'N/A'}</div><div class="asset-popup-subtitle">UNDERTAKING</div><div class="asset-popup-divider"></div><div class="asset-popup-table">${row('Business Unit', hlEsc(buVal))}${row('Poles Tagged', 'None in the current filter', true)}</div></div>`;
+                            return `<div class="asset-popup"><div class="asset-popup-title">${hlEsc(name) || 'N/A'}</div><div class="asset-popup-subtitle">${subtitle}</div><div class="asset-popup-divider"></div><div class="asset-popup-table">${row('Business Unit', hlEsc(buVal))}${boundaryRows}${row('Poles Tagged', 'None in the current filter', true)}</div></div>`;
                         }
                         const poles = countUniquePoles(utRows);
                         const feeders = new Set(utRows.map(r => r.Feeder).filter(Boolean)).size;
@@ -6193,10 +6233,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         return `
                             <div class="asset-popup">
                                 <div class="asset-popup-title">${hlEsc(name) || 'N/A'}</div>
-                                <div class="asset-popup-subtitle">UNDERTAKING</div>
+                                <div class="asset-popup-subtitle">${subtitle}</div>
                                 <div class="asset-popup-divider"></div>
                                 <div class="asset-popup-table">
                                     ${row('Business Unit', hlEsc(buVal))}
+                                    ${boundaryRows}
                                     ${row('Feeders', feeders.toLocaleString())}
                                     ${row('Distribution Transformers', dts.toLocaleString())}
                                     ${row('Poles Tagged', poles.toLocaleString())}
@@ -6231,7 +6272,56 @@ document.addEventListener('DOMContentLoaded', () => {
             }).addTo(boundaryLayer);
 
             // ═══════════════════════════════════════════════════════════════
-            // HT Feeder Lines (Shomolu) — thick orange dashed polylines
+            // 2026 Business Units — 5 BUs (ABULE EGBA collapsed). Heavy outline
+            // in each BU's color over a dark casing, no fill and non-interactive
+            // so UT polygons underneath stay clickable. Toggle: layer control.
+            // ═══════════════════════════════════════════════════════════════
+            L.geoJSON(buData, {
+                style: { color: '#0f172a', weight: 7, opacity: 0.55, fillOpacity: 0, lineJoin: 'round' },
+                interactive: false
+            }).addTo(buLayer);
+            L.geoJSON(buData, {
+                style: (feat) => ({
+                    color: feat.properties.FILL || '#f8fafc',
+                    weight: 3.5,
+                    opacity: 1,
+                    fillOpacity: 0,
+                    lineJoin: 'round'
+                }),
+                interactive: false,
+                onEachFeature: (feat, layer) => {
+                    // Label at the area centroid of the BU's largest part (a bounds
+                    // center can fall outside an irregular BU such as IKORODU).
+                    const g = feat.geometry;
+                    const polys = g.type === 'Polygon' ? [g.coordinates] : g.coordinates;
+                    let best = null;
+                    polys.forEach(poly => {
+                        const ring = poly[0];
+                        let a = 0, cx = 0, cy = 0;
+                        for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+                            const f = ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1];
+                            a += f; cx += (ring[j][0] + ring[i][0]) * f; cy += (ring[j][1] + ring[i][1]) * f;
+                        }
+                        if (a && (!best || Math.abs(a) > best.a)) best = { a: Math.abs(a), lng: cx / (3 * a), lat: cy / (3 * a) };
+                    });
+                    const at = best ? L.latLng(best.lat, best.lng) : layer.getBounds().getCenter();
+                    const col = feat.properties.FILL || '#f8fafc';
+                    const utCount = feat.properties.UT_COUNT;
+                    L.marker(at, {
+                        interactive: false,
+                        keyboard: false,
+                        icon: L.divIcon({
+                            className: 'bu-label-wrapper',
+                            html: `<div class="bu-label" style="background:${col};">${hlEsc(feat.properties.Name || '')} BU` +
+                                (utCount ? `<span class="bu-label-sub">${utCount} UTs</span>` : '') + `</div>`,
+                            iconSize: [0, 0]
+                        })
+                    }).addTo(buLayer);
+                }
+            }).addTo(buLayer);
+
+            // ═══════════════════════════════════════════════════════════════
+            // HT Feeder Lines (Shomolu network, 2026 UT/BU) — thick orange dashed polylines
             // Rendered as two stacked layers: a wider glow underneath + a
             // bright dashed line on top, so the feeders read at all zooms.
             // ═══════════════════════════════════════════════════════════════
@@ -6257,7 +6347,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     className: 'ht-feeder-line'
                 },
                 onEachFeature: (feat, layer) => {
-                    const name = feat.properties.Name || 'HT Feeder';
+                    const p = feat.properties;
+                    const name = hlEsc(p.Name || 'HT Feeder');
+                    // 2026 BU/UT come from the feeder's DTs; a feeder with no DTs
+                    // in the GIS has none, so fall back to its pre-2026 BU.
+                    const bu = p.BU_2026 || p.BU_OLD || 'SHOMOLU';
+                    const moved = p.BU_2026 && p.BU_OLD && p.BU_2026 !== p.BU_OLD;
+                    const cell = (lbl, val) => `<div class="asset-popup-label">${lbl}</div><div class="asset-popup-value">${val}</div>`;
                     layer.bindTooltip(name, {
                         sticky: true,
                         direction: 'top',
@@ -6266,13 +6362,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     layer.bindPopup(`
                         <div class="asset-popup">
                             <div class="asset-popup-title">${name}</div>
-                            <div class="asset-popup-subtitle">HT FEEDER LINE · SHOMOLU</div>
+                            <div class="asset-popup-subtitle">HT FEEDER LINE · ${hlEsc(bu)}</div>
                             <div class="asset-popup-divider"></div>
                             <div class="asset-popup-grid">
-                                <div class="asset-popup-label">Type</div>
-                                <div class="asset-popup-value">11 kV HT Feeder</div>
-                                <div class="asset-popup-label">Business Unit</div>
-                                <div class="asset-popup-value">SHOMOLU</div>
+                                ${cell('Type', '11 kV HT Feeder')}
+                                ${cell('Business Unit (2026)', p.BU_2026 ? hlEsc(p.BU_2026) : 'Not assigned (no DTs)')}
+                                ${cell('Undertaking (2026)', p.UT_2026 ? hlEsc(p.UT_2026) : 'Not assigned (no DTs)')}
+                                ${moved ? cell('Pre-2026 BU', hlEsc(p.BU_OLD) + ' → ' + hlEsc(p.BU_2026)) : ''}
+                                ${p.DT_COUNT ? cell('DTs', Number(p.DT_COUNT).toLocaleString()) : ''}
+                                ${p.LEN_KM != null ? cell('Length', Number(p.LEN_KM).toLocaleString() + ' km') : ''}
                             </div>
                         </div>
                     `, { className: 'asset-popup-wrapper', maxWidth: 300, minWidth: 240 });

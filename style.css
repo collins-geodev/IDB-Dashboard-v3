@@ -2569,6 +2569,56 @@ header.exec-header img.exec-header-logo,
 /* Hide UT labels when zoomed out to avoid clutter */
 #map.ut-labels-hidden .ut-label-wrapper { display: none; }
 
+/* 2026 Business Unit labels — pill in the BU's own color (set inline) */
+.bu-label-wrapper {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+
+.bu-label {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 4px 12px;
+    color: #ffffff;
+    font-family: 'Inter', 'Segoe UI', Tahoma, sans-serif;
+    font-size: 12.5px;
+    font-weight: 800;
+    letter-spacing: 1.2px;
+    line-height: 1.2;
+    border-radius: 6px;
+    border: 1.5px solid rgba(255, 255, 255, 0.85);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+    white-space: nowrap;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    text-transform: uppercase;
+}
+
+.bu-label-sub {
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.6px;
+    opacity: 0.9;
+}
+
+/* Zoomed in, UT labels take over — keep the BU tag small */
+#map:not(.ut-labels-hidden) .bu-label { font-size: 10.5px; padding: 2px 9px; opacity: 0.88; }
+#map:not(.ut-labels-hidden) .bu-label-sub { display: none; }
+
+.bu-legend-swatch {
+    display: inline-block;
+    width: 12px;
+    height: 10px;
+    border: 2.5px solid #7A4FB5;
+    border-radius: 2px;
+    margin: 0 7px 0 2px;
+    vertical-align: middle;
+    box-sizing: border-box;
+}
+
 /* Ensure the Leaflet map container has a dark-friendly background while tiles load */
 #map {
     background: #0f172a;

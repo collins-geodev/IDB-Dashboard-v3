@@ -60,7 +60,7 @@ The filter is applied once on load against both the field-data file (`Feeder` co
 - **Executive Summary** – Top-level rollup: poles tagged, DTs covered, buildings connected, % completion vs. BOQ.
 - **KPI cards** – Total poles (incl./excl. new), good condition, bad/replace, new poles to install, feeders, DTs, buildings.
 - **Project completion analytics** – Per-feeder and per-DT progress bars, tagged-vs-target deltas, BOQ comparison.
-- **Interactive map** – Lagos boundary, Undertaking polygons, Shomolu HT feeder polylines, Injection Substation markers, TCN station markers, geo-tagged pole points colored by Undertaking.
+- **Interactive map** – Lagos boundary, 2026 Undertaking polygons (38) and Business Unit outlines (5), Shomolu-network 11kV feeder polylines tagged with their 2026 UT/BU, Injection Substation markers, TCN station markers, geo-tagged pole points colored by vendor.
 - **Multi-select filtering** – BU, Undertaking, User, Feeder, DT, Upriser, Material, Date — every filter is multi-select and stacks contextually.
 - **Vendor inference & issue simulation** – Vendor derived from User; issue type assigned where missing for downstream charts.
 - **Duplicate SLRN detection** – Highlights repeated `Lt PoleSLRN` and `Associated Buildings SLRN` values with dismissible warnings.
@@ -96,10 +96,12 @@ The filter is applied once on load against both the field-data file (`Feeder` co
 ├── switch_styles.css                           # Field/BOQ toggle styles
 ├── converted_data_latest.json                  # Field tagging data (fallback copy)
 ├── BOQ-IDB.json                                # BOQ targets per feeder/DT (fallback copy)
+├── realignment-2026.js                         # 2026 UT/BU re-attribution of field records
 ├── data/
 │   ├── lagos_boundary.geojson
-│   ├── ut_boundaries.geojson
-│   ├── shomolu_ht_feeders.geojson
+│   ├── ut_boundaries.geojson                   # 2026 UTs (38)
+│   ├── bu_boundaries.geojson                   # 2026 BUs (5)
+│   ├── shomolu_ht_feeders.geojson              # Shomolu-network 11kV feeders, 2026 UT/BU tagged
 │   ├── iss_substations.geojson
 │   └── tcn_stations.geojson
 ├── images/
@@ -109,6 +111,22 @@ The filter is applied once on load against both the field-data file (`Feeder` co
 ├── LT Pole Data Cleaned Captured Shomolu BU-2026.xlsx   # Source workbook reference
 └── README.md
 ```
+
+---
+
+## 2026 UT & BU realignment (5 BUs, 38 UTs)
+
+From 2026 Ikeja Electric runs **5 Business Units** — AKOWONJO, IKEJA, IKORODU, OSHODI, SHOMOLU — and **38 Undertakings**. ABULE EGBA BU has been collapsed (previously 6 BUs / 54 UTs). The map layers come from the GIS Team's *IKEDC_UT_BU_Realignment_2026* pack (`IE_UT_Boundary_2026`, `IE_BU_Boundary_2026`, `IE_Feeders_11kV_2026`, `IE_Old_to_New_UT_Lookup`).
+
+Field records are still captured against the legacy UT/BU names, so [`realignment-2026.js`](realignment-2026.js) re-attributes every record at load time (including shared/template uploads):
+
+1. **GPS first** — the pole's coordinates are tested against the 2026 UT polygons (`data/ut_boundaries.geojson`).
+2. **Guarded by the official lookup** — a GPS hit is accepted only if it is one of the 2026 UTs the record's legacy UT was split into. GPS strays, missing coordinates, or a failed boundary fetch fall back to the legacy UT's majority destination.
+3. The original values are kept as `Undertaking (pre-2026)` / `Business Unit (pre-2026)` — shown in the pole popup when they differ, and exported as extra columns in the Excel/CSV register.
+
+Notable effect on the Shomolu data: legacy **MAGODO** and **OLOWORA** (and most of legacy **IKOSI**, which lies inside 2026 MAGODO) now belong to **IKEJA BU**; **MENDE → OGUDU**, **OLATEJU → ILUPEJU**, **BARIGA → IGBOBI**. Seven Shomolu-network feeders move to IKEJA (BANKOLE, ISHERI, OJOTA, ORISHA, OWULADE, SHANGISHA, UNILAG).
+
+To refresh the layers from a newer GIS pack, regenerate the three GeoJSON files from the master GeoPackage (`IKEDC_UT_BU_Realignment_2026.gpkg`) keeping the same property names, and update the lookup tables in `realignment-2026.js` from `IE_Old_to_New_UT_Lookup.csv`.
 
 ---
 
