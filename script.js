@@ -5828,9 +5828,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 maxZoom: 20
             });
             mapBases = { dark: darkLayer, light: lightLayer, satellite: satLayer, hybrid: hybridLayer };
-            // Default the basemap to match the dashboard theme (dark by default).
-            const wantLight = document.documentElement.getAttribute('data-theme') === 'light';
-            (wantLight ? lightLayer : darkLayer).addTo(map);
+            // Default basemap is Hybrid (satellite + labels). Theme sync only
+            // swaps Dark/Light, so it leaves this choice alone.
+            hybridLayer.addTo(map);
             mapLayersControl = L.control.layers(
                 { 'Dark': darkLayer, 'Light': lightLayer, 'Satellite': satLayer, 'Hybrid': hybridLayer },
                 null,
