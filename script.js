@@ -53,7 +53,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let boundariesLoaded = false;   // one-time load guard
     let utBoundsCache = null;       // UT-only bounds (fallback when no data)
     let mapInitiallyFitted = false; // first-render fit guard
-    let pulseTimer = null;          // setTimeout id for pulse auto-stop
     let mapBases = {};              // { dark, light, satellite, hybrid } base tile layers
     let lastMapFilterSig = null;    // signature of the last filtered set drawn on the map
 
@@ -5788,8 +5787,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderMap() {
         if (!map) {
-            // Init map — default view centers on Lagos; boundary fit will take over once loaded
-            map = L.map('map', { zoomControl: true }).setView([6.55, 3.45], 10);
+            // Init map straight at the Lagos regional overview. Every vector
+            // overlay (boundaries, BUs, HT feeders, ~3k pole dots) draws on ONE
+            // shared canvas: thousands of SVG nodes were what froze the map.
+            // One canvas also means one hit-test surface, so clicks reach
+            // whichever shape is on top (poles are kept last = topmost).
+            map = L.map('map', {
+                zoomControl: true,
+                renderer: L.canvas({ padding: 0.5, tolerance: 3 })
+            }).setView([6.55, 3.55], 8);
 
             // Base layers — Dark (default) & Light (Esri Canvas), Google Satellite/Hybrid.
             // Esri replaces CARTO, whose keyless tiles have been an "API KEY
@@ -5875,12 +5881,13 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             map.on('zoomend', updateLabelVisibility);
 
-            // Load boundary overlays once, then re-run the render so markers
-            // exist at the moment we compute data bounds / trigger the pulse.
+            // Load boundary overlays once. They land on the shared canvas after
+            // any pole dots already drawn, so lift the poles back on top
+            // (cheap reorder) instead of rebuilding every marker.
             loadBoundaries().then(() => {
                 updateLabelVisibility();
                 setTimeout(() => map.invalidateSize(), 50);
-                renderMap(); // second pass now that boundaries are in place
+                markersLayer.eachLayer(l => l.bringToFront());
             });
         }
 
@@ -5910,11 +5917,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     weight: 1,
                     opacity: 1,
                     fillOpacity: 0.85,
-                    className: 'data-point-marker', // enables CSS pulse animation
                     bubblingMouseEvents: false     // a pole click must not reach the map 'click' (which clears a DT highlight)
                 });
 
-                marker.bindPopup(polePopupHtml(d, lat, lon), {
+                // Popup HTML is built on open, not up front for every marker.
+                marker.bindPopup(() => polePopupHtml(d, lat, lon), {
                     className: 'asset-popup-wrapper',
                     maxWidth: 320,
                     minWidth: 260,
@@ -6064,19 +6071,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const filterSig = filteredData.length + '|' + idOf(filteredData[0]) + '|' + idOf(lastRow);
 
         if (!mapInitiallyFitted) {
-            try {
-                // Lagos State centroid, wide regional zoom level
-                map.flyTo([6.55, 3.55], 8, {
-                    duration: 2.8,
-                    easeLinearity: 0.25
-                });
-            } catch (e) {
-                console.warn("flyTo failed", e);
-                map.setView([6.55, 3.55], 8);
-            }
+            // The map was created at the Lagos regional view, so there is
+            // nothing to animate on first render.
             mapInitiallyFitted = true;
             lastMapFilterSig = filterSig;
-            startMarkerPulse(20000);
         } else {
             // Re-frame the map whenever the filtered set changed, so it always
             // visibly reflects the current selection. Skip when nothing changed
@@ -6123,25 +6121,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 } catch (e) { console.warn('map reframe failed', e); }
             }
-            if (count > 0) startMarkerPulse(20000);
         }
-    }
-
-    // Pulse the data point markers for `durationMs`, then stop automatically.
-    // Implemented as a CSS class toggle on #map so the scale animation runs on
-    // the GPU and handles 3k markers without jank. A JS timer clears the class
-    // when the duration expires.
-    function startMarkerPulse(durationMs) {
-        const mapEl = document.getElementById('map');
-        if (!mapEl) return;
-        if (pulseTimer) clearTimeout(pulseTimer);
-        mapEl.classList.remove('pulsing');
-        void mapEl.offsetWidth; // force reflow to restart the keyframe timeline
-        mapEl.classList.add('pulsing');
-        pulseTimer = setTimeout(() => {
-            mapEl.classList.remove('pulsing');
-            pulseTimer = null;
-        }, durationMs);
     }
 
     // Highlight a search hit for 20 seconds: drop a pulsating halo marker
@@ -6198,7 +6178,9 @@ document.addEventListener('DOMContentLoaded', () => {
     async function loadBoundaries() {
         if (boundariesLoaded) return;
         try {
-            const bust = '?v=' + Date.now();
+            // Fixed version tag (bump when a GeoJSON changes) so the ~530 KB of
+            // boundary data is cached between visits instead of refetched.
+            const bust = '?v=20261014a';
             const [lagosData, utData, buData, htData, issData, tcnData] = await Promise.all([
                 fetch('./data/lagos_boundary.geojson' + bust).then(r => r.json()),
                 fetch('./data/ut_boundaries.geojson' + bust).then(r => r.json()),
@@ -6262,9 +6244,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     const fromOld = feat.properties.FROM_OLD_UTS || '';
                     const areaKm2 = feat.properties.AREA_KM2;
 
+                    // No bringToFront: on the shared canvas that would lift the
+                    // polygon over the pole dots and steal their clicks.
                     layer.on('mouseover', e => {
                         e.target.setStyle({ fillOpacity: 0.45, weight: 3.2 });
-                        e.target.bringToFront();
                     });
                     layer.on('mouseout', e => {
                         utGeo.resetStyle(e.target);
@@ -6311,8 +6294,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         `;
                     };
 
-                    layer.on('click', () => layer.setPopupContent(buildUtPopup()));
-                    layer.bindPopup(buildUtPopup(), {
+                    // Built on each open (always reflects the current filter),
+                    // never up front: each build scans the whole filtered set.
+                    layer.bindPopup(() => buildUtPopup(), {
                         className: 'asset-popup-wrapper',
                         maxWidth: 320,
                         minWidth: 260,
@@ -6406,8 +6390,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     opacity: 0.95,
                     dashArray: '10, 6',
                     lineCap: 'round',
-                    lineJoin: 'round',
-                    className: 'ht-feeder-line'
+                    lineJoin: 'round'
                 },
                 onEachFeature: (feat, layer) => {
                     const p = feat.properties;
