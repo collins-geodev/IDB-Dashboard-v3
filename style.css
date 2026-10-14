@@ -2955,17 +2955,26 @@ header.exec-header img.exec-header-logo,
     color: #22d3ee;
     background: rgba(34, 211, 238, 0.18);
 }
-/* Expanded: map spans the full dashboard width at near-viewport height,
-   Key Insights drops below it. */
-.map-section.map-expanded .map-insights-grid {
-    grid-template-columns: 1fr;
-}
+/* Expanded: the map card fills the whole dashboard window, above the
+   sidebar and header; page scroll is locked until it collapses. */
 .map-section.map-expanded .map-insights-grid > .chart-container {
-    height: calc(100vh - 110px);
-    min-height: 560px !important;
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0 !important;
+    margin: 0;
+    padding: 1rem 1.25rem;
+    border-radius: 0;
+    border: none;
 }
 .map-section.map-expanded #map {
     min-height: 0 !important;
+}
+html.map-expanded-lock,
+html.map-expanded-lock body {
+    overflow: hidden;
 }
 #map.zoom-lens-active {
     cursor: crosshair;

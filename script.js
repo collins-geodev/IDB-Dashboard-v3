@@ -5384,10 +5384,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 0);
     }
 
-    // Map control: expand / collapse toggle. Expanded, the map card spans
-    // the full dashboard width at near-viewport height (Key Insights drops
-    // below it); collapsing restores the default 2-column layout. Escape
-    // also collapses.
+    // Map control: expand / collapse toggle. Expanded, the map card fills
+    // the whole dashboard window; collapsing (button or Escape) restores
+    // the default card in the map + Key Insights grid.
     function addMapExpandControl() {
         const ICON_EXPAND = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>';
         const ICON_COLLAPSE = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></svg>';
@@ -5413,6 +5412,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const center = map.getCenter();
                 const zoom = map.getZoom();
                 section.classList.toggle('map-expanded', expanded);
+                document.documentElement.classList.toggle('map-expanded-lock', expanded);
                 btn.classList.toggle('active', expanded);
                 btn.innerHTML = expanded ? ICON_COLLAPSE : ICON_EXPAND;
                 btn.title = expanded ? 'Collapse map (Esc)' : 'Expand map';
@@ -5422,7 +5422,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 // synchronous reflow) and keep the same view centred.
                 map.invalidateSize({ pan: false });
                 map.setView(center, zoom, { animate: false });
-                section.scrollIntoView({ behavior: 'smooth', block: 'start' });
             };
 
             btn.addEventListener('click', () => setExpanded(!section.classList.contains('map-expanded')));
