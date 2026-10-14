@@ -5384,6 +5384,54 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 0);
     }
 
+    // Map control: expand / collapse toggle. Expanded, the map card spans
+    // the full dashboard width at near-viewport height (Key Insights drops
+    // below it); collapsing restores the default 2-column layout. Escape
+    // also collapses.
+    function addMapExpandControl() {
+        const ICON_EXPAND = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>';
+        const ICON_COLLAPSE = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></svg>';
+
+        const ExpandControl = L.Control.extend({
+            options: { position: 'topleft' },
+            onAdd: function () {
+                const container = L.DomUtil.create('div', 'map-expand-control leaflet-bar');
+                container.innerHTML = `<button type="button" id="mapExpandToggle" title="Expand map" aria-label="Expand map" aria-pressed="false">${ICON_EXPAND}</button>`;
+                L.DomEvent.disableClickPropagation(container);
+                L.DomEvent.disableScrollPropagation(container);
+                return container;
+            }
+        });
+        new ExpandControl().addTo(map);
+
+        setTimeout(() => {
+            const btn = document.getElementById('mapExpandToggle');
+            const section = document.getElementById('map-section');
+            if (!btn || !section) return;
+
+            const setExpanded = (expanded) => {
+                const center = map.getCenter();
+                const zoom = map.getZoom();
+                section.classList.toggle('map-expanded', expanded);
+                btn.classList.toggle('active', expanded);
+                btn.innerHTML = expanded ? ICON_COLLAPSE : ICON_EXPAND;
+                btn.title = expanded ? 'Collapse map (Esc)' : 'Expand map';
+                btn.setAttribute('aria-label', btn.title);
+                btn.setAttribute('aria-pressed', String(expanded));
+                // Resize Leaflet to the new container (reading layout forces a
+                // synchronous reflow) and keep the same view centred.
+                map.invalidateSize({ pan: false });
+                map.setView(center, zoom, { animate: false });
+                section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            };
+
+            btn.addEventListener('click', () => setExpanded(!section.classList.contains('map-expanded')));
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && section.classList.contains('map-expanded')) setExpanded(false);
+            });
+        }, 0);
+    }
+
     // Map control: circular magnifier lens that follows the cursor.
     // When toggled on, a small inset Leaflet map tracks the pointer and
     // displays the area beneath it at a higher zoom level, so the user
@@ -5794,6 +5842,7 @@ document.addEventListener('DOMContentLoaded', () => {
             addMapSearchControl();
             addMapFilterControl();
             addMapZoomLensControl();
+            addMapExpandControl();
 
             // Layer order: boundaries (bottom) → labels → data markers (top)
             // Layer order (bottom → top): UT polygons → BU outlines → HT lines → UT labels

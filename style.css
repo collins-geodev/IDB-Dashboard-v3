@@ -2927,6 +2927,46 @@ header.exec-header img.exec-header-logo,
     background: rgba(34, 211, 238, 0.18);
     text-shadow: 0 0 8px rgba(34, 211, 238, 0.6);
 }
+/* Map expand / collapse toggle */
+.map-expand-control {
+    background: rgba(15, 20, 25, 0.92) !important;
+    border: 1px solid rgba(34, 211, 238, 0.3) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5) !important;
+    padding: 0 !important;
+    backdrop-filter: blur(8px);
+    overflow: hidden;
+}
+.map-expand-control button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    color: #e2e8f0;
+    cursor: pointer;
+    padding: 7px 10px;
+    line-height: 1;
+}
+.map-expand-control button:hover {
+    color: #22d3ee;
+}
+.map-expand-control button.active {
+    color: #22d3ee;
+    background: rgba(34, 211, 238, 0.18);
+}
+/* Expanded: map spans the full dashboard width at near-viewport height,
+   Key Insights drops below it. */
+.map-section.map-expanded .map-insights-grid {
+    grid-template-columns: 1fr;
+}
+.map-section.map-expanded .map-insights-grid > .chart-container {
+    height: calc(100vh - 110px);
+    min-height: 560px !important;
+}
+.map-section.map-expanded #map {
+    min-height: 0 !important;
+}
 #map.zoom-lens-active {
     cursor: crosshair;
 }
