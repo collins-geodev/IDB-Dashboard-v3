@@ -1009,6 +1009,39 @@ document.addEventListener('DOMContentLoaded', () => {
         return new Date(+yyyy, +mm - 1, +dd, +hh, +mi).getTime();
     }
 
+    // Day part of a capture timestamp: "08/14/2026 10:32" -> "08/14/2026",
+    // "2026-10-22T10:32:00" -> "2026-10-22". The Date filter's options and its
+    // match both key on this.
+    function captureDay(item) {
+        return String(item["Date/timestamp"] || '').trim().split(/[ T]/)[0];
+    }
+
+    // Sortable value for a capture day. The dataset is MM/DD/YYYY, but newer
+    // exports and New-Pole uploads have carried DD/MM/YYYY and ISO dates.
+    // new Date() returns NaN for DD/MM/YYYY (e.g. "22/10/2026"), and NaN from a
+    // sort comparator scrambles the order, so the latest days never reached the
+    // top of the Date filter. Unparseable values sort last.
+    function captureDayValue(day) {
+        let m = day.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+        if (m) return new Date(+m[1], +m[2] - 1, +m[3]).getTime();
+        m = day.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
+        if (m) {
+            // MM/DD unless the first part can't be a month (then DD/MM).
+            const [mm, dd] = +m[1] > 12 ? [+m[2], +m[1]] : [+m[1], +m[2]];
+            return new Date(+m[3], mm - 1, dd).getTime();
+        }
+        const t = Date.parse(day);
+        return isNaN(t) ? -Infinity : t;
+    }
+
+    // Distinct capture days in `data`, newest first.
+    function captureDaysNewestFirst(data) {
+        return [...new Set(data.map(captureDay).filter(Boolean))]
+            .map(day => ({ day, t: captureDayValue(day) }))
+            .sort((a, b) => (a.t === b.t ? 0 : b.t - a.t))
+            .map(x => x.day);
+    }
+
     // Collapse duplicate poles (same key) into one cleaned row so the export
     // matches the unique-pole counts the dashboard shows. The key is identical to
     // the one every KPI uses: Lt PoleSLRN, falling back to LT Pole No.
@@ -1763,17 +1796,17 @@ document.addEventListener('DOMContentLoaded', () => {
     function formatTimestampNow() {
         const d = new Date();
         const p = (n) => String(n).padStart(2, '0');
-        return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+        return `${p(d.getMonth() + 1)}/${p(d.getDate())}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
     }
 
     // SheetJS hands date-formatted cells over as raw Excel serials (days since
-    // 1899-12-30), not strings. Convert to the dataset's 'DD/MM/YYYY HH:MM'
+    // 1899-12-30), not strings. Convert to the dataset's 'MM/DD/YYYY HH:MM'
     // form so date filters and every `.split(' ')` consumer keep working.
     function excelSerialToTimestamp(n) {
         if (typeof n !== 'number' || !isFinite(n)) return n;
         const d = new Date(Math.round((n - 25569) * 86400000));
         const p = (x) => String(x).padStart(2, '0');
-        return `${p(d.getUTCDate())}/${p(d.getUTCMonth() + 1)}/${d.getUTCFullYear()} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+        return `${p(d.getUTCMonth() + 1)}/${p(d.getUTCDate())}/${d.getUTCFullYear()} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
     }
 
     const TEMPLATE_DATE_KEYS = ['Date/timestamp', 'Date Installed'];
@@ -3739,7 +3772,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { id: 'dtFilter', val: d => d["DT Name"] },
         { id: 'upriserFilter', val: d => String(d["UpriserNo"]) },
         { id: 'materialFilter', val: d => (d["Type of Pole"] || '').trim().toUpperCase() },
-        { id: 'dateFilter', val: d => (d["Date/timestamp"] || '').split(' ')[0] },
+        { id: 'dateFilter', val: captureDay },
     ];
 
     // Predicate for one facet's current selection (no selection = pass-all).
@@ -3861,7 +3894,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const dts = [...new Set(data.map(item => item["DT Name"]))].filter(Boolean).sort();
         const uprisers = [...new Set(data.map(item => String(item["UpriserNo"] ?? '')).filter(Boolean))].sort((a, b) => a - b);
         const feeders = [...new Set(data.map(item => item["Feeder"]))].filter(Boolean).sort();
-        const dates = [...new Set(data.map(item => item["Date/timestamp"] ? item["Date/timestamp"].split(' ')[0] : ''))].filter(Boolean).sort((a, b) => new Date(b) - new Date(a));
+        const dates = captureDaysNewestFirst(data);
 
         const populateSelect = (select, items) => {
             items.forEach(item => {
@@ -3911,8 +3944,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function rebuildDateOptions(data) {
         const sel = document.getElementById('dateFilter');
         if (!sel) return;
-        const dates = [...new Set(data.map(d => (d["Date/timestamp"] || '').split(' ')[0]).filter(Boolean))]
-            .sort((a, b) => new Date(b) - new Date(a));
+        const dates = captureDaysNewestFirst(data);
         sel.innerHTML = '<option value="All">All Dates</option>';
         dates.forEach(dt => {
             const o = document.createElement('option');
@@ -3965,7 +3997,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 (!upriserVals || upriserVals.includes(String(item["UpriserNo"]))) &&
                 (!feederVals || feederVals.includes(item["Feeder"])) &&
                 (!matVals || matVals.includes(poleType)) &&
-                (!dateVals || (item["Date/timestamp"] && dateVals.some(d => item["Date/timestamp"].startsWith(d))));
+                (!dateVals || dateVals.includes(captureDay(item)));
         });
     }
 
