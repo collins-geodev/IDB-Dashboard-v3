@@ -4573,6 +4573,10 @@ document.addEventListener('DOMContentLoaded', () => {
             else history.pushState(null, '', hash);
         }
 
+        if (isHome) {
+            // Clamp checks need layout, which the Home page only has once shown.
+            requestAnimationFrame(() => { try { updateRecMoreButtons(); } catch (e) {} });
+        }
         if (!isHome) {
             renderPageIfStale(page);
             // Leaflet / Plotly measure their container: re-measure once visible.
@@ -7689,12 +7693,38 @@ document.addEventListener('DOMContentLoaded', () => {
                 content.innerHTML = recs.map(r => `
                     <div class="rec-item">
                         <h4>${r.icon} ${r.title}</h4>
-                        <p>${r.text}</p>
+                        <p class="rec-text">${r.text}</p>
+                        <button type="button" class="rec-more" hidden>Show more</button>
                     </div>
                 `).join('');
             }
         });
+        updateRecMoreButtons();
     }
+
+    // Recommendation text is clamped to a few lines (compact cards); a "Show
+    // more" link appears only where the text actually overflows. Measured when
+    // the Home page is visible (hidden pages have no layout) — navigateToPage
+    // calls this again on entering Home.
+    function updateRecMoreButtons() {
+        const home = document.getElementById('view-home');
+        if (!home || !home.getClientRects().length) return;
+        home.querySelectorAll('.rec-item').forEach(item => {
+            const p = item.querySelector('.rec-text'), btn = item.querySelector('.rec-more');
+            if (!p || !btn) return;
+            if (item.classList.contains('expanded')) { btn.hidden = false; return; }
+            btn.hidden = !(p.scrollHeight > p.clientHeight + 2);
+        });
+    }
+    let _recResizeT = null;
+    window.addEventListener('resize', () => { clearTimeout(_recResizeT); _recResizeT = setTimeout(updateRecMoreButtons, 200); });
+    document.addEventListener('click', (e) => {
+        const btn = e.target.closest && e.target.closest('.rec-more');
+        if (!btn) return;
+        const item = btn.closest('.rec-item');
+        const open = item.classList.toggle('expanded');
+        btn.textContent = open ? 'Show less' : 'Show more';
+    });
 
     // --- Event Listeners ---
     const resetFiltersBtn = document.getElementById('resetFiltersBtn');

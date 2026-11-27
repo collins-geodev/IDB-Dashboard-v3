@@ -4298,3 +4298,28 @@ main.main-content .exec-summary { max-width: none; padding: 14px 18px; }
 /* The answer box reserved ~90px while hidden; collapse it until there is an answer. */
 #view-home .ai-response:not(.visible) { display: none; }
 #view-home .ai-response { margin-top: 0.6rem; padding: 0.7rem 0.8rem; font-size: 0.86rem; }
+
+/* ── Home: compact Strategic Recommendations cards ─────────────────────────
+   Smaller header; each finding shows its title and the first 3 lines, with a
+   "Show more" link (only where the text overflows) to expand it. */
+#view-home .rec-card { padding: 0.9rem 1.05rem; }
+#view-home .rec-card .card-header { margin-bottom: 0.65rem; padding-bottom: 0.55rem; }
+#view-home .rec-card .card-header h3 { font-size: 1.15rem; }
+#view-home .rec-card .status-badge { font-size: 0.62rem; padding: 0.18rem 0.55rem; }
+#view-home .rec-content { gap: 0.65rem; }
+#view-home .rec-item h4 { font-size: 0.9rem; margin-bottom: 0.2rem; }
+#view-home .rec-item .rec-text {
+    font-size: 0.82rem;
+    line-height: 1.45;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+#view-home .rec-item.expanded .rec-text { display: block; -webkit-line-clamp: unset; overflow: visible; }
+#view-home .rec-more {
+    background: none; border: 0; padding: 0; margin-top: 0.15rem;
+    font: inherit; font-size: 0.74rem; font-weight: 600;
+    color: hsl(var(--primary)); cursor: pointer;
+}
+#view-home .rec-more:hover { text-decoration: underline; }
