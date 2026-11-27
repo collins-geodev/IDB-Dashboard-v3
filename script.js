@@ -6631,9 +6631,13 @@ document.addEventListener('DOMContentLoaded', () => {
                         clearSearchHighlight();
                         map.fitBounds(L.latLngBounds(dataLatLngs), { padding: [40, 40], maxZoom: 16 });
                     } else if (!filtersActive) {
-                        // No filters -> return to the wide regional overview.
+                        // No filters -> frame every captured pole (the project
+                        // area). A fixed zoom-8 view looked right in the old tall
+                        // map but shows half the West African coast in the
+                        // landscape one; fitting the data works at any shape.
                         clearSearchHighlight();
-                        map.setView([6.55, 3.55], 8);
+                        if (dataLatLngs.length) map.fitBounds(L.latLngBounds(dataLatLngs), { padding: [30, 30], maxZoom: 14 });
+                        else map.setView([6.55, 3.55], 8);
                     }
                 } catch (e) { console.warn('map reframe failed', e); }
             }
