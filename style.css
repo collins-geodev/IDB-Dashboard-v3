@@ -4109,3 +4109,28 @@ main.main-content { overflow-x: clip; overflow-y: visible; min-width: 0; }
     #view-dashboard .top-insights-row .top-insight-users { flex: 1 1 100%; }
     #view-dashboard .completion-title-row { flex: 1 1 100%; }
 }
+
+/* ── Overview page: landscape map on top, Key Insights below in columns ── */
+#map-section .map-insights-grid { grid-template-columns: 1fr; gap: 1rem; margin-bottom: 1rem; }
+#map-section .map-insights-grid > .chart-container { min-height: 0 !important; }
+/* Wide, short map (≈3:1 on a desktop); fullscreen mode keeps its own size. */
+.map-section:not(.map-expanded) #map {
+    height: clamp(340px, 46vh, 500px);
+    min-height: 0 !important;
+    flex-grow: 0;
+}
+#map-section .insights-card { padding: 1rem 1.25rem; }
+#map-section .insights-card h2 { font-size: 1rem; margin-bottom: 0.75rem; }
+/* Insight blocks flow into newspaper columns instead of one tall stack. */
+#keyInsightsContent {
+    display: block !important;
+    height: auto !important;
+    column-width: 300px;
+    column-gap: 1.75rem;
+    column-rule: 1px solid hsl(var(--border));
+}
+#keyInsightsContent > .insight-item {
+    break-inside: avoid;
+    margin-bottom: 0.85rem;
+    padding-bottom: 0.85rem;
+}
