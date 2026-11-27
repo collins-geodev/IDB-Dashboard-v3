@@ -4038,3 +4038,8 @@ html.map-expanded-lock body {
    (never-scrolling) scroll container and breaks the sticky filter bar.
    overflow-x:clip still stops sideways spill without creating one. */
 main.main-content { overflow-x: clip; overflow-y: visible; min-width: 0; }
+/* On phones the filters wrap into a tall block — pinning it would cover most
+   of the screen, so it scrolls normally there. */
+@media (max-width: 768px) {
+    #view-dashboard .filters-section { position: static; box-shadow: none; }
+}
