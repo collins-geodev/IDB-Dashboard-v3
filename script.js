@@ -725,6 +725,20 @@ document.addEventListener('DOMContentLoaded', () => {
         return isNaN(t) ? -Infinity : t;
     }
 
+    // LT Pole numbers are three digits (001, 009, 010). Some captures store them
+    // unpadded ("9", "10", or the number 9) — pad 1-2 digit values so every
+    // view, sort and export shows 009 / 010. Longer or non-numeric values
+    // (e.g. "1001", "12A") are left as captured.
+    function padPoleNo(item) {
+        if (!item) return item;
+        const v = item["LT Pole No"];
+        if (v == null) return item;
+        const s = String(v).trim();
+        if (/^\d{1,2}$/.test(s)) item["LT Pole No"] = s.padStart(3, '0');
+        else if (typeof v === 'number') item["LT Pole No"] = s;
+        return item;
+    }
+
     // ── Geometry ────────────────────────────────────────────────────────────
     // Captured coordinates of a record, or null when missing / (0,0).
     function coordsOf(d) {
@@ -800,6 +814,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Captures without usable coordinates are moved (re-survey assumed).
     const DT_LOCATION_FIELDS = ["Feeder", "DT Name", "Bussines Unit", "Undertaking", "UpriserNo"];
     function reconcilePoleLocations(data) {
+        // Records are about to change in place: drop owner/register caches.
+        _ownerCache.clear();
         const groups = new Map();
         data.forEach(d => {
             if (!d) return;
@@ -1060,6 +1076,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             // Process Field Data
             fieldData.forEach(item => {
+                padPoleNo(item);
                 item.Vendor_Name = inferVendor(item.User);
                 if (!item.Issue_Type) item.Issue_Type = simulateIssue(item);
             });
@@ -1813,10 +1830,26 @@ document.addEventListener('DOMContentLoaded', () => {
                 { header: 'Concrete', type: 'n', width: 11, fmt: '#,##0' },
                 { header: 'Wooden', type: 'n', width: 11, fmt: '#,##0' },
                 { header: 'Progress', type: 'n', width: 12, fmt: '0.0%' },
-                { header: 'Status', type: 's', width: 14 }
+                { header: 'Status', type: 's', width: 14 },
+                { header: 'Spans', type: 'n', width: 9, fmt: '#,##0' },
+                { header: 'Avg Span (m)', type: 'n', width: 12, fmt: '0' },
+                { header: 'Longest Span (m)', type: 'n', width: 14, fmt: '0' },
+                { header: 'Line (km)', type: 'n', width: 10, fmt: '0.00' },
+                { header: `Spans > ${LONG_SPAN_M} m`, type: 'n', width: 12, fmt: '0' }
             ],
-            rows: stats.dtRows.map(r => { const c = dtClassify(r); return [r.dtName, r.feeder, r.vendor, r.boqTotal, r.actualTotal, r.concrete, r.wooden, c.progress == null ? '' : +(c.progress / 100).toFixed(4), c.status]; }),
-            totalRow: ['TOTAL', '', '', dtTot.exp, dtTot.act, dtTot.conc, dtTot.wood, dtTot.exp > 0 ? +(dtTot.act / dtTot.exp).toFixed(4) : '', '']
+            rows: stats.dtRows.map(r => {
+                const c = dtClassify(r);
+                const s = dtSpanSummary(r.key);
+                const sp = s.count ? [s.count, Math.round(s.avg), Math.round(s.max), +(s.total / 1000).toFixed(2), s.long] : ['', '', '', '', ''];
+                return [r.dtName, r.feeder, r.vendor, r.boqTotal, r.actualTotal, r.concrete, r.wooden, c.progress == null ? '' : +(c.progress / 100).toFixed(4), c.status, ...sp];
+            }),
+            totalRow: (() => {
+                const all = stats.dtRows.map(r => dtSpanSummary(r.key)).filter(s => s.count);
+                const n = all.reduce((a, s) => a + s.count, 0), km = all.reduce((a, s) => a + s.total, 0);
+                return ['TOTAL', '', '', dtTot.exp, dtTot.act, dtTot.conc, dtTot.wood, dtTot.exp > 0 ? +(dtTot.act / dtTot.exp).toFixed(4) : '', '',
+                    n || '', n ? Math.round(km / n) : '', all.length ? Math.round(Math.max(...all.map(s => s.max))) : '',
+                    n ? +(km / 1000).toFixed(2) : '', all.reduce((a, s) => a + s.long, 0)];
+            })()
         });
         XL.utils.book_append_sheet(wb, dtWs, 'DT Performance');
 
@@ -2171,6 +2204,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Uploads published before the serial-date fix are stored with raw
             // Excel serials / numeric cells — normalize them at merge time too.
             normalizeUploadRecord(rec);
+            padPoleNo(rec);
             // Uploads are captured against legacy UT/BU names too.
             if (window.IDB_REALIGNMENT) IDB_REALIGNMENT.realignRecords([rec]);
             // Stored uploads carry the Vendor_Name computed when they were
@@ -5069,55 +5103,101 @@ document.addEventListener('DOMContentLoaded', () => {
     // Repeat captures of the same pole are merged the same way the export does
     // (see mergeDuplicatesBySLRN): building lists are UNIONed so no captured
     // building is ever dropped, and the distinct count is recomputed.
+    // Pole register for one DT (sequenced, with spans) — see buildPoleRegisters.
     function getPoleRegister(dtKey) {
-        const byPole = new Map();
-        let unkeyed = 0;
+        return buildPoleRegisters(filteredData).get(dtKey) || [];
+    }
 
-        const owners = poleDtOwners(filteredData);
-        filteredData.forEach(d => {
-            if (dtKeyOf(d) !== dtKey) return;
-            // A pole keyed to two DT names is listed only under the DT that owns it —
-            // except a capture left in place by the distance check (a different
-            // physical pole sharing the SLRN): it is listed here, flagged, uncounted.
-            const ownSlrn = poleSlrn(d);
-            const reuse = !!(ownSlrn && owners.get(ownSlrn) !== dtKey && d.__slrnReuse);
-            if (ownSlrn && owners.get(ownSlrn) !== dtKey && !reuse) return;
+    // Every DT's pole register in ONE pass over the data: Map(dtKey -> poles[]),
+    // each list ordered by upriser then pole number and carrying span (m) from
+    // the previous pole on the same upriser. The DT table's span columns and the
+    // drill-down register both read from here, so they always agree. Cached per
+    // data array.
+    function buildPoleRegisters(data) {
+        return _cached('registers', data, () => {
+            const byDt = new Map();          // dtKey -> Map(poleId -> rec)
+            const owners = poleDtOwners(data);
+            let unkeyed = 0;
+            data.forEach(d => {
+                const dtKey = dtKeyOf(d);
+                // A pole keyed to two DT names is listed only under the DT that owns it —
+                // except a capture left in place by the distance check (a different
+                // physical pole sharing the SLRN): listed on its own DT, flagged, uncounted.
+                const ownSlrn = poleSlrn(d);
+                const reuse = !!(ownSlrn && owners.get(ownSlrn) !== dtKey && d.__slrnReuse);
+                if (ownSlrn && owners.get(ownSlrn) !== dtKey && !reuse) return;
 
-            const slrn = String(d["Lt PoleSLRN"] || d["LT Pole No"] || '').trim().toUpperCase();
-            const id = slrn || `__unkeyed_${unkeyed++}`;
-
-            let rec = byPole.get(id);
-            if (!rec) {
-                rec = {
-                    slrn: slrn || '—',
-                    poleNo: d["LT Pole No"] || '—',
-                    // A single pole can carry more than one upriser, so this is
-                    // a set rather than a scalar (e.g. IESHLT002500 on 1 and 2).
-                    uprisers: new Set(),
-                    material: d["Type of Pole"] || '—',
-                    status: d["Status"] || '—',
-                    user: getDisplayName(d["User"]) || '—',
-                    date: d["Date/timestamp"] || '—',
-                    declared: 0,
-                    buildings: new Set(),
-                    captures: 0,
-                    coords: null,
-                    coordT: -Infinity,
-                    reuse: reuse ? d.__slrnReuse : null
-                };
-                byPole.set(id, rec);
-            }
-
-            rec.captures++;
-            // Position = the latest capture that has usable coordinates.
-            const c = coordsOf(d), t = captureTime(d);
-            if (c && (!rec.coords || t > rec.coordT)) { rec.coords = c; rec.coordT = t; }
-            const up = (d["UpriserNo"] ?? '').toString().trim();
-            if (up) rec.uprisers.add(up);
-            rec.declared = Math.max(rec.declared, parseInt(d["No of Buildings Connected to the Pole"]) || 0);
-            parseBuildings(d["Associated Buildings SLRN"]).forEach(b => rec.buildings.add(b));
+                if (!byDt.has(dtKey)) byDt.set(dtKey, new Map());
+                const byPole = byDt.get(dtKey);
+                const slrn = String(d["Lt PoleSLRN"] || d["LT Pole No"] || '').trim().toUpperCase();
+                const id = slrn || `__unkeyed_${unkeyed++}`;
+                addCaptureToRegister(byPole, id, slrn, reuse, d);
+            });
+            const out = new Map();
+            byDt.forEach((byPole, dtKey) => out.set(dtKey, sequencePoleRegister(byPole)));
+            return out;
         });
+    }
 
+    // Per-DT span summary for the DT table: spanStats over the DT's register.
+    function dtSpanSummary(dtKey) {
+        return spanStats(getPoleRegister(dtKey));
+    }
+
+    // The five span cells of a DT table row ("—" when the DT has no measurable span).
+    function dtSpanCellsHTML(dtKey) {
+        const s = dtSpanSummary(dtKey);
+        const c = 'style="text-align: center;"';
+        if (!s.count) {
+            const dash = `<span style="color:#a0a0a0;">—</span>`;
+            return `<td class="col-spanCount" ${c}>${dash}</td><td class="col-spanAvg" ${c}>${dash}</td>` +
+                `<td class="col-spanMax" ${c}>${dash}</td><td class="col-lineKm" ${c}>${dash}</td><td class="col-longSpans" ${c}>${dash}</td>`;
+        }
+        const long = s.long
+            ? `<span class="pr-count-warn" title="${s.long} span(s) over ${LONG_SPAN_M} m — open the pole register to see which">${s.long}</span>`
+            : '0';
+        const maxWarn = s.max > LONG_SPAN_M ? ' class="pr-count-warn"' : '';
+        return `<td class="col-spanCount" ${c}>${s.count}</td>` +
+            `<td class="col-spanAvg" ${c}>${Math.round(s.avg)}</td>` +
+            `<td class="col-spanMax" ${c}><span${maxWarn}>${Math.round(s.max)}</span></td>` +
+            `<td class="col-lineKm" ${c}>${(s.total / 1000).toFixed(2)}</td>` +
+            `<td class="col-longSpans" ${c}>${long}</td>`;
+    }
+
+    function addCaptureToRegister(byPole, id, slrn, reuse, d) {
+        let rec = byPole.get(id);
+        if (!rec) {
+            rec = {
+                slrn: slrn || '—',
+                poleNo: d["LT Pole No"] || '—',
+                // A single pole can carry more than one upriser, so this is
+                // a set rather than a scalar (e.g. IESHLT002500 on 1 and 2).
+                uprisers: new Set(),
+                material: d["Type of Pole"] || '—',
+                status: d["Status"] || '—',
+                user: getDisplayName(d["User"]) || '—',
+                date: d["Date/timestamp"] || '—',
+                declared: 0,
+                buildings: new Set(),
+                captures: 0,
+                coords: null,
+                coordT: -Infinity,
+                reuse: reuse ? d.__slrnReuse : null
+            };
+            byPole.set(id, rec);
+        }
+    
+        rec.captures++;
+        // Position = the latest capture that has usable coordinates.
+        const c = coordsOf(d), t = captureTime(d);
+        if (c && (!rec.coords || t > rec.coordT)) { rec.coords = c; rec.coordT = t; }
+        const up = (d["UpriserNo"] ?? '').toString().trim();
+        if (up) rec.uprisers.add(up);
+        rec.declared = Math.max(rec.declared, parseInt(d["No of Buildings Connected to the Pole"]) || 0);
+        parseBuildings(d["Associated Buildings SLRN"]).forEach(b => rec.buildings.add(b));
+    }
+
+    function sequencePoleRegister(byPole) {
         // Ordered by upriser then pole sequence — the order crews walk the line.
         const num = (a, b) => String(a).localeCompare(String(b), undefined, { numeric: true });
         const list = [...byPole.values()]
@@ -5361,6 +5441,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td class="col-remaining" style="text-align: center; color: #a0a0a0;">${Math.max(0, row.boqTotal - row.actualTotal)}</td>
                 <td class="col-concrete" style="text-align: center;">${row.concrete}</td>
                 <td class="col-wooden" style="text-align: center;">${row.wooden}</td>
+                ${dtSpanCellsHTML(row.key)}
                 <td class="col-progress" style="width: 70px;">
                     <div style="display: flex; align-items: center; gap: 4px;">
                         <div style="flex-grow: 1; height: 4px; background: #333; border-radius: 2px; overflow: hidden;">
@@ -7871,6 +7952,11 @@ document.addEventListener('DOMContentLoaded', () => {
         { id: 'col-remaining', label: 'Remaining', checked: true },
         { id: 'col-concrete', label: 'Concrete', checked: true },
         { id: 'col-wooden', label: 'Wooden', checked: true },
+        { id: 'col-spanCount', label: 'Spans', checked: true },
+        { id: 'col-spanAvg', label: 'Avg Span (m)', checked: true },
+        { id: 'col-spanMax', label: 'Longest Span (m)', checked: true },
+        { id: 'col-lineKm', label: 'Line (km)', checked: true },
+        { id: 'col-longSpans', label: 'Spans > 80 m', checked: true },
         { id: 'col-progress', label: 'Progress', checked: true },
         { id: 'col-status', label: 'Status', checked: true }
     ];
