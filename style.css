@@ -4401,3 +4401,7 @@ main.main-content .exec-summary { max-width: none; padding: 14px 18px; }
 #view-home .ai-suggestions { gap: 0.28rem; margin-top: 0.45rem; }
 #view-home .ai-chip { padding: 0.15rem 0.5rem; font-size: 0.67rem; }
 #view-home .parameter-list { gap: 0.45rem; }
+/* Keep the two Home cards at equal halves: the one-line AI description must
+   truncate, not widen its column. */
+#view-home .summary-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+#view-home .summary-card { min-width: 0; }
