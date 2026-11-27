@@ -1636,7 +1636,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         // Unique poles per capture-day. Capture date is MM/DD/YYYY.
-        const parseDay = (s) => { const m = String(s).split('/'); return m.length === 3 ? new Date(+m[2], +m[0] - 1, +m[1]).getTime() : 0; };
+        const parseDay = (s) => { const d = parseCaptureDay(s); return d ? d.getTime() : 0; };
         const dayMap = {};
         data.forEach(d => {
             const day = String(d['Date/timestamp'] || '').split(' ')[0];
@@ -2184,16 +2184,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const axisLine = t.light ? '#c3c2b7' : '#383835';
         const axis = (a) => Object.assign({
             gridcolor: grid, gridwidth: 1, zeroline: false, linecolor: axisLine,
-            tickfont: { size: 11, color: t.muted }, title: { text: '', font: { size: 11, color: t.muted } },
+            tickfont: { size: 12, color: t.muted }, title: { text: '', font: { size: 12, color: t.muted } },
             automargin: true, fixedrange: true
         }, a);
         const L = Object.assign({
             paper_bgcolor: 'rgba(0,0,0,0)',
             plot_bgcolor: 'rgba(0,0,0,0)',
-            font: { family: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif', size: 12, color: t.text },
+            font: { family: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif', size: 13, color: t.text },
             margin: { t: 16, r: 16, b: 40, l: 48 },
             showlegend: false,
-            legend: { orientation: 'h', x: 0, xanchor: 'left', y: 1.02, yanchor: 'bottom', font: { size: 11, color: t.text }, bgcolor: 'rgba(0,0,0,0)' },
+            legend: { orientation: 'h', x: 0, xanchor: 'left', y: 1.02, yanchor: 'bottom', font: { size: 12, color: t.text }, bgcolor: 'rgba(0,0,0,0)' },
             hoverlabel: { bgcolor: t.light ? '#ffffff' : '#131313', bordercolor: t.light ? '#d4d4cf' : '#383835', font: { color: t.text, size: 12 } },
             bargap: 0.35
         }, extra || {});
@@ -4006,7 +4006,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Dates & velocity
         const dateStrings = data.map(d => d["Date/timestamp"] ? d["Date/timestamp"].split(' ')[0] : '').filter(Boolean);
-        const dates = [...new Set(dateStrings)].sort();
+        // Sort as real dates (mm/dd and dd/mm mixed), not as text.
+        const dates = [...new Set(dateStrings)].sort((a, b) => ((parseCaptureDay(a) || 0) - (parseCaptureDay(b) || 0)) || String(a).localeCompare(String(b)));
         const activeDays = dates.length || 1;
         const runRate = (total / activeDays).toFixed(1);
         const TARGET = 50;
@@ -7057,7 +7058,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // --- Velocity ---
         const dateStrings = data.map(d => d["Date/timestamp"] ? d["Date/timestamp"].split(' ')[0] : '').filter(Boolean);
-        const dates = [...new Set(dateStrings)].sort();
+        // Sort as real dates (mm/dd and dd/mm mixed), not as text.
+        const dates = [...new Set(dateStrings)].sort((a, b) => ((parseCaptureDay(a) || 0) - (parseCaptureDay(b) || 0)) || String(a).localeCompare(String(b)));
         const activeDays = dates.length || 1;
         const runRate = (total / activeDays).toFixed(1);
 
@@ -7494,7 +7496,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const dates = new Set(dateStrings);
             const activeDays = dates.size || 1;
             const avgRate = Math.round(totalRecords / activeDays);
-            const sortedDates = Array.from(dates).sort();
+            const sortedDates = Array.from(dates).sort((a, b) => ((parseCaptureDay(a) || 0) - (parseCaptureDay(b) || 0)) || String(a).localeCompare(String(b)));
             const lastDateISO = sortedDates[sortedDates.length - 1];
             const firstDateISO = sortedDates[0];
 
@@ -7542,7 +7544,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const avgBuildingsPerPole = totalRecords > 0 ? (buildingsConnected / totalRecords).toFixed(2) : '0.00';
 
             // Data freshness
-            const lastDateObj = lastDateISO ? new Date(lastDateISO) : new Date();
+            const lastDateObj = (lastDateISO && parseCaptureDay(lastDateISO)) || new Date();
             const diffDays = Math.ceil(Math.abs(new Date() - lastDateObj) / (1000 * 60 * 60 * 24));
 
             // Completion vs BOQ

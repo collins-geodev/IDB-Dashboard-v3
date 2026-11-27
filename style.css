@@ -4182,3 +4182,33 @@ main.main-content { overflow-x: clip; overflow-y: visible; min-width: 0; }
 #dtTable td.col-users { min-width: 0; }
 #dt-analysis .vendor-tag { padding: 1px 5px; font-size: 0.68rem; }
 #dt-analysis .pagination-container { margin-top: 0.6rem !important; }
+
+/* ── Fill the width + slightly larger text (whole app) ─────────────────────
+   Base size 16px → 17.5px (~9% larger): rem-based text, spacing and the
+   compact cards all scale together. Content spans the full area beside the
+   sidebar with slim gutters (was capped at 98% / 1200px with wide padding). */
+html { font-size: 17.5px; }
+main.main-content .dashboard-container { max-width: none; padding: 14px 18px; }
+main.main-content .exec-summary { max-width: none; padding: 14px 18px; }
+#dt-analysis #dtTable { font-size: 0.76rem; }
+#dt-analysis #dtTable th { font-size: 0.72rem; }
+#kpis .kpi-title { font-size: 0.62rem; }
+#kpis .stat-label { font-size: 0.58rem; }
+#kpis .kpi-footer { font-size: 0.6rem; }
+
+/* ── Home page: compact executive summary ──────────────────────────────── */
+#view-home .summary-grid { grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+#view-home .summary-card { padding: 1.1rem 1.25rem; }
+#view-home .summary-card h2 { font-size: 1.1rem; margin-bottom: 0.6rem; padding-bottom: 0.4rem; }
+#view-home .summary-card p { margin-bottom: 0.5rem; }
+#view-home .rec-section { margin-top: 1rem; }
+#view-home .rec-section > h2 { margin-bottom: 0.75rem !important; font-size: 1.1rem; }
+#view-home .rec-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+#view-home .rec-card { padding: 1.1rem 1.25rem; }
+#view-home .rec-content { gap: 0.85rem; }
+#view-home .rec-item h4 { font-size: 0.95rem; margin-bottom: 0.3rem; }
+#view-home .rec-item p { font-size: 0.85rem; line-height: 1.5; }
+@media (max-width: 1100px) { #view-home .rec-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 768px) {
+    #view-home .summary-grid, #view-home .rec-grid { grid-template-columns: 1fr; }
+}
