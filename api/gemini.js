@@ -63,9 +63,16 @@ module.exports = async (req, res) => {
     const url = 'https://generativelanguage.googleapis.com/v1beta/models/' +
         encodeURIComponent(model) + ':generateContent';
 
+    // Give up on Google after 20s: without this an unresponsive upstream kept
+    // the function hanging until Vercel killed it at 300s (seen 2026-11-27),
+    // while the browser had long since given up. The dashboard then falls back
+    // to its built-in analytics answer.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20000);
     try {
         const upstream = await fetch(url, {
             method: 'POST',
+            signal: controller.signal,
             headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
             body: JSON.stringify({
                 systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
@@ -92,6 +99,10 @@ module.exports = async (req, res) => {
         }
         res.status(200).json({ answer, model });
     } catch (e) {
-        res.status(502).json({ error: 'fetch_failed' });
+        const timedOut = e && e.name === 'AbortError';
+        console.error('[gemini] upstream ' + (timedOut ? 'timed out after 20s' : 'fetch failed'), model, e && e.message);
+        res.status(timedOut ? 504 : 502).json({ error: timedOut ? 'upstream_timeout' : 'fetch_failed', model });
+    } finally {
+        clearTimeout(timer);
     }
 };
