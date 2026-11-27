@@ -4088,6 +4088,9 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>`;
         }).join('');
 
+        // Key Metrics card: the "Current" run rate was a placeholder stuck at 0.
+        const rateEl = document.getElementById('exec-avg-rate');
+        if (rateEl) { rateEl.textContent = runRate; rateEl.style.color = velocityColor; }
         const boqColor = completionPct !== null && parseFloat(completionPct) >= 50 ? '#10b981' : '#eab308';
         container.innerHTML = `
             <!-- Narrative -->
