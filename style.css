@@ -4134,3 +4134,8 @@ main.main-content { overflow-x: clip; overflow-y: visible; min-width: 0; }
     margin-bottom: 0.85rem;
     padding-bottom: 0.85rem;
 }
+
+/* ── Vendors page: compact cards around the horizontal vendor charts ── */
+#vendor .charts-grid { gap: 1rem; margin-bottom: 1rem; }
+#vendor .chart-container { min-height: 0; padding: 1rem 1.25rem 0.75rem; }
+#vendor .chart-container h2 { margin-bottom: 0.5rem; }

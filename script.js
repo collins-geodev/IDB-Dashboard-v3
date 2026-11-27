@@ -4988,29 +4988,40 @@ document.addEventListener('DOMContentLoaded', () => {
         const t = chartTheme();
         const colors = vendors.map(v => vendorColor(v));
 
+        // Horizontal bars: three vendors read in ~190px instead of ~340px.
+        // Vendor order top→bottom follows VENDOR_ORDER (Plotly draws y bottom-up).
+        const yNames = vendors.slice().reverse();
+        const rev = arr => arr.slice().reverse();
+        const hLayout = (extra) => baseChartLayout(Object.assign({
+            height: 190, bargap: 0.38,
+            margin: { t: 8, r: 64, b: 28, l: 8 },
+            xaxis: { showgrid: true, showline: false },
+            yaxis: { showgrid: false, tickfont: { size: 12, color: t.text } }
+        }, extra || {}));
+
         themedPlot('vendorTotalChart', [{
-            type: 'bar', x: vendors, y: totals, marker: { color: colors },
-            text: totals.map(fmtInt), textposition: 'outside', cliponaxis: false,
-            textfont: { size: 13, color: t.text },
-            hovertemplate: '<b>%{x}</b><br>%{y:,} unique poles<extra></extra>'
-        }], baseChartLayout({
-            height: 340, bargap: 0.45,
-            yaxis: { range: [0, Math.max(...totals, 1) * 1.15] }
+            type: 'bar', orientation: 'h', y: yNames, x: rev(totals), marker: { color: rev(colors) },
+            text: rev(totals).map(fmtInt), textposition: 'outside', cliponaxis: false,
+            textfont: { size: 12, color: t.text },
+            hovertemplate: '<b>%{y}</b><br>%{x:,} unique poles<extra></extra>'
+        }], hLayout({
+            xaxis: { showgrid: true, showline: false, range: [0, Math.max(...totals, 1) * 1.15] }
         }), { displayModeBar: false });
 
         const TARGET = 50;
+        const xMax = Math.max(TARGET * 1.15, Math.max(...rates) * 1.15);
         themedPlot('vendorRunRateChart', [{
-            type: 'bar', x: vendors, y: rates, marker: { color: colors },
-            text: rates.map(r => r.toFixed(1)), textposition: 'outside', cliponaxis: false,
-            textfont: { size: 13, color: t.text },
-            hovertemplate: '<b>%{x}</b><br>%{y:.1f} poles per officer-day<extra></extra>'
-        }], baseChartLayout({
-            height: 340, bargap: 0.45,
-            yaxis: { range: [0, Math.max(TARGET * 1.2, Math.max(...rates) * 1.15)] },
-            shapes: [{ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: TARGET, y1: TARGET,
+            type: 'bar', orientation: 'h', y: yNames, x: rev(rates), marker: { color: rev(colors) },
+            text: rev(rates).map(r => r.toFixed(1)), textposition: 'outside', cliponaxis: false,
+            textfont: { size: 12, color: t.text },
+            hovertemplate: '<b>%{y}</b><br>%{x:.1f} poles per officer-day<extra></extra>'
+        }], hLayout({
+            margin: { t: 22, r: 64, b: 28, l: 8 },
+            xaxis: { showgrid: true, showline: false, range: [0, xMax] },
+            shapes: [{ type: 'line', yref: 'paper', y0: 0, y1: 1, x0: TARGET, x1: TARGET,
                 line: { color: t.muted, width: 1.5, dash: 'dash' } }],
-            annotations: [{ xref: 'paper', x: 1, y: TARGET, xanchor: 'right', yanchor: 'bottom', showarrow: false,
-                text: `Target ${TARGET} / officer / day`, font: { size: 11, color: t.muted } }]
+            annotations: [{ yref: 'paper', y: 1, x: TARGET, xanchor: 'center', yanchor: 'bottom', showarrow: false,
+                text: `Target ${TARGET}/day`, font: { size: 10, color: t.muted } }]
         }), { displayModeBar: false });
     }
 
