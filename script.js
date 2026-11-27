@@ -6587,10 +6587,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const filterSig = filteredData.length + '|' + idOf(filteredData[0]) + '|' + idOf(lastRow);
 
         if (!mapInitiallyFitted) {
-            // The map was created at the Lagos regional view, so there is
-            // nothing to animate on first render.
+            // First render: frame every captured pole (the project area). The
+            // fixed zoom-8 creation view suits a tall map but shows half the
+            // West African coast in the landscape Overview map.
             mapInitiallyFitted = true;
             lastMapFilterSig = filterSig;
+            try {
+                map.invalidateSize();
+                if (dataLatLngs.length) map.fitBounds(L.latLngBounds(dataLatLngs), { padding: [30, 30], maxZoom: 14, animate: false });
+            } catch (e) { console.warn('initial map frame failed', e); }
         } else {
             // Re-frame the map whenever the filtered set changed, so it always
             // visibly reflects the current selection. Skip when nothing changed
