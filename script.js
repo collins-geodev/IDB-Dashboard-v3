@@ -4838,6 +4838,9 @@ document.addEventListener('DOMContentLoaded', () => {
         themedPlot('userPerformanceChart', traces, baseChartLayout({
             height: Math.max(260, top.length * 20 + 50),
             barmode: 'overlay', bargap: 0.3, showlegend: true,
+            // Start the legend at the card's left edge (not the narrow plot
+            // area after the 140px name column) so it fits on one line.
+            legend: { orientation: 'h', x: -0.62, xanchor: 'left', y: 1.01, yanchor: 'bottom', font: { size: 11, color: chartTheme().text } },
             margin: { t: 8, r: 44, b: 28, l: 140 },
             xaxis: { showgrid: true, showline: false },
             yaxis: { showgrid: false, tickfont: { size: 11, color: chartTheme().text } }
