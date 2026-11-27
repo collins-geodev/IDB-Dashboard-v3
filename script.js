@@ -5561,12 +5561,17 @@ document.addEventListener('DOMContentLoaded', () => {
             tr.dataset.dtkey = row.key;
 
             // Add classes for column visibility
+            // DT names repeat the feeder ("11-OguduINJ-T2-Alapere-TAWONISE"); the
+            // Feeder column already shows it, so the cell shows just the DT part
+            // on one line and keeps the full name in the tooltip.
+            const dtShort = (row.feeder && row.dtName.toUpperCase().startsWith(String(row.feeder).toUpperCase() + '-'))
+                ? row.dtName.slice(String(row.feeder).length + 1) : row.dtName;
             tr.innerHTML = `
                 <td class="col-index" style="text-align: center;">${globalIndex}</td>
                 <td class="col-dtName" style="font-weight: 500; color: hsl(var(--foreground));">
                     <button type="button" class="dt-drill-toggle" aria-expanded="${isOpen}"
-                        title="${isOpen ? 'Hide' : 'Show'} the pole register for this DT">
-                        <span class="dt-drill-caret">${isOpen ? '&#9662;' : '&#9656;'}</span><span>${row.dtName}</span>
+                        title="${row.dtName} — ${isOpen ? 'hide' : 'show'} the pole register">
+                        <span class="dt-drill-caret">${isOpen ? '&#9662;' : '&#9656;'}</span><span class="dt-name-text">${dtShort}</span>
                     </button>
                 </td>
                 <td class="col-feeder">${row.feeder}</td>

@@ -53,7 +53,7 @@
     <!-- ApexCharts -->
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <!-- Custom CSS -->
-    <link rel="stylesheet" href="style.css?v=20261127j">
+    <link rel="stylesheet" href="style.css?v=20261127k">
     <link rel="stylesheet" href="sidebar.css?v=20260531a">
     <link rel="stylesheet" href="insights.css?v=20260405w">
     <link rel="stylesheet" href="ai-styles.css?v=20260901b">
@@ -915,11 +915,14 @@
                     </div>
                 </section>
 
-                <section class="table-section" id="dt-analysis" data-page="dt-analysis" style="margin-top: 2rem;">
-                    <div class="table-controls"
-                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 10px;">
-                        <div id="tableInfo" style="color: #a0a0a0; font-size: 0.9rem;">Showing 0 of 0 DTs</div>
-                        <div class="search-wrapper" style="display: flex; gap: 10px; position: relative;">
+                <section class="table-section" id="dt-analysis" data-page="dt-analysis">
+                    <div class="chart-container wide dt-table-card">
+                        <div class="dt-table-head">
+                            <div>
+                                <h2>DT Performance &amp; Field Officer Analysis</h2>
+                                <div id="tableInfo" class="dt-table-info">Showing 0 of 0 DTs</div>
+                            </div>
+                            <div class="search-wrapper" style="display: flex; gap: 10px; position: relative;">
                             <!-- Column Filter Dropdown -->
                             <div class="column-filter-container">
                                 <button id="columnFilterBtn" class="filter-btn">
@@ -941,9 +944,8 @@
                                 autocomplete="off">
                             <div id="searchSuggestions" class="search-suggestions"></div>
                         </div>
-                    </div>
-                    <div class="chart-container wide" style="height: auto; min-height: 400px; overflow-x: auto;">
-                        <h2 style="margin-bottom: 10px;">DT Performance & Field Officer Analysis</h2>
+                        </div>
+                        <div class="dt-table-scroll">
                         <table id="dtTable" class="data-table">
                             <thead>
                                 <tr>
@@ -974,6 +976,7 @@
                                 <!-- Rows will be populated by JS -->
                             </tbody>
                         </table>
+                        </div>
                     </div>
                     <!-- Pagination Controls -->
                     <div id="paginationControls" class="pagination-container"
@@ -998,7 +1001,7 @@
     <script src="convex-client.js?v=20260710a"></script>
     <script src="auth-footprint.js?v=20260705a"></script>
     <script src="dashboard-auth.js?v=20260707b"></script>
-    <script src="script.js?v=20261127q"></script>
+    <script src="script.js?v=20261127r"></script>
 </body>
 
 </html>
