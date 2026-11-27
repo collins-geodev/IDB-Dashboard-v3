@@ -4227,3 +4227,6 @@ main.main-content .exec-summary { max-width: none; padding: 14px 18px; }
     .dashboard-container header { flex-wrap: wrap; }
     .dashboard-container .header-controls { flex-wrap: wrap; flex: 1 1 auto; }
 }
+/* When space is tight the title wraps to two lines instead of being cut off. */
+.dashboard-header-brand { min-width: 240px; }
+.dashboard-header-titles h1 { white-space: normal; overflow: visible; text-overflow: clip; }
