@@ -4808,7 +4808,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 1. Field officers — top 20 by unique poles, horizontal, coloured by vendor.
     function renderUserPerformanceChart() {
-        const TOP = 20;
+        const TOP = 15;
         const counts = uniquePolesByGroup(filteredData, userFacetKey);
         const vendorOf = {};
         filteredData.forEach(d => { const o = userFacetKey(d); if (o && !vendorOf[o]) vendorOf[o] = d.Vendor_Name || 'Other'; });
@@ -4836,9 +4836,9 @@ document.addEventListener('DOMContentLoaded', () => {
             : 'Field Officers by Poles Captured';
 
         themedPlot('userPerformanceChart', traces, baseChartLayout({
-            height: Math.max(320, top.length * 24 + 70),
+            height: Math.max(260, top.length * 20 + 50),
             barmode: 'overlay', bargap: 0.3, showlegend: true,
-            margin: { t: 8, r: 48, b: 32, l: 150 },
+            margin: { t: 8, r: 44, b: 28, l: 140 },
             xaxis: { showgrid: true, showline: false },
             yaxis: { showgrid: false, tickfont: { size: 11, color: chartTheme().text } }
         }), { displayModeBar: false });
@@ -4865,7 +4865,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }));
         const peak = Math.max(0, ...days.map(k => Object.values(byDay[k]).reduce((a, b) => a + b, 0)));
         themedPlot('projectVelocityChart', traces, baseChartLayout({
-            height: 380, barmode: 'stack', bargap: 0.15, showlegend: true,
+            height: 270, barmode: 'stack', bargap: 0.15, showlegend: true,
             legend: { orientation: 'h', x: 0, xanchor: 'left', y: 1.02, yanchor: 'bottom', traceorder: 'normal', font: { size: 11, color: chartTheme().text } },
             margin: { t: 8, r: 16, b: 40, l: 48 },
             xaxis: { type: 'date', tickformat: '%d %b', showgrid: false, showline: true },
@@ -4899,7 +4899,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         const main = entries[0] || ['—', 0];
         themedPlot('poleTypeChart', traces, baseChartLayout({
-            height: 280, barmode: 'stack', bargap: 0.1, showlegend: true,
+            height: 270, barmode: 'stack', bargap: 0.1, showlegend: true,
             legend: { orientation: 'h', x: 0, y: -0.2, yanchor: 'top', traceorder: 'normal', font: { size: 12, color: t.text } },
             margin: { t: 110, r: 8, b: 40, l: 8 },
             xaxis: { range: [0, 100], showgrid: false, showline: false, showticklabels: false },
@@ -4944,7 +4944,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         const last = days.length - 1;
         themedPlot('staffIssuesChart', traces, baseChartLayout({
-            height: 360, showlegend: true, hovermode: 'x unified',
+            height: 270, showlegend: true, hovermode: 'x unified',
             margin: { t: 8, r: 72, b: 40, l: 56 },
             xaxis: { type: 'date', tickformat: '%d %b', showgrid: false, showline: true },
             yaxis: { title: { text: 'Poles (cumulative)' }, rangemode: 'tozero' },
@@ -4965,7 +4965,7 @@ document.addEventListener('DOMContentLoaded', () => {
             textfont: { size: 11, color: t.muted },
             hovertemplate: '<b>%{y}</b><br>%{x:,} poles<extra></extra>'
         }], baseChartLayout({
-            height: Math.max(300, sorted.length * 34 + 60), bargap: 0.35,
+            height: Math.max(240, sorted.length * 26 + 44), bargap: 0.3,
             margin: { t: 8, r: 56, b: 32, l: 8 },
             xaxis: { showgrid: true, showline: false },
             yaxis: { showgrid: false, tickfont: { size: 11, color: t.text } }
@@ -5671,7 +5671,7 @@ document.addEventListener('DOMContentLoaded', () => {
             textfont: { size: 11, color: t.muted },
             hovertemplate: '<b>%{y}</b><br>%{x:,} poles<extra></extra>'
         }], baseChartLayout({
-            height: Math.max(300, sorted.length * 34 + 60), bargap: 0.35,
+            height: Math.max(240, sorted.length * 26 + 44), bargap: 0.3,
             margin: { t: 8, r: 56, b: 32, l: 8 },
             xaxis: { showgrid: true, showline: false },
             yaxis: { showgrid: false, tickfont: { size: 11, color: t.text } }

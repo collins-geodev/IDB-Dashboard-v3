@@ -53,7 +53,7 @@
     <!-- ApexCharts -->
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <!-- Custom CSS -->
-    <link rel="stylesheet" href="style.css?v=20261127i">
+    <link rel="stylesheet" href="style.css?v=20261127j">
     <link rel="stylesheet" href="sidebar.css?v=20260531a">
     <link rel="stylesheet" href="insights.css?v=20260405w">
     <link rel="stylesheet" href="ai-styles.css?v=20260901b">
@@ -863,46 +863,37 @@
                 </section>
 
                 <!-- Charts Grid -->
-                <section class="charts-grid" id="charts" data-page="charts">
-                    <!-- User Performance Bar Chart -->
-                    <div class="chart-container wide">
-                        <h2>Top Field Officers by Poles Captured</h2>
-                        <div id="userPerformanceChart"></div>
-                    </div>
-
-                    <!-- Activity & Distribution (Split Row) -->
-                    <div class="chart-split-row">
-                        <!-- Activity Over Time -->
+                <section class="charts-grid charts-compact" id="charts" data-page="charts">
+                    <!-- Row 1 — over time: daily, cumulative, material mix -->
+                    <div class="charts-row charts-row-time">
                         <div class="chart-container">
                             <h2>Daily Poles Captured by Vendor</h2>
                             <div id="projectVelocityChart"></div>
                         </div>
-
-                        <!-- Pole Type Distribution -->
+                        <!-- Cumulative poles captured (replaces the simulated issues chart) -->
+                        <div class="chart-container">
+                            <h2>Cumulative Poles Captured</h2>
+                            <div id="staffIssuesChart"></div>
+                        </div>
                         <div class="chart-container">
                             <h2>Pole Material Mix</h2>
                             <div id="poleTypeChart"></div>
                         </div>
                     </div>
 
-                    <!-- Cumulative poles captured (replaces the simulated issues chart) -->
-                    <div class="chart-container wide">
-                        <h2>Cumulative Poles Captured</h2>
-                        <div id="staffIssuesChart"></div>
-                    </div>
-
-                    <!-- Equal split row for Undertaking and Feeder -->
-                    <div class="split-row">
-                        <!-- Undertaking Breakdown -->
+                    <!-- Row 2 — rankings: officers, feeders, undertakings -->
+                    <div class="charts-row charts-row-rank">
                         <div class="chart-container">
-                            <h2>Poles by Undertaking</h2>
-                            <div id="undertakingChart"></div>
+                            <h2>Top Field Officers by Poles Captured</h2>
+                            <div id="userPerformanceChart"></div>
                         </div>
-
-                        <!-- Feeder Breakdown -->
                         <div class="chart-container">
                             <h2>Top 10 Feeders by Poles Captured</h2>
                             <div id="feederChart"></div>
+                        </div>
+                        <div class="chart-container">
+                            <h2>Poles by Undertaking</h2>
+                            <div id="undertakingChart"></div>
                         </div>
                     </div>
                 </section>
@@ -1007,7 +998,7 @@
     <script src="convex-client.js?v=20260710a"></script>
     <script src="auth-footprint.js?v=20260705a"></script>
     <script src="dashboard-auth.js?v=20260707b"></script>
-    <script src="script.js?v=20261127o"></script>
+    <script src="script.js?v=20261127p"></script>
 </body>
 
 </html>

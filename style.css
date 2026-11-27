@@ -4139,3 +4139,21 @@ main.main-content { overflow-x: clip; overflow-y: visible; min-width: 0; }
 #vendor .charts-grid { gap: 1rem; margin-bottom: 1rem; }
 #vendor .chart-container { min-height: 0; padding: 1rem 1.25rem 0.75rem; }
 #vendor .chart-container h2 { margin-bottom: 0.5rem; }
+
+/* ── Charts page: two compact rows (over time · rankings) ───────────────── */
+#charts.charts-compact { display: block; margin-bottom: 1rem; }
+#charts .charts-row { display: grid; gap: 1rem; margin-bottom: 1rem; }
+#charts .charts-row-time { grid-template-columns: 2fr 2fr 1.15fr; }
+#charts .charts-row-rank { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+#charts .chart-container { min-height: 0; padding: 0.9rem 1rem 0.6rem; }
+#charts .chart-container h2 { font-size: 0.92rem; margin-bottom: 0.4rem; padding-bottom: 0.4rem; }
+@media (max-width: 1200px) {
+    #charts .charts-row-time { grid-template-columns: 1fr 1fr; }
+    #charts .charts-row-time > :last-child { grid-column: span 2; }
+    #charts .charts-row-rank { grid-template-columns: 1fr 1fr; }
+    #charts .charts-row-rank > :first-child { grid-column: span 2; }
+}
+@media (max-width: 768px) {
+    #charts .charts-row-time, #charts .charts-row-rank { grid-template-columns: 1fr; }
+    #charts .charts-row > * { grid-column: auto !important; }
+}
