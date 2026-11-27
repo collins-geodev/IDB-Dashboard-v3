@@ -4078,3 +4078,34 @@ main.main-content { overflow-x: clip; overflow-y: visible; min-width: 0; }
 @media (max-width: 480px) {
     #kpis.kpi-section { grid-template-columns: repeat(2, 1fr) !important; }
 }
+
+/* ── Compact top cards (Active Users + Project Completion Rate) ────────────
+   One slim row: smaller type and icon, and the two completion rates side by
+   side instead of stacked. */
+#view-dashboard .top-insights-row { gap: 0.6rem; margin: 0.6rem 0 0.75rem; }
+#view-dashboard .top-insights-row .top-insight-card { padding: 0.55rem 0.85rem; box-shadow: none; }
+#view-dashboard .top-insight-label { font-size: 0.66rem; letter-spacing: 0.4px; }
+#view-dashboard .top-insight-value { font-size: 1.2rem; line-height: 1.15; margin-top: 0.05rem; }
+#view-dashboard .top-insight-icon { width: 30px; height: 30px; border-radius: 6px; }
+#view-dashboard .top-insight-icon svg { width: 16px; height: 16px; }
+#view-dashboard .top-insights-row .top-insight-users { flex: 0 1 220px; min-width: 160px; }
+#view-dashboard .top-insights-row .top-insight-completion {
+    flex: 1 1 auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 1.25rem;
+    flex-wrap: wrap;
+}
+#view-dashboard .completion-title-row { margin-bottom: 0; flex: 0 0 auto; gap: 6px; }
+#view-dashboard .completion-title-row svg { width: 16px; height: 16px; }
+#view-dashboard .completion-split { flex: 1 1 320px; flex-direction: row; gap: 1.25rem; }
+#view-dashboard .completion-split-row { flex: 1 1 0; min-width: 0; }
+#view-dashboard .completion-split-row .completion-header { margin-bottom: 0.2rem; }
+#view-dashboard .completion-sub-label { font-size: 0.68rem; }
+#view-dashboard .completion-split-row .completion-rate-value { font-size: 1rem; }
+#view-dashboard .completion-bar-track { height: 5px; border-radius: 3px; }
+@media (max-width: 768px) {
+    #view-dashboard .top-insights-row { flex-wrap: wrap; }
+    #view-dashboard .top-insights-row .top-insight-users { flex: 1 1 100%; }
+    #view-dashboard .completion-title-row { flex: 1 1 100%; }
+}
