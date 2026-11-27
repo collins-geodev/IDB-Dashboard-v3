@@ -4079,9 +4079,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const totalBoqAllTop = activeBoqData.reduce((sum, d) => sum + (parseInt(d["POLES Grand Total"]) || 0), 0);
         const totalBoqNewTop = activeBoqData.reduce((sum, d) => sum + (parseInt(d["NEW POLE"]) || 0), 0);
         const totalBoqExNewTop = Math.max(0, totalBoqAllTop - totalBoqNewTop);
-        const actRecordsAllTop = filteredData.length;
-        const actNewCountTop = filteredData.filter(isNewInstallPole).length;
-        const actRecordsExNewTop = Math.max(0, actRecordsAllTop - actNewCountTop);
+        // Count unique pole SLRNs (not raw records) so duplicate captures don't
+        // inflate the rate — same basis as the Total Poles cards below.
+        const topPoleSLRNs = new Set();
+        const topNewPoleSLRNs = new Set();
+        filteredData.forEach(item => {
+            const slrn = (item["Lt PoleSLRN"] || item["LT Pole No"] || "").toString().trim();
+            if (!slrn) return;
+            topPoleSLRNs.add(slrn);
+            if (isNewInstallPole(item)) topNewPoleSLRNs.add(slrn);
+        });
+        const actRecordsAllTop = topPoleSLRNs.size;
+        const actRecordsExNewTop = Math.max(0, actRecordsAllTop - topNewPoleSLRNs.size);
 
         // Incl. New Poles (Total Poles card base)
         if (topCompRateEl && topCompBarEl) {
@@ -4690,12 +4699,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     newPoles: 0, // New Poles (Install)
                     actualTotal: 0,
                     concrete: 0,
-                    wooden: 0
+                    wooden: 0,
+                    _slrns: new Set()
                 };
             }
 
-            map[key].actualTotal++;
             if (userFacetKey(d)) map[key].users.add(userFacetKey(d));
+
+            // Count each pole once per DT (unique SLRN), matching the KPI cards —
+            // duplicate captures and SLRN-less uploads don't inflate the tally.
+            const slrn = poleSlrn(d);
+            if (!slrn || map[key]._slrns.has(slrn)) return;
+            map[key]._slrns.add(slrn);
+            map[key].actualTotal++;
 
             // New Poles (Install)
             if (isNewInstallPole(d)) map[key].newPoles++;
@@ -6805,11 +6821,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     actualTotal: 0,
                     actualGood: 0,
                     actualBad: 0,
-                    users: new Set()
+                    users: new Set(),
+                    _slrns: new Set()
                 };
             }
-            fieldGroups[key].actualTotal++;
             if (userFacetKey(d)) fieldGroups[key].users.add(userFacetKey(d));
+            const slrn = poleSlrn(d);
+            if (slrn && !fieldGroups[key]._slrns.has(slrn)) {
+                fieldGroups[key]._slrns.add(slrn);
+                fieldGroups[key].actualTotal++;
+            }
         });
 
         // 2. Iterate BOQ and Merge
