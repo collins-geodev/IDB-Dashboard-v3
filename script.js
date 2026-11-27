@@ -7694,7 +7694,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="rec-item">
                         <h4>${r.icon} ${r.title}</h4>
                         <p class="rec-text">${r.text}</p>
-                        <button type="button" class="rec-more" hidden>Show more</button>
+                        <button type="button" class="rec-more" hidden aria-label="Show the full recommendation">More ▾</button>
                     </div>
                 `).join('');
             }
@@ -7723,7 +7723,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!btn) return;
         const item = btn.closest('.rec-item');
         const open = item.classList.toggle('expanded');
-        btn.textContent = open ? 'Show less' : 'Show more';
+        btn.textContent = open ? 'Less ▴' : 'More ▾';
     });
 
     // --- Event Listeners ---

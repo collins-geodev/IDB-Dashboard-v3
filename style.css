@@ -4323,3 +4323,9 @@ main.main-content .exec-summary { max-width: none; padding: 14px 18px; }
     color: hsl(var(--primary)); cursor: pointer;
 }
 #view-home .rec-more:hover { text-decoration: underline; }
+
+/* Toggle sits on the title line (no extra row); text clamps to 2 lines. */
+#view-home .rec-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 0.5rem; align-items: baseline; }
+#view-home .rec-item h4 { grid-column: 1; grid-row: 1; }
+#view-home .rec-item .rec-more { grid-column: 2; grid-row: 1; margin-top: 0; white-space: nowrap; }
+#view-home .rec-item .rec-text { grid-column: 1 / -1; grid-row: 2; -webkit-line-clamp: 2; }
