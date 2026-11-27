@@ -32,8 +32,49 @@ current dashboard scope, then a QUESTION. Rules:
   lists, **bold** for key numbers and names. No tables, no code blocks, no links, no HTML.
 - Keep it under ~200 words unless the user explicitly asks for a detailed report.`;
 
+// TEMPORARY diagnostics (2026-11-27): GET /api/gemini?diag=1 reports whether
+// the key is set, which models the key can see, and how the configured model
+// responds to a tiny prompt. Never returns the key itself. Remove after use.
+async function diagnose(key, model) {
+    const timed = async (url, opts, ms) => {
+        const c = new AbortController(); const t = setTimeout(() => c.abort(), ms); const t0 = Date.now();
+        try {
+            const r = await fetch(url, Object.assign({ signal: c.signal }, opts));
+            const text = await r.text();
+            return { status: r.status, ms: Date.now() - t0, text };
+        } catch (e) {
+            return { status: e && e.name === 'AbortError' ? 'timeout' : 'error', ms: Date.now() - t0, text: String(e && e.message || '') };
+        } finally { clearTimeout(t); }
+    };
+    const out = {
+        keyPresent: !!key,
+        keyShape: key ? ((key.startsWith('AIza') ? 'AIza… ' : 'non-standard prefix, ') + key.length + ' chars') : null,
+        model, modelFromEnv: !!process.env.GEMINI_MODEL, region: process.env.VERCEL_REGION || null
+    };
+    if (!key) return out;
+    const base = 'https://generativelanguage.googleapis.com/v1beta/models';
+    const list = await timed(base + '?pageSize=1000', { headers: { 'x-goog-api-key': key } }, 10000);
+    out.listModels = { status: list.status, ms: list.ms };
+    try {
+        const names = (JSON.parse(list.text).models || []).map(m => m.name.replace(/^models\//, ''));
+        out.listModels.count = names.length;
+        out.listModels.configuredModelListed = names.includes(model);
+        out.listModels.flashModels = names.filter(n => /flash/.test(n)).slice(0, 40);
+    } catch (e) { out.listModels.error = list.text.slice(0, 200); }
+    const gen = await timed(base + '/' + encodeURIComponent(model) + ':generateContent', {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
+        body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'Reply with the single word OK.' }] }], generationConfig: { maxOutputTokens: 64 } })
+    }, 15000);
+    out.generate = { status: gen.status, ms: gen.ms, body: gen.text.slice(0, 300) };
+    return out;
+}
+
 module.exports = async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
+    if (req.method === 'GET' && req.query && req.query.diag) {
+        res.status(200).json(await diagnose(process.env.GEMINI_API_KEY, process.env.GEMINI_MODEL || 'gemini-3.6-flash'));
+        return;
+    }
     if (req.method !== 'POST') {
         res.status(405).json({ error: 'method_not_allowed' });
         return;
