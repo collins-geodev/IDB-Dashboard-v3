@@ -7141,7 +7141,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         container.innerHTML = `
             <!-- Velocity & Trend -->
-            <div class="insight-item" style="flex-direction:column;align-items:stretch;">
+            <div class="insight-item ki-velocity" style="flex-direction:column;align-items:stretch;">
                 <div style="display:flex;justify-content:space-between;align-items:center;">
                     <span class="insight-label">Project Velocity</span>
                     <span style="font-size:0.8rem;color:${trendColor};font-weight:600;">${trendIcon} ${trendPct > 0 ? '+' : ''}${trendPct}% vs prior</span>
@@ -7159,7 +7159,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             ${completionPct !== null ? `
             <!-- BOQ Completion -->
-            <div class="insight-item" style="flex-direction:column;align-items:stretch;">
+            <div class="insight-item ki-boq" style="flex-direction:column;align-items:stretch;">
                 <div style="display:flex;justify-content:space-between;align-items:center;">
                     <span class="insight-label">BOQ Completion</span>
                     <span style="font-size:1.1rem;font-weight:700;color:${parseFloat(completionPct) >= 50 ? '#10b981' : '#eab308'};">${completionPct}%</span>
@@ -7170,7 +7170,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ` : ''}
 
             <!-- Vendor Race -->
-            <div class="insight-item" style="flex-direction:column;align-items:stretch;">
+            <div class="insight-item ki-leaderboard" style="flex-direction:column;align-items:stretch;">
                 <span class="insight-label" style="margin-bottom:8px;">Vendor Leaderboard</span>
                 ${vendorBarsHTML}
             </div>
@@ -7181,14 +7181,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 const vColors = Object.fromEntries(VENDOR_ORDER.map(v => [v, vendorColor(v)]));
                 const vShort = { 'ETC Workforce': 'ETC', 'Jesom Technology': 'Jesom', 'Ikeja Electric': 'Ikeja' };
                 const rows = vendorNames.map(v => {
-                    const vUsers = {};
-                    data.filter(d => d.Vendor_Name === v).forEach(d => { const o = userFacetKey(d); if (o) vUsers[o] = (vUsers[o] || 0) + 1; });
+                    const vUsers = uniquePolesByGroup(data.filter(d => d.Vendor_Name === v), userFacetKey);   // unique poles per officer
                     const sorted = Object.entries(vUsers).sort((a, b) => b[1] - a[1]);
                     if (sorted.length === 0) return '';
                     const best = sorted[0];
                     const worst = sorted[sorted.length - 1];
                     const color = vColors[v];
-                    return `<div style="margin-bottom:10px;padding:8px;background:rgba(255,255,255,0.02);border-radius:6px;border-left:3px solid ${color};">
+                    return `<div class="ki-officer" style="padding:8px;background:rgba(255,255,255,0.02);border-radius:6px;border-left:3px solid ${color};">
                         <div style="font-size:0.75rem;font-weight:700;color:${color};margin-bottom:5px;">${vShort[v]} (${sorted.length} officers)</div>
                         <div style="display:flex;justify-content:space-between;align-items:center;">
                             <div>
@@ -7208,14 +7207,14 @@ document.addEventListener('DOMContentLoaded', () => {
                         </div>
                     </div>`;
                 }).filter(Boolean).join('');
-                return rows ? `<div class="insight-item" style="flex-direction:column;align-items:stretch;">
+                return rows ? `<div class="insight-item ki-officers" style="flex-direction:column;align-items:stretch;">
                     <span class="insight-label" style="margin-bottom:6px;">Officer Performance by Vendor</span>
-                    ${rows}
+                    <div class="ki-officer-rows">${rows}</div>
                 </div>` : '';
             })()}
 
             <!-- Building-SLRN Linkage -->
-            <div class="insight-item" style="flex-direction:column;align-items:stretch;">
+            <div class="insight-item ki-linkage" style="flex-direction:column;align-items:stretch;">
                 <div style="display:flex;justify-content:space-between;align-items:center;">
                     <span class="insight-label">Building Linkage</span>
                     <span style="font-size:0.85rem;font-weight:600;color:${linkColor};">${linkPct}% linked</span>
@@ -7230,7 +7229,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
 
             <!-- Network Coverage -->
-            <div class="insight-item" style="flex-direction:column;align-items:stretch;">
+            <div class="insight-item ki-coverage" style="flex-direction:column;align-items:stretch;">
                 <span class="insight-label" style="margin-bottom:6px;">Network Coverage</span>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;text-align:center;">
                     <div style="background:rgba(255,255,255,0.03);border-radius:6px;padding:8px 4px;">
@@ -7249,13 +7248,13 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
 
             <!-- Pole Material Mix -->
-            <div class="insight-item" style="flex-direction:column;align-items:stretch;">
+            <div class="insight-item ki-material" style="flex-direction:column;align-items:stretch;">
                 <span class="insight-label" style="margin-bottom:6px;">Pole Material Mix</span>
                 ${poleTypeBarsHTML}
             </div>
 
             <!-- Data Window -->
-            <div class="insight-item">
+            <div class="insight-item ki-window">
                 <span class="insight-label">Data Window</span>
                 <span style="font-size:0.85rem;color:var(--text-secondary);text-align:right;">${firstDate}<br>${lastDate}</span>
             </div>

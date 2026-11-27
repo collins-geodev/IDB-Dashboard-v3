@@ -4357,3 +4357,34 @@ main.main-content .exec-summary { max-width: none; padding: 14px 18px; }
     #exec-dynamic-content .ds-row { grid-template-columns: 1fr; gap: 0.6rem; }
     #exec-dynamic-content .ds-facts { grid-template-columns: 1fr 1fr; }
 }
+
+/* ── Overview: Key Insights fill the full width (explicit grid) ─────────────
+   Replaces the newspaper columns, which left the right side empty because the
+   tall officer block set the column height. Officers now sit side by side. */
+#keyInsightsContent {
+    display: grid !important;
+    columns: auto; column-rule: none;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.9rem 1.6rem;
+    align-items: start;
+}
+#keyInsightsContent > .insight-item { margin: 0 !important; padding-bottom: 0 !important; border-bottom: 0 !important; break-inside: auto; }
+#keyInsightsContent .ki-velocity    { grid-column: 1; grid-row: 1; }
+#keyInsightsContent .ki-boq         { grid-column: 2; grid-row: 1; }
+#keyInsightsContent .ki-linkage     { grid-column: 3; grid-row: 1; }
+#keyInsightsContent .ki-coverage    { grid-column: 4; grid-row: 1; }
+#keyInsightsContent .ki-officers    { grid-column: 1 / span 2; grid-row: 2 / span 2; }
+#keyInsightsContent .ki-leaderboard { grid-column: 3; grid-row: 2 / span 2; }
+#keyInsightsContent .ki-material    { grid-column: 4; grid-row: 2; }
+#keyInsightsContent .ki-window      { grid-column: 4; grid-row: 3; }
+#keyInsightsContent .ki-officer-rows { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.6rem; }
+#keyInsightsContent .ki-officer { margin: 0 !important; min-width: 0; }
+@media (max-width: 1200px) {
+    #keyInsightsContent { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    #keyInsightsContent > .insight-item { grid-column: auto !important; grid-row: auto !important; }
+    #keyInsightsContent .ki-officers { grid-column: 1 / -1 !important; }
+}
+@media (max-width: 768px) {
+    #keyInsightsContent { grid-template-columns: 1fr; }
+    #keyInsightsContent .ki-officer-rows { grid-template-columns: 1fr; }
+}
