@@ -678,6 +678,35 @@ document.addEventListener('DOMContentLoaded', () => {
     function poleSlrn(item) {
         return String((item && (item["Lt PoleSLRN"] || item["LT Pole No"])) || "").trim();
     }
+    // DT key used by the DT table, pole register and BOQ variance.
+    function dtKeyOf(d) {
+        const feeder = (d["Feeder"] || "Unknown Feeder").toString().trim();
+        const dtName = (d["DT Name"] || "Unknown DT").toString().trim();
+        return `${feeder}|${dtName}`.toUpperCase();
+    }
+    // A pole SLRN captured under more than one DT name (re-surveyed, or keyed to
+    // the wrong DT) must count once, not once per DT. Each SLRN is owned by the
+    // DT of its MOST RECENT capture — the same "latest capture wins" rule the
+    // merged export uses; ties keep the first capture seen.
+    // Returns Map(slrn -> dtKeyOf). Cached per data array.
+    let _poleOwnerCache = { src: null, len: -1, map: null };
+    function poleDtOwners(arr) {
+        if (_poleOwnerCache.src === arr && _poleOwnerCache.len === arr.length) return _poleOwnerCache.map;
+        const best = new Map();
+        arr.forEach(d => {
+            const slrn = poleSlrn(d); if (!slrn) return;
+            const raw = d["Date/timestamp"];
+            let t = parseFieldTimestamp(raw);
+            if (isNaN(t)) t = Date.parse(raw || '');
+            if (isNaN(t)) t = -Infinity;
+            const cur = best.get(slrn);
+            if (!cur || t > cur.t) best.set(slrn, { t, key: dtKeyOf(d) });
+        });
+        const map = new Map();
+        best.forEach((v, slrn) => map.set(slrn, v.key));
+        _poleOwnerCache = { src: arr, len: arr.length, map };
+        return map;
+    }
     function countUniquePoles(arr) {
         var s = new Set();
         arr.forEach(function (d) { var x = poleSlrn(d); if (x) s.add(x); });
@@ -4679,6 +4708,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function getEnhancedDTData() {
         const map = {};
+        const owners = poleDtOwners(filteredData);
 
         // 1. Process Field Data
         filteredData.forEach(d => {
@@ -4706,10 +4736,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (userFacetKey(d)) map[key].users.add(userFacetKey(d));
 
-            // Count each pole once per DT (unique SLRN), matching the KPI cards —
-            // duplicate captures and SLRN-less uploads don't inflate the tally.
+            // Count each pole once (unique SLRN), under the one DT that owns it
+            // (its latest capture), matching the KPI cards — duplicate captures,
+            // poles keyed to two DT names, and SLRN-less uploads don't inflate it.
             const slrn = poleSlrn(d);
-            if (!slrn || map[key]._slrns.has(slrn)) return;
+            if (!slrn || owners.get(slrn) !== key || map[key]._slrns.has(slrn)) return;
             map[key]._slrns.add(slrn);
             map[key].actualTotal++;
 
@@ -4824,10 +4855,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const byPole = new Map();
         let unkeyed = 0;
 
+        const owners = poleDtOwners(filteredData);
         filteredData.forEach(d => {
-            const feeder = (d["Feeder"] || "Unknown Feeder").trim();
-            const dtName = (d["DT Name"] || "Unknown DT").trim();
-            if (`${feeder}|${dtName}`.toUpperCase() !== dtKey) return;
+            if (dtKeyOf(d) !== dtKey) return;
+            // A pole keyed to two DT names is listed only under the DT that owns it.
+            const ownSlrn = poleSlrn(d);
+            if (ownSlrn && owners.get(ownSlrn) !== dtKey) return;
 
             const slrn = String(d["Lt PoleSLRN"] || d["LT Pole No"] || '').trim().toUpperCase();
             const id = slrn || `__unkeyed_${unkeyed++}`;
@@ -6827,7 +6860,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (userFacetKey(d)) fieldGroups[key].users.add(userFacetKey(d));
             const slrn = poleSlrn(d);
-            if (slrn && !fieldGroups[key]._slrns.has(slrn)) {
+            if (slrn && poleDtOwners(filteredData).get(slrn) === dtKeyOf(d) && !fieldGroups[key]._slrns.has(slrn)) {
                 fieldGroups[key]._slrns.add(slrn);
                 fieldGroups[key].actualTotal++;
             }
