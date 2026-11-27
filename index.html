@@ -53,7 +53,7 @@
     <!-- ApexCharts -->
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <!-- Custom CSS -->
-    <link rel="stylesheet" href="style.css?v=20261127l">
+    <link rel="stylesheet" href="style.css?v=20261127m">
     <link rel="stylesheet" href="sidebar.css?v=20260531a">
     <link rel="stylesheet" href="insights.css?v=20260405w">
     <link rel="stylesheet" href="ai-styles.css?v=20260901b">
@@ -200,7 +200,10 @@
                 <header>
                     <div class="dashboard-header-brand">
                         <img src="images/ie-logo.png?v=20260405c" alt="IE Logo" class="exec-header-logo">
-                        <h1>IDB 2.0 Assets Tagging Monitoring Dashboard</h1>
+                        <div class="dashboard-header-titles">
+                            <h1>IDB 2.0 Assets Tagging Monitoring Dashboard</h1>
+                            <div class="last-updated" id="lastUpdated">Last Updated: Now</div>
+                        </div>
                     </div>
                     <div class="header-controls">
 
@@ -228,7 +231,7 @@
                                 id="exportDropdownToggle" aria-haspopup="true" aria-expanded="false"
                                 title="Export the dashboard data — duplicate poles are merged into one row per LT Pole SLRN and ordered by upriser/pole sequence">
                                 <span aria-hidden="true">⬇️</span>
-                                <span class="template-dropdown-label">Download / Export</span>
+                                <span class="template-dropdown-label" title="Download / Export">Export</span>
                                 <svg class="template-dropdown-caret" width="12" height="12" viewBox="0 0 24 24"
                                     fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"
                                     stroke-linejoin="round" aria-hidden="true">
@@ -313,7 +316,7 @@
                                 title="Admin only — upload a JSON file to update the dashboard data for everyone"
                                 style="background-color: #10b981; border: 1px solid #10b981; color: white;">
                                 <span aria-hidden="true">🗄️</span>
-                                <span class="template-dropdown-label">Update Data (JSON)</span>
+                                <span class="template-dropdown-label" title="Update Data (JSON)">Update Data</span>
                                 <svg class="template-dropdown-caret" width="12" height="12" viewBox="0 0 24 24"
                                     fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"
                                     stroke-linejoin="round" aria-hidden="true">
@@ -338,7 +341,6 @@
                             </div>
                             <input type="file" id="jsonUploadInput" accept=".json,application/json" hidden>
                         </div>
-                        <div class="last-updated" id="lastUpdated">Last Updated: Now</div>
                     </div>
                 </header>
 
