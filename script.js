@@ -30,6 +30,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let filteredData = [];
     let boqData = []; // Store BOQ Data
     let duplicateInfo = { poles: 0, buildings: 0, poleDuplicates: [], buildingDuplicates: [] };
+    // Captures moved onto their pole's latest DT by reconcilePoleLocations().
+    let poleLocationConflicts = [];
     let viewMode = 'field'; // 'field' or 'boq'
     let currentPage = 1;
     const rowsPerPage = 25;
@@ -630,7 +632,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const banner = document.getElementById('duplicate-warning-banner');
         if (!banner) return;
 
-        if (duplicateInfo.poles === 0 && duplicateInfo.buildings === 0) {
+        const movedPoles = new Set(poleLocationConflicts.map(c => c.slrn)).size;
+        const dlBtn = document.getElementById('dt-conflict-download');
+        if (dlBtn) {
+            dlBtn.hidden = movedPoles === 0;
+            if (!dlBtn.dataset.wired) { dlBtn.addEventListener('click', downloadPoleLocationConflicts); dlBtn.dataset.wired = '1'; }
+        }
+
+        if (duplicateInfo.poles === 0 && duplicateInfo.buildings === 0 && movedPoles === 0) {
             banner.style.display = 'none';
             return;
         }
@@ -639,8 +648,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (duplicateInfo.poles > 0) parts.push(`${duplicateInfo.poles} duplicate Pole SLRN${duplicateInfo.poles > 1 ? 's' : ''}`);
         if (duplicateInfo.buildings > 0) parts.push(`${duplicateInfo.buildings} duplicate Building SLRN${duplicateInfo.buildings > 1 ? 's' : ''}`);
 
+        let msg = parts.length
+            ? `Data Quality Notice: ${parts.join(' and ')} detected. KPI counts reflect unique values only.`
+            : 'Data Quality Notice:';
+        if (movedPoles) {
+            msg += ` ${movedPoles} pole${movedPoles > 1 ? 's were' : ' was'} recorded under two DTs and ${movedPoles > 1 ? 'are' : 'is'} counted under the DT of the latest capture.`;
+        }
         const msgEl = document.getElementById('duplicate-warning-msg');
-        if (msgEl) msgEl.textContent = `Data Quality Notice: ${parts.join(' and ')} detected. KPI counts reflect unique values only.`;
+        if (msgEl) msgEl.textContent = msg;
         banner.style.display = 'flex';
     }
 
@@ -698,15 +713,78 @@ document.addEventListener('DOMContentLoaded', () => {
         _ownerCache.set(kind, { src: arr, len: arr.length, map });
         return map;
     }
+    // Capture time in ms (mm/dd/yyyy hh:mm or ISO); -Infinity when unreadable.
+    function captureTime(d) {
+        const raw = d && d["Date/timestamp"];
+        let t = parseFieldTimestamp(raw);
+        if (isNaN(t)) t = Date.parse(raw || '');
+        return isNaN(t) ? -Infinity : t;
+    }
+
+    // ── Load-time rule: one pole, one DT ─────────────────────────────────────
+    // Some pole SLRNs are captured under two DT names, sometimes on two feeders
+    // (re-surveys, or a crew keying the wrong DT). Before anything renders, every
+    // capture of such a pole is moved onto the DT of its LATEST capture (the
+    // same "latest capture wins" rule as the merged export), so the map, every
+    // filter, chart, card, table and export agree. The recorded values are kept
+    // on the record (__origLocation) and listed in poleLocationConflicts, which
+    // the data-quality banner offers as a download for correcting the source.
+    // Idempotent: re-running it (after an upload) re-decides from the recorded
+    // values, so a newer upload on a different DT takes the pole over cleanly.
+    const DT_LOCATION_FIELDS = ["Feeder", "DT Name", "Bussines Unit", "Undertaking", "UpriserNo"];
+    function reconcilePoleLocations(data) {
+        const recorded = r => r.__origLocation || r;
+        const groups = new Map();
+        data.forEach(d => {
+            // Start from the recorded values every run, so clearing an upload
+            // that caused a move puts the older captures back.
+            if (d && d.__origLocation) { Object.assign(d, d.__origLocation); delete d.__origLocation; }
+            const s = poleSlrn(d); if (!s) return;
+            if (!groups.has(s)) groups.set(s, []);
+            groups.get(s).push(d);
+        });
+
+        const conflicts = [];
+        groups.forEach((rows, slrn) => {
+            if (rows.length < 2) return;
+            if (new Set(rows.map(r => dtKeyOf(recorded(r)))).size < 2) return;
+
+            let owner = rows[0], ownerT = captureTime(owner);
+            rows.forEach(r => { const t = captureTime(r); if (t > ownerT) { owner = r; ownerT = t; } });
+            const target = {};
+            DT_LOCATION_FIELDS.forEach(f => { target[f] = recorded(owner)[f]; });
+            const targetKey = dtKeyOf(target);
+
+            rows.forEach(r => {
+                const from = recorded(r);
+                if (dtKeyOf(from) === targetKey) return;   // already on the owning DT
+                r.__origLocation = {};
+                DT_LOCATION_FIELDS.forEach(f => { r.__origLocation[f] = r[f]; });
+                conflicts.push({
+                    slrn, poleNo: r["LT Pole No"] || '', captured: r["Date/timestamp"] || '',
+                    user: getDisplayName(r["User"]) || r["User"] || '',
+                    fromFeeder: from["Feeder"] || '', fromDT: from["DT Name"] || '', fromUpriser: from["UpriserNo"] ?? '',
+                    toFeeder: target["Feeder"] || '', toDT: target["DT Name"] || '',
+                    latest: owner["Date/timestamp"] || ''
+                });
+                DT_LOCATION_FIELDS.forEach(f => { r[f] = target[f]; });
+            });
+        });
+
+        poleLocationConflicts = conflicts;
+        if (conflicts.length) {
+            const poles = new Set(conflicts.map(c => c.slrn)).size;
+            console.warn(`[Data Quality] ${poles} pole SLRN(s) were recorded under two DTs — ${conflicts.length} capture(s) moved to the DT of the latest capture.`);
+        }
+        return conflicts;
+    }
+
     function poleOwnerRows(arr) {
         return _cached('rows', arr, () => {
             const best = new Map();
             arr.forEach(d => {
                 const slrn = poleSlrn(d); if (!slrn) return;
-                const raw = d["Date/timestamp"];
-                let t = parseFieldTimestamp(raw);
-                if (isNaN(t)) t = Date.parse(raw || '');
-                if (isNaN(t)) t = -Infinity;
+                const t = captureTime(d);
                 const cur = best.get(slrn);
                 if (!cur || t > cur.t) best.set(slrn, { t, row: d });
             });
@@ -914,7 +992,9 @@ document.addEventListener('DOMContentLoaded', () => {
             // them — scoped to this dashboard's allowed feeders.
             const sharedUploadCount = applySharedUploads(sharedUploads);
 
-            // Detect duplicate SLRNs before rendering
+            // One pole, one DT: move captures of a pole recorded under two DTs
+            // onto its latest capture's DT, then detect duplicates — before rendering.
+            reconcilePoleLocations(globalData);
             detectDuplicateSLRNs(globalData);
 
             // Index pole ↔ building SLRNs for the Asset lookup and DT drill-down
@@ -1718,6 +1798,11 @@ document.addEventListener('DOMContentLoaded', () => {
     function downloadCSV() {
         if (!filteredData || filteredData.length === 0) { alert('No data available to download.'); return; }
         const reg = buildRegisterMatrix();
+        saveCsv(`IDB_Pole_Register_${new Date().toISOString().split('T')[0]}.csv`, reg.headers, reg.rows);
+    }
+
+    // Write headers + rows as a UTF-8 CSV download (BOM so Excel reads it right).
+    function saveCsv(fileName, headers, rows) {
         const esc = (v) => {
             let s = v == null ? '' : String(v);
             // Neutralise spreadsheet formula/DDE injection: a cell that starts
@@ -1726,18 +1811,29 @@ document.addEventListener('DOMContentLoaded', () => {
             // Quote on comma, quote, CR or LF (a lone CR must not split a record).
             return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
         };
-        const lines = [reg.headers.map(esc).join(',')];
-        reg.rows.forEach(row => lines.push(row.map(esc).join(',')));
-        // UTF-8 BOM so Excel opens it with correct encoding.
+        const lines = [headers.map(esc).join(',')];
+        rows.forEach(row => lines.push(row.map(esc).join(',')));
         const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `IDB_Pole_Register_${new Date().toISOString().split('T')[0]}.csv`;
+        a.download = fileName;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+    }
+
+    // Field-team list of every capture the load-time rule moved to another DT —
+    // these are the source records to correct.
+    function downloadPoleLocationConflicts() {
+        if (!poleLocationConflicts.length) { alert('No poles are recorded under two DTs.'); return; }
+        const headers = ['Pole SLRN', 'LT Pole No', 'Capture Date', 'Captured By',
+            'Recorded Feeder', 'Recorded DT', 'Recorded Upriser',
+            'Assigned Feeder (latest capture)', 'Assigned DT (latest capture)', 'Latest Capture Date'];
+        const rows = poleLocationConflicts.map(c => [c.slrn, c.poleNo, c.captured, c.user,
+            c.fromFeeder, c.fromDT, c.fromUpriser, c.toFeeder, c.toDT, c.latest]);
+        saveCsv(`IDB_Poles_Under_Two_DTs_${new Date().toISOString().split('T')[0]}.csv`, headers, rows);
     }
 
     /* =====================================================================
@@ -1946,6 +2042,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function rerenderAfterDataChange(previewNote) {
+        reconcilePoleLocations(globalData);   // uploads may put a pole on a new DT
         detectDuplicateSLRNs(globalData);
         buildAssetIndex(globalData);   // uploaded poles bring their own SLRNs
         populateFilters();     // rebuild filter option lists (new feeders/DTs/users)
