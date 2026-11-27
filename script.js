@@ -767,31 +767,143 @@ document.addEventListener('DOMContentLoaded', () => {
     const LONG_SPAN_M = 80;
 
     // Span from the previous pole on the same line: walks `items` in their
-    // given order and sets item.span (metres, or null) on each, measured to the
-    // previous item with the same lineKeyFn() value. The first pole on a line
-    // (or one without coordinates on either side) gets null.
+    // given order and sets item.span (metres, or null) and item.spanFrom (the
+    // previous located item) on each, measured to the previous item with the
+    // same lineKeyFn() value. The first pole on a line (or one without
+    // coordinates) gets null.
     function assignSpans(items, lineKeyFn, coordFn) {
         const prevByLine = new Map();
         items.forEach(it => {
             const line = lineKeyFn(it);
             const here = coordFn(it);
             const prev = prevByLine.get(line);
-            it.span = (prev && here) ? haversineM(prev, here) : null;
-            if (here) prevByLine.set(line, here);
+            it.span = (prev && here) ? haversineM(prev.c, here) : null;
+            it.spanFrom = (prev && here) ? prev.item : null;
+            if (here) prevByLine.set(line, { c: here, item: it });
             else if (!prevByLine.has(line)) prevByLine.set(line, null);
         });
         return items;
     }
     function spanStats(items) {
-        const spans = items.map(i => i.span).filter(s => s != null);
+        const withSpan = items.filter(i => i.span != null);
+        const spans = withSpan.map(i => i.span);
         const total = spans.reduce((a, b) => a + b, 0);
+        const lvl = l => withSpan.filter(i => i.spanConf && i.spanConf.level === l).length;
         return {
             count: spans.length,
             total,
             avg: spans.length ? total / spans.length : 0,
             max: spans.length ? Math.max(...spans) : 0,
-            long: spans.filter(s => s > LONG_SPAN_M).length
+            long: spans.filter(s => s > LONG_SPAN_M).length,
+            high: lvl('high'), medium: lvl('medium'), low: lvl('low')
         };
+    }
+
+    // ── GPS accuracy confidence for spans ───────────────────────────────────
+    // A span is the distance between two GPS fixes, so its uncertainty is the
+    // two poles' position errors combined: σ = √(u₁² + u₂²). Each pole's u is:
+    //   1. the capture's reported GPS accuracy, when the capture app sends one
+    //      (any of GPS_ACCURACY_FIELDS — none are captured yet);
+    //   2. else, for a pole captured 2+ times on its DT, the scatter between its
+    //      fixes (max pair distance ÷ √2) — a direct measurement;
+    //   3. else the TYPICAL error for this dataset, calibrated on every load
+    //      from all such repeat captures (median scatter ÷ √2);
+    // plus the rounding error when coordinates carry fewer than 5 decimals
+    // (4 dp ≈ ±5.6 m, 3 dp ≈ ±56 m).
+    // Confidence: High when σ ≤ 20% of the span, Medium ≤ 40%, else Low.
+    // Always Low when the two poles share identical coordinates or sit < 3 m
+    // apart (captured from the same spot, not at each pole).
+    const GPS_ACCURACY_FIELDS = ['GPS Accuracy', 'GPS Accuracy (m)', 'Accuracy', 'Accuracy (m)',
+        'Horizontal Accuracy', 'HorizontalAccuracy', 'accuracy', 'gps_accuracy', 'Location Accuracy'];
+    const SPAN_CONF_HIGH = 0.20, SPAN_CONF_MEDIUM = 0.40, SPAN_MIN_PLAUSIBLE_M = 3;
+    const GPS_TYPICAL_ERROR_FALLBACK_M = 10;
+    let gpsCalibration = { typicalErrorM: GPS_TYPICAL_ERROR_FALLBACK_M, poles: 0, medianScatterM: null };
+
+    function reportedAccuracyM(d) {
+        for (const k of GPS_ACCURACY_FIELDS) {
+            const v = parseFloat(d && d[k]);
+            if (isFinite(v) && v > 0) return v;
+        }
+        return null;
+    }
+    function coordDecimals(d) {
+        const dec = v => { const s = String(v == null ? '' : v).trim(); const i = s.indexOf('.'); return i < 0 ? 0 : s.length - i - 1; };
+        return Math.min(dec(d && d.Latitude), dec(d && d.Longitude));
+    }
+    function maxPairDistanceM(coords) {
+        let m = 0;
+        for (let i = 0; i < coords.length; i++)
+            for (let j = i + 1; j < coords.length; j++) m = Math.max(m, haversineM(coords[i], coords[j]));
+        return m;
+    }
+
+    // Calibrate the dataset's typical GPS error from poles captured more than
+    // once on the same DT. Runs on every load / upload.
+    function calibrateGpsError(data) {
+        const groups = new Map();
+        data.forEach(d => {
+            const s = poleSlrn(d), c = coordsOf(d);
+            if (!s || !c) return;
+            const k = s + '|' + dtKeyOf(d);
+            if (!groups.has(k)) groups.set(k, []);
+            groups.get(k).push(c);
+        });
+        const scatter = [];
+        groups.forEach(cs => { if (cs.length > 1) scatter.push(maxPairDistanceM(cs)); });
+        scatter.sort((a, b) => a - b);
+        if (scatter.length >= 20) {
+            const med = scatter[Math.floor(scatter.length / 2)];
+            gpsCalibration = { typicalErrorM: Math.min(30, Math.max(3, med / Math.SQRT2)), poles: scatter.length, medianScatterM: med };
+        } else {
+            gpsCalibration = { typicalErrorM: GPS_TYPICAL_ERROR_FALLBACK_M, poles: scatter.length, medianScatterM: null };
+        }
+        console.log(`[GPS] Typical position error ±${gpsCalibration.typicalErrorM.toFixed(1)} m` +
+            (gpsCalibration.medianScatterM != null ? ` (median scatter ${gpsCalibration.medianScatterM.toFixed(1)} m over ${scatter.length} re-captured poles)` : ' (fallback — too few re-captured poles)'));
+        return gpsCalibration;
+    }
+
+    // Position uncertainty of one register pole: { u (m), basis (text) }.
+    function poleGpsError(p) {
+        let u, basis;
+        if (p.accuracy != null) {
+            u = p.accuracy; basis = `GPS reported ±${Math.round(u)} m`;
+        } else if (p.coordList && p.coordList.length > 1) {
+            const sc = maxPairDistanceM(p.coordList);
+            u = Math.max(2, sc / Math.SQRT2);
+            basis = `${p.coordList.length} captures ${Math.round(sc)} m apart`;
+        } else {
+            u = gpsCalibration.typicalErrorM;
+            basis = `typical for this data ±${Math.round(u)} m`;
+        }
+        if (p.decimals != null && p.decimals < 5) {
+            const res = 111320 * Math.pow(10, -p.decimals) / 2;
+            u = Math.hypot(u, res);
+            basis += `, coordinates rounded to ${p.decimals} dp`;
+        }
+        return { u, basis };
+    }
+
+    // Rate every span in a sequenced register (items carry span/spanFrom).
+    function rateSpans(items) {
+        const coordKey = p => p.coords ? `${p.coords.lat},${p.coords.lon}` : null;
+        const seen = new Map();
+        items.forEach(p => { const k = coordKey(p); if (k) seen.set(k, (seen.get(k) || 0) + 1); });
+        items.forEach(p => {
+            p.gps = p.coords ? poleGpsError(p) : null;
+            if (p.span == null || !p.spanFrom || !p.gps || !p.spanFrom.gps) { p.spanConf = null; return; }
+            const sigma = Math.hypot(p.gps.u, p.spanFrom.gps.u);
+            const rel = sigma / Math.max(p.span, 1);
+            const reasons = [];
+            if (p.span < SPAN_MIN_PLAUSIBLE_M) reasons.push(`poles under ${SPAN_MIN_PLAUSIBLE_M} m apart — likely captured from the same spot`);
+            else if (seen.get(coordKey(p)) > 1 || seen.get(coordKey(p.spanFrom)) > 1) reasons.push('identical coordinates on another pole');
+            const level = reasons.length ? 'low' : rel <= SPAN_CONF_HIGH ? 'high' : rel <= SPAN_CONF_MEDIUM ? 'medium' : 'low';
+            p.spanConf = {
+                level, sigma, rel, reasons,
+                text: `±${Math.round(sigma)} m (${Math.round(rel * 100)}% of span). This pole: ${p.gps.basis}. Previous pole: ${p.spanFrom.gps.basis}.` +
+                    (reasons.length ? ' ' + reasons.join('; ') + '.' : '')
+            };
+        });
+        return items;
     }
 
     // ── Load-time rule: one pole, one DT ─────────────────────────────────────
@@ -1094,6 +1206,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // One pole, one DT: move captures of a pole recorded under two DTs
             // onto its latest capture's DT, then detect duplicates — before rendering.
             reconcilePoleLocations(globalData);
+            calibrateGpsError(globalData);      // typical GPS error, for span confidence
             detectDuplicateSLRNs(globalData);
 
             // Index pole ↔ building SLRNs for the Asset lookup and DT drill-down
@@ -1410,9 +1523,12 @@ document.addEventListener('DOMContentLoaded', () => {
         { header: 'DT Name', key: 'DT Name', type: 's', width: 34 },
         { header: 'DT Number', key: 'DT Number', type: 's', width: 13 },
         { header: 'Upriser No', key: 'UpriserNo', type: 'n', width: 10, fmt: '0' },
-        // Straight-line metres from the previous pole on the same Feeder/DT/upriser
-        // (captured coordinates, export sequence). Blank for the first pole on a line.
+        // Straight-line metres from the previous pole on the same DT/upriser, taken
+        // from the on-screen pole register (same sequence, same GPS confidence).
+        // Blank for the first pole on a line or a pole without coordinates.
         { header: 'Span from Previous Pole (m)', key: '__span', type: 'n', width: 14, fmt: '0' },
+        { header: 'Span ± (m)', key: '__spanSigma', type: 'n', width: 10, fmt: '0' },
+        { header: 'Span GPS Confidence', key: '__spanConf', type: 's', width: 14 },
         { header: 'Pole Type', key: 'Type of Pole', type: 's', width: 12 },
         { header: 'Buildings Connected', key: 'No of Buildings Connected to the Pole', type: 'n', width: 13, fmt: '0' },
         { header: 'Building Linked', key: '__linked', type: 's', width: 12 },
@@ -1429,7 +1545,12 @@ document.addEventListener('DOMContentLoaded', () => {
     function registerCellValue(col, d) {
         if (col.key === '__linked') return String(d['Associated Buildings SLRN'] || '').trim() ? 'Yes' : 'No';
         if (col.key === '__officer') return getDisplayName(d['User']) || d['User'] || '';
-        if (col.key === '__span') return d.span == null ? '' : Math.round(d.span);
+        if (col.key === '__span') return d.__regPole && d.__regPole.span != null ? Math.round(d.__regPole.span) : '';
+        if (col.key === '__spanSigma') return d.__regPole && d.__regPole.spanConf ? Math.round(d.__regPole.spanConf.sigma) : '';
+        if (col.key === '__spanConf') {
+            const c = d.__regPole && d.__regPole.spanConf;
+            return c ? c.level.charAt(0).toUpperCase() + c.level.slice(1) : '';
+        }
         const v = d[col.key];
         return v == null ? '' : v;
     }
@@ -1437,9 +1558,16 @@ document.addEventListener('DOMContentLoaded', () => {
     // Cleaned (de-duplicated, sequence-sorted) register as {headers, rows[][]}.
     function buildRegisterMatrix() {
         const rows = getCleanExportData();
-        // Rows arrive sorted Feeder → DT → Upriser → Pole No, so a span is the
-        // distance to the previous row on the same Feeder|DT|Upriser line.
-        assignSpans(rows, d => `${dtKeyOf(d)}|${String(d.UpriserNo ?? '').trim()}`, coordsOf);
+        // Span columns come from the on-screen pole register (one row per pole
+        // SLRN per DT), so the export carries exactly the spans and confidence
+        // the dashboard shows.
+        const regs = buildPoleRegisters(filteredData);
+        const byPole = new Map();
+        regs.forEach((poles, dtKey) => poles.forEach(p => { if (!p.reuse && p.slrn !== '—') byPole.set(dtKey + '|' + p.slrn, p); }));
+        rows.forEach(d => {
+            const slrn = String(d["Lt PoleSLRN"] || d["LT Pole No"] || '').trim().toUpperCase();
+            d.__regPole = slrn ? byPole.get(dtKeyOf(d) + '|' + slrn) || null : null;
+        });
         const headers = REGISTER_COLUMNS.map(c => c.header);
         const matrix = rows.map(d => REGISTER_COLUMNS.map(c => registerCellValue(c, d)));
         return { headers, rows: matrix, columns: REGISTER_COLUMNS };
@@ -1835,12 +1963,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 { header: 'Avg Span (m)', type: 'n', width: 12, fmt: '0' },
                 { header: 'Longest Span (m)', type: 'n', width: 14, fmt: '0' },
                 { header: 'Line (km)', type: 'n', width: 10, fmt: '0.00' },
-                { header: `Spans > ${LONG_SPAN_M} m`, type: 'n', width: 12, fmt: '0' }
+                { header: `Spans > ${LONG_SPAN_M} m`, type: 'n', width: 12, fmt: '0' },
+                { header: 'High-Confidence Spans', type: 'n', width: 12, fmt: '0' },
+                { header: 'Medium-Confidence Spans', type: 'n', width: 12, fmt: '0' },
+                { header: 'Low-Confidence Spans', type: 'n', width: 12, fmt: '0' }
             ],
             rows: stats.dtRows.map(r => {
                 const c = dtClassify(r);
                 const s = dtSpanSummary(r.key);
-                const sp = s.count ? [s.count, Math.round(s.avg), Math.round(s.max), +(s.total / 1000).toFixed(2), s.long] : ['', '', '', '', ''];
+                const sp = s.count ? [s.count, Math.round(s.avg), Math.round(s.max), +(s.total / 1000).toFixed(2), s.long, s.high, s.medium, s.low] : ['', '', '', '', '', '', '', ''];
                 return [r.dtName, r.feeder, r.vendor, r.boqTotal, r.actualTotal, r.concrete, r.wooden, c.progress == null ? '' : +(c.progress / 100).toFixed(4), c.status, ...sp];
             }),
             totalRow: (() => {
@@ -1848,7 +1979,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const n = all.reduce((a, s) => a + s.count, 0), km = all.reduce((a, s) => a + s.total, 0);
                 return ['TOTAL', '', '', dtTot.exp, dtTot.act, dtTot.conc, dtTot.wood, dtTot.exp > 0 ? +(dtTot.act / dtTot.exp).toFixed(4) : '', '',
                     n || '', n ? Math.round(km / n) : '', all.length ? Math.round(Math.max(...all.map(s => s.max))) : '',
-                    n ? +(km / 1000).toFixed(2) : '', all.reduce((a, s) => a + s.long, 0)];
+                    n ? +(km / 1000).toFixed(2) : '', all.reduce((a, s) => a + s.long, 0),
+                    all.reduce((a, s) => a + s.high, 0), all.reduce((a, s) => a + s.medium, 0), all.reduce((a, s) => a + s.low, 0)];
             })()
         });
         XL.utils.book_append_sheet(wb, dtWs, 'DT Performance');
@@ -2168,6 +2300,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function rerenderAfterDataChange(previewNote) {
         reconcilePoleLocations(globalData);   // uploads may put a pole on a new DT
+        calibrateGpsError(globalData);
         detectDuplicateSLRNs(globalData);
         buildAssetIndex(globalData);   // uploaded poles bring their own SLRNs
         populateFilters();     // rebuild filter option lists (new feeders/DTs/users)
@@ -5144,6 +5277,17 @@ document.addEventListener('DOMContentLoaded', () => {
         return spanStats(getPoleRegister(dtKey));
     }
 
+    // Small colour-coded GPS-confidence badge (high = green, medium = amber, low = red).
+    const SPAN_CONF_COLORS = { high: '#059669', medium: '#d97706', low: '#dc2626' };
+    function spanConfBadge(level, label, title) {
+        const c = SPAN_CONF_COLORS[level] || '#64748b';
+        const t = title || ({ high: `Span uncertainty ≤ ${SPAN_CONF_HIGH * 100}% of the span`,
+            medium: `Span uncertainty ${SPAN_CONF_HIGH * 100}–${SPAN_CONF_MEDIUM * 100}% of the span`,
+            low: `Span uncertainty > ${SPAN_CONF_MEDIUM * 100}% of the span, or the two fixes look captured from the same spot` })[level];
+        const esc = s => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+        return `<span title="${esc(t)}" style="display:inline-block;font-size:0.78em;line-height:1.3;padding:0 5px;border-radius:8px;white-space:nowrap;color:${c};background:${c}1a;border:1px solid ${c}55;">${label}</span>`;
+    }
+
     // The five span cells of a DT table row ("—" when the DT has no measurable span).
     function dtSpanCellsHTML(dtKey) {
         const s = dtSpanSummary(dtKey);
@@ -5151,8 +5295,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!s.count) {
             const dash = `<span style="color:#a0a0a0;">—</span>`;
             return `<td class="col-spanCount" ${c}>${dash}</td><td class="col-spanAvg" ${c}>${dash}</td>` +
-                `<td class="col-spanMax" ${c}>${dash}</td><td class="col-lineKm" ${c}>${dash}</td><td class="col-longSpans" ${c}>${dash}</td>`;
+                `<td class="col-spanMax" ${c}>${dash}</td><td class="col-lineKm" ${c}>${dash}</td><td class="col-longSpans" ${c}>${dash}</td>` +
+                `<td class="col-spanConf" ${c}>${dash}</td>`;
         }
+        const conf = `<span style="white-space:nowrap;">${spanConfBadge('high', s.high, `${s.high} high-confidence span(s)`)} ` +
+            `${spanConfBadge('medium', s.medium, `${s.medium} medium-confidence span(s)`)} ` +
+            `${spanConfBadge('low', s.low, `${s.low} low-confidence span(s) — open the pole register for the reasons`)}</span>`;
         const long = s.long
             ? `<span class="pr-count-warn" title="${s.long} span(s) over ${LONG_SPAN_M} m — open the pole register to see which">${s.long}</span>`
             : '0';
@@ -5161,7 +5309,8 @@ document.addEventListener('DOMContentLoaded', () => {
             `<td class="col-spanAvg" ${c}>${Math.round(s.avg)}</td>` +
             `<td class="col-spanMax" ${c}><span${maxWarn}>${Math.round(s.max)}</span></td>` +
             `<td class="col-lineKm" ${c}>${(s.total / 1000).toFixed(2)}</td>` +
-            `<td class="col-longSpans" ${c}>${long}</td>`;
+            `<td class="col-longSpans" ${c}>${long}</td>` +
+            `<td class="col-spanConf" ${c}>${conf}</td>`;
     }
 
     function addCaptureToRegister(byPole, id, slrn, reuse, d) {
@@ -5182,6 +5331,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 captures: 0,
                 coords: null,
                 coordT: -Infinity,
+                coordList: [],      // every capture's fix — their scatter measures GPS error
+                accuracy: null,     // reported GPS accuracy of the latest fix, if captured
+                decimals: null,     // coordinate decimals of the latest fix
                 reuse: reuse ? d.__slrnReuse : null
             };
             byPole.set(id, rec);
@@ -5190,7 +5342,12 @@ document.addEventListener('DOMContentLoaded', () => {
         rec.captures++;
         // Position = the latest capture that has usable coordinates.
         const c = coordsOf(d), t = captureTime(d);
-        if (c && (!rec.coords || t > rec.coordT)) { rec.coords = c; rec.coordT = t; }
+        if (c) rec.coordList.push(c);
+        if (c && (!rec.coords || t > rec.coordT)) {
+            rec.coords = c; rec.coordT = t;
+            rec.accuracy = reportedAccuracyM(d);
+            rec.decimals = coordDecimals(d);
+        }
         const up = (d["UpriserNo"] ?? '').toString().trim();
         if (up) rec.uprisers.add(up);
         rec.declared = Math.max(rec.declared, parseInt(d["No of Buildings Connected to the Pole"]) || 0);
@@ -5208,7 +5365,7 @@ document.addEventListener('DOMContentLoaded', () => {
             .sort((a, b) => num(a.uprisers[0] ?? '', b.uprisers[0] ?? '')
                 || num(a.poleNo, b.poleNo) || num(a.slrn, b.slrn));
         // Span (m) from the previous pole on the same upriser, in that sequence.
-        return assignSpans(list, p => p.uprisers[0] ?? '', p => p.coords);
+        return rateSpans(assignSpans(list, p => p.uprisers[0] ?? '', p => p.coords));
     }
 
     // Building SLRNs render as chips, collapsed past the third. The widest cell
@@ -5242,6 +5399,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const spanSummary = ss.count
             ? ` · ${ss.count} span${ss.count === 1 ? '' : 's'}, avg ${m(ss.avg)} m, longest ${m(ss.max)} m, line ${(ss.total / 1000).toFixed(2)} km`
               + (ss.long ? ` · <span class="pr-count-warn">${ss.long} span${ss.long === 1 ? '' : 's'} &gt; ${LONG_SPAN_M} m</span>` : '')
+              + ` · GPS confidence: ${spanConfBadge('high', ss.high + ' high')} ${spanConfBadge('medium', ss.medium + ' medium')} ${spanConfBadge('low', ss.low + ' low')}`
             : ' · no spans (coordinates missing)';
 
         const body = all.length ? all.map(p => {
@@ -5252,7 +5410,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const longSpan = p.span != null && p.span > LONG_SPAN_M;
             const spanCell = p.span == null
                 ? `<span class="pole-drill-none" title="${p.coords ? 'First pole on this upriser' : 'No captured coordinates'}">—</span>`
-                : `<span${longSpan ? ` class="pr-count-warn" title="Longer than ${LONG_SPAN_M} m — check for a missing pole, a numbering gap or a bad GPS fix"` : ''}>${m(p.span)}</span>`;
+                : `<span${longSpan ? ` class="pr-count-warn" title="Longer than ${LONG_SPAN_M} m — check for a missing pole, a numbering gap or a bad GPS fix"` : ''}>${m(p.span)}</span>`
+                  + (p.spanConf ? ` ${spanConfBadge(p.spanConf.level, '±' + m(p.spanConf.sigma), p.spanConf.text)}` : '');
             const reuseTag = p.reuse
                 ? `<span class="pr-count-warn" style="display:block;font-size:0.8em;" title="Same SLRN captured ${p.reuse.distance} m away on ${p.reuse.dt}. Counted there; this pole needs its own SLRN.">SLRN reuse — counted on ${p.reuse.dt.split('-').pop()}</span>`
                 : '';
@@ -7957,6 +8116,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { id: 'col-spanMax', label: 'Longest Span (m)', checked: true },
         { id: 'col-lineKm', label: 'Line (km)', checked: true },
         { id: 'col-longSpans', label: 'Spans > 80 m', checked: true },
+        { id: 'col-spanConf', label: 'Span GPS Confidence', checked: true },
         { id: 'col-progress', label: 'Progress', checked: true },
         { id: 'col-status', label: 'Status', checked: true }
     ];
