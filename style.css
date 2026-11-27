@@ -4223,7 +4223,9 @@ main.main-content .exec-summary { max-width: none; padding: 14px 18px; }
 .dashboard-container .header-controls .upload-btn { padding: 0.32rem 0.65rem; font-size: 0.76rem; white-space: nowrap; }
 .dashboard-container .view-toggle-wrapper { gap: 0.35rem !important; white-space: nowrap; }
 .dashboard-container .view-toggle-wrapper > span { font-size: 0.76rem !important; }
-@media (max-width: 1100px) {
+/* The controls need ~900px beside the title: on windows under 1400px they
+   drop to their own row (right-aligned) rather than overflow the edge. */
+@media (max-width: 1400px) {
     .dashboard-container header { flex-wrap: wrap; }
     .dashboard-container .header-controls { flex-wrap: wrap; flex: 1 1 auto; }
 }
