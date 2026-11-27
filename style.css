@@ -4277,3 +4277,24 @@ main.main-content .exec-summary { max-width: none; padding: 14px 18px; }
     border-color: hsl(var(--border)) !important;
     color: hsl(var(--foreground)) !important;
 }
+
+/* ── Home: compact Key Metrics & Parameters card (run rate + AI assistant) ── */
+#view-home .summary-grid { align-items: start; }       /* cards size to content */
+#view-home .parameter-list { gap: 0.6rem; }
+#view-home .parameter-list li { gap: 0.6rem; align-items: center; }
+#view-home .param-icon { font-size: 1.1rem; padding: 0.35rem; min-width: 2rem; }
+#view-home .parameter-list div strong { font-size: 0.95rem; margin-bottom: 0.05rem; }
+#view-home .parameter-list div p { font-size: 0.8rem; }
+#view-home .ai-assistant-container { padding: 0.8rem 0.9rem; margin-top: 0.3rem; box-shadow: none; }
+#view-home .ai-header { gap: 0.6rem; margin-bottom: 0.6rem; }
+#view-home .ai-icon { font-size: 1.35rem; padding: 0.4rem; border-radius: 9px; }
+#view-home .ai-header h3 { font-size: 0.98rem; }
+#view-home .ai-header p { font-size: 0.76rem; line-height: 1.4; }
+#view-home .ai-input-wrapper { gap: 0.5rem; }
+#view-home .ai-input-wrapper input { padding: 0.5rem 0.75rem; font-size: 0.84rem; }
+#view-home .ai-input-wrapper button { padding: 0 1.1rem; font-size: 0.84rem; }
+#view-home .ai-suggestions { gap: 0.35rem; margin-top: 0.55rem; }
+#view-home .ai-chip { padding: 0.22rem 0.6rem; font-size: 0.72rem; }
+/* The answer box reserved ~90px while hidden; collapse it until there is an answer. */
+#view-home .ai-response:not(.visible) { display: none; }
+#view-home .ai-response { margin-top: 0.6rem; padding: 0.7rem 0.8rem; font-size: 0.86rem; }
