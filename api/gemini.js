@@ -72,7 +72,8 @@ async function diagnose(key, model) {
 module.exports = async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     if (req.method === 'GET' && req.query && req.query.diag) {
-        res.status(200).json(await diagnose(process.env.GEMINI_API_KEY, process.env.GEMINI_MODEL || 'gemini-3.6-flash'));
+        const probe = typeof req.query.model === 'string' && /^[a-z0-9.\-]{3,60}$/.test(req.query.model) ? req.query.model : null;
+        res.status(200).json(await diagnose(process.env.GEMINI_API_KEY, probe || process.env.GEMINI_MODEL || 'gemini-3.6-flash'));
         return;
     }
     if (req.method !== 'POST') {
