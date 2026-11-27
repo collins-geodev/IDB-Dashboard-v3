@@ -61,22 +61,24 @@
 
 :root {
     /* Design Tokens from Reference */
-    --background: 220 25% 8%;
-    --foreground: 0 0% 98%;
-    --card: 220 20% 12%;
-    --card-foreground: 0 0% 98%;
-    --primary: 199 89% 48%;
-    /* Bright Blue */
+    /* Dark ("black") theme — matched to the PipWise palette
+       (pipwise-two.vercel.app): pure-black page, #131313 cards, #303030
+       hairline borders, white / #b8b8b8 text, #5297ff accent. */
+    --background: 0 0% 0%;            /* #000000 */
+    --foreground: 0 0% 100%;          /* #ffffff */
+    --card: 0 0% 7.5%;                /* #131313 */
+    --card-foreground: 0 0% 100%;
+    --primary: 216 100% 66%;          /* #5297ff */
     --primary-foreground: 0 0% 100%;
-    --secondary: 220 15% 18%;
-    --muted: 220 15% 18%;
-    --muted-foreground: 220 10% 60%;
-    --accent: 162 85% 45%;
-    /* Teal/Green */
-    --destructive: 0 84.2% 60.2%;
-    --border: 220 15% 20%;
-    --input: 220 15% 20%;
-    --ring: 199 89% 48%;
+    --secondary: 0 0% 11.5%;          /* #1d1d1d — white 11% over black */
+    --muted: 0 0% 11.5%;
+    --muted-foreground: 0 0% 72%;     /* #b8b8b8 */
+    --accent: 170 67% 40%;            /* #22ab94 (PipWise "good") */
+    --destructive: 355 91% 65%;       /* #f7525f (PipWise "bad") */
+    --warning: 36 91% 55%;            /* #f5a524 (PipWise "warn") */
+    --border: 0 0% 19%;               /* #303030 */
+    --input: 0 0% 19%;
+    --ring: 216 100% 66%;
     --radius: 0.625rem;
 
     /* Legacy Mappings */
@@ -1130,7 +1132,7 @@ footer {
 }
 
 .kpi-card-modern {
-    background-color: #1e1e24;
+    background-color: hsl(var(--secondary));
     /* Dark card bg */
     border-radius: 8px;
     /* Reduced radius */
@@ -1432,7 +1434,7 @@ footer {
 .progress-track {
     width: 100%;
     height: 4px;
-    background: #334155;
+    background: hsl(var(--secondary));
     border-radius: 2px;
     overflow: hidden;
 }
@@ -1502,7 +1504,7 @@ footer {
 
 .page-btn {
     background: transparent;
-    border: 1px solid #334155;
+    border: 1px solid hsl(var(--border));
     color: #94a3b8;
     min-width: 32px;
     height: 32px;
@@ -1551,9 +1553,9 @@ footer {
     align-items: center;
     gap: 8px;
     padding: 0.5rem 1rem;
-    background-color: #1e1e24;
+    background-color: hsl(var(--secondary));
     /* match kpi */
-    border: 1px solid #334155;
+    border: 1px solid hsl(var(--border));
     color: #fff;
     border-radius: 6px;
     cursor: pointer;
@@ -1569,8 +1571,8 @@ footer {
     top: 100%;
     right: 0;
     margin-top: 5px;
-    background-color: #1e1e24;
-    border: 1px solid #334155;
+    background-color: hsl(var(--secondary));
+    border: 1px solid hsl(var(--border));
     border-radius: 6px;
     padding: 10px;
     z-index: 100;
@@ -1593,7 +1595,7 @@ footer {
 }
 
 .col-check-item:hover {
-    background-color: #334155;
+    background-color: hsl(var(--secondary));
     border-radius: 4px;
 }
 
@@ -1613,8 +1615,8 @@ footer {
     width: 250px;
     max-height: 300px;
     overflow-y: auto;
-    background-color: #1e1e24;
-    border: 1px solid #334155;
+    background-color: hsl(var(--secondary));
+    border: 1px solid hsl(var(--border));
     border-radius: 6px;
     z-index: 999;
     margin-top: 5px;
@@ -2621,7 +2623,7 @@ header.exec-header img.exec-header-logo,
 
 /* Ensure the Leaflet map container has a dark-friendly background while tiles load */
 #map {
-    background: #0f172a;
+    background: hsl(var(--background));
 }
 
 /* ───────── Asset Attribute Popup (data point marker) ───────── */
@@ -3982,3 +3984,26 @@ html.map-expanded-lock body {
     .asset-lookup-suggestions { min-width: 200px; max-width: 88vw; }
     .pr-buildings { min-width: 160px; }
 }
+
+/* ── Vendor legend keys: colour lives on the swatch, text stays in ink ── */
+.vendor-key-row { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 0.85rem; color: hsl(var(--muted-foreground, 215 16% 57%)); }
+.vendor-key { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.vendor-key i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; background: #898781; }
+
+/* ── PipWise black theme: soft blue / violet edge glows on the black page ── */
+:root:not([data-theme="light"]) body {
+    background-color: #000;
+    background-image:
+        radial-gradient(55% 45% at 0% 80%, rgba(82, 151, 255, 0.16), transparent 70%),
+        radial-gradient(55% 45% at 100% 80%, rgba(167, 71, 227, 0.14), transparent 70%);
+    background-attachment: fixed;
+}
+:root:not([data-theme="light"]) .chart-container,
+:root:not([data-theme="light"]) .kpi-card-modern {
+    box-shadow: none;
+}
+
+/* DT table: keep DT and feeder names on one or two lines instead of 3-4. */
+#dtTable td.col-dtName { min-width: 230px; }
+#dtTable td.col-feeder { min-width: 170px; white-space: nowrap; }
+#dtTable td.col-users { min-width: 140px; }

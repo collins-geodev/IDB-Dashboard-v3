@@ -38,9 +38,6 @@
     <script>try { window.XLSXStyle = window.XLSX; } catch (e) {}</script>
     <!-- SheetJS (xlsx) — plain community build for the template upload parser -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <!-- Highcharts -->
-    <script src="https://cdn.jsdelivr.net/npm/highcharts@11/highcharts.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/highcharts@11/highcharts-3d.js"></script>
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
@@ -50,7 +47,7 @@
     <!-- ApexCharts -->
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <!-- Custom CSS -->
-    <link rel="stylesheet" href="style.css?v=20261014b">
+    <link rel="stylesheet" href="style.css?v=20261127a">
     <link rel="stylesheet" href="sidebar.css?v=20260531a">
     <link rel="stylesheet" href="insights.css?v=20260405w">
     <link rel="stylesheet" href="ai-styles.css?v=20260901b">
@@ -826,10 +823,10 @@
                             </h2>
                             <div id="map" style="flex-grow: 1; min-height: 400px; width: 100%; border-radius: 8px;">
                             </div>
-                            <div class="map-legend" style="margin-top: 10px; font-size: 0.9rem; color: #a0a0a0;">
-                                <span style="color: #0EA5E9; margin-right: 15px;">● ETC Workforce</span>
-                                <span style="color: #f97316; margin-right: 15px;">● Jesom Technology</span>
-                                <span style="color: #eab308;">● Ikeja Electric</span>
+                            <div class="map-legend vendor-key-row" style="margin-top: 10px;">
+                                <span class="vendor-key"><i data-vendor-dot="ETC Workforce"></i>ETC Workforce</span>
+                                <span class="vendor-key"><i data-vendor-dot="Jesom Technology"></i>Jesom Technology</span>
+                                <span class="vendor-key"><i data-vendor-dot="Ikeja Electric"></i>Ikeja Electric</span>
                             </div>
                             <div class="map-legend" style="margin-top: 4px; font-size: 0.8rem; color: #a0a0a0;" title="IKEDC UT &amp; BU Boundary Realignment 2026 — 5 BUs, 38 UTs (Abule Egba BU collapsed)">
                                 <span style="margin-right: 10px;">2026 BUs:</span>
@@ -857,13 +854,11 @@
                 <section class="vendor-section" id="vendor" style="margin-bottom: 2rem;">
                     <div class="charts-grid">
                         <div class="chart-container" style="display: flex; flex-direction: column;">
-                            <h2 style="display: flex; align-items: center; gap: 10px; margin-bottom: 1rem;">📊 Total
-                                Assets Enumerated (Vendor)</h2>
+                            <h2>Unique Poles Captured by Vendor</h2>
                             <div id="vendorTotalChart" style="flex: 1; min-height: 350px;"></div>
                         </div>
                         <div class="chart-container" style="display: flex; flex-direction: column;">
-                            <h2 style="display: flex; align-items: center; gap: 10px; margin-bottom: 1rem;">⚡ Average
-                                Daily Run Rate (Vendor)</h2>
+                            <h2>Average Run Rate — Poles per Officer per Day</h2>
                             <div id="vendorRunRateChart" style="flex: 1; min-height: 350px;"></div>
                         </div>
                     </div>
@@ -873,7 +868,7 @@
                 <section class="charts-grid" id="charts">
                     <!-- User Performance Bar Chart -->
                     <div class="chart-container wide">
-                        <h2>User Performance (Records Captured)</h2>
+                        <h2>Top Field Officers by Poles Captured</h2>
                         <div id="userPerformanceChart"></div>
                     </div>
 
@@ -881,20 +876,20 @@
                     <div class="chart-split-row">
                         <!-- Activity Over Time -->
                         <div class="chart-container">
-                            <h2>Daily Run Rate Comparison: All Vendors</h2>
+                            <h2>Daily Poles Captured by Vendor</h2>
                             <div id="projectVelocityChart"></div>
                         </div>
 
                         <!-- Pole Type Distribution -->
                         <div class="chart-container">
-                            <h2>Pole Type Distribution</h2>
+                            <h2>Pole Material Mix</h2>
                             <div id="poleTypeChart"></div>
                         </div>
                     </div>
 
-                    <!-- Issues by Field Staff (Stacked Bar) -->
+                    <!-- Cumulative poles captured (replaces the simulated issues chart) -->
                     <div class="chart-container wide">
-                        <h2>Distribution of Reported Issues by Field Staff</h2>
+                        <h2>Cumulative Poles Captured</h2>
                         <div id="staffIssuesChart"></div>
                     </div>
 
@@ -902,13 +897,13 @@
                     <div class="split-row">
                         <!-- Undertaking Breakdown -->
                         <div class="chart-container">
-                            <h2>Undertaking Distribution</h2>
+                            <h2>Poles by Undertaking</h2>
                             <div id="undertakingChart"></div>
                         </div>
 
                         <!-- Feeder Breakdown -->
                         <div class="chart-container">
-                            <h2>Top Feeders by Captured Assets</h2>
+                            <h2>Top 10 Feeders by Poles Captured</h2>
                             <div id="feederChart"></div>
                         </div>
                     </div>
@@ -953,7 +948,7 @@
 
                             <!-- Existing Search (Kept for functionality, but styled to fit) -->
                             <input type="text" id="dtSearchInput" placeholder="Search Data..."
-                                style="padding: 0.5rem; border-radius: 6px; border: 1px solid #334155; background: #1e1e24; color: #fff; width: 200px;"
+                                style="padding: 0.5rem; border-radius: 6px; border: 1px solid hsl(var(--border)); background: hsl(var(--secondary)); color: hsl(var(--foreground)); width: 200px;"
                                 autocomplete="off">
                             <div id="searchSuggestions" class="search-suggestions"></div>
                         </div>
@@ -1014,7 +1009,7 @@
     <script src="convex-client.js?v=20260710a"></script>
     <script src="auth-footprint.js?v=20260705a"></script>
     <script src="dashboard-auth.js?v=20260707b"></script>
-    <script src="script.js?v=20261127i"></script>
+    <script src="script.js?v=20261127j"></script>
 </body>
 
 </html>

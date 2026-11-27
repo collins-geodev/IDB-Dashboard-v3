@@ -1343,7 +1343,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!ts) return NaN;
         const m = ts.toString().trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2}))?/);
         if (!m) return NaN;
-        const [, mm, dd, yyyy, hh = "0", mi = "0"] = m;
+        let [, mm, dd, yyyy, hh = "0", mi = "0"] = m;
+        // Most rows are mm/dd/yyyy, but some are dd/mm/yyyy ("21/08/2026"):
+        // a first part over 12 can only be a day, so swap. Ambiguous stays mm/dd.
+        if (+mm > 12 && +dd <= 12) [mm, dd] = [dd, mm];
         return new Date(+yyyy, +mm - 1, +dd, +hh, +mi).getTime();
     }
 
@@ -2108,8 +2111,8 @@ document.addEventListener('DOMContentLoaded', () => {
             light,
             mode: light ? 'light' : 'dark',
             text: light ? '#1e293b' : '#fafafa',
-            muted: light ? '#475569' : '#a0a0a0',
-            grid: light ? 'rgba(15,23,42,0.12)' : 'rgba(255,255,255,0.08)'
+            muted: light ? '#475569' : '#b8b8b8',
+            grid: light ? '#e8e8e3' : 'rgba(255,255,255,0.07)'
         };
     }
 
@@ -2144,7 +2147,75 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Drop-in for Plotly.newPlot that applies the active theme first.
     function themedPlot(id, traces, layout, config) {
-        return Plotly.newPlot(id, traces, applyPlotlyTheme(layout), config);
+        return Plotly.newPlot(id, traces, applyPlotlyTheme(layout),
+            Object.assign({ responsive: true, displaylogo: false,
+                modeBarButtonsToRemove: ['lasso2d', 'select2d', 'autoScale2d', 'toggleSpikelines'] }, config));
+    }
+
+    // ── Vendor identity colours — ONE palette for every chart, the map, the
+    // Home summary and the PDF, so a vendor is always the same colour.
+    // Validated with the dataviz palette checker (all pairs; light on #ffffff,
+    // dark on the #131313 PipWise card): blue / orange / teal pass CVD separation,
+    // the normal-vision floor and 3:1 contrast in dark. (The old sky / orange /
+    // yellow set failed: yellow was too pale on white and too close to orange.)
+    const VENDOR_ORDER = ['ETC Workforce', 'Jesom Technology', 'Ikeja Electric'];
+    const VENDOR_PALETTE = {
+        light: { 'ETC Workforce': '#2a78d6', 'Jesom Technology': '#eb6834', 'Ikeja Electric': '#1baf7a' },
+        dark:  { 'ETC Workforce': '#3987e5', 'Jesom Technology': '#d95926', 'Ikeja Electric': '#199e70' }
+    };
+    const VENDOR_OTHER_COLOR = '#898781';
+    function vendorColor(name, mode) {
+        const m = mode || chartTheme().mode;
+        return (VENDOR_PALETTE[m] || VENDOR_PALETTE.light)[name] || VENDOR_OTHER_COLOR;
+    }
+    // Paint every HTML legend swatch marked data-vendor-dot="<vendor>".
+    function paintVendorKeys() {
+        document.querySelectorAll('[data-vendor-dot]').forEach(el => {
+            el.style.background = vendorColor(el.getAttribute('data-vendor-dot'));
+        });
+    }
+
+    // Shared chart chrome: transparent card background, system sans, solid
+    // hairline grid, recessive axes, a styled hover label and no chart title
+    // (the card heading names the chart). Each chart passes only what differs.
+    function baseChartLayout(extra) {
+        const t = chartTheme();
+        const grid = t.light ? '#e8e8e3' : 'rgba(255,255,255,0.07)';
+        const axisLine = t.light ? '#c3c2b7' : '#383835';
+        const axis = (a) => Object.assign({
+            gridcolor: grid, gridwidth: 1, zeroline: false, linecolor: axisLine,
+            tickfont: { size: 11, color: t.muted }, title: { text: '', font: { size: 11, color: t.muted } },
+            automargin: true, fixedrange: true
+        }, a);
+        const L = Object.assign({
+            paper_bgcolor: 'rgba(0,0,0,0)',
+            plot_bgcolor: 'rgba(0,0,0,0)',
+            font: { family: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif', size: 12, color: t.text },
+            margin: { t: 16, r: 16, b: 40, l: 48 },
+            showlegend: false,
+            legend: { orientation: 'h', x: 0, xanchor: 'left', y: 1.02, yanchor: 'bottom', font: { size: 11, color: t.text }, bgcolor: 'rgba(0,0,0,0)' },
+            hoverlabel: { bgcolor: t.light ? '#ffffff' : '#131313', bordercolor: t.light ? '#d4d4cf' : '#383835', font: { color: t.text, size: 12 } },
+            bargap: 0.35
+        }, extra || {});
+        L.xaxis = axis(Object.assign({ showgrid: false, showline: true }, (extra || {}).xaxis));
+        L.yaxis = axis(Object.assign({ showgrid: true, showline: false }, (extra || {}).yaxis));
+        return L;
+    }
+
+    // Capture day → Date. Field data mixes mm/dd/yyyy (most rows) with some
+    // dd/mm/yyyy rows (e.g. "21/08/2026") and ISO dates. A first part > 12 can
+    // only be a day, so those are read as dd/mm; ambiguous ones stay mm/dd.
+    function parseCaptureDay(s) {
+        const str = String(s == null ? '' : s).trim();
+        const m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+        if (m) {
+            let a = +m[1], b = +m[2];
+            const [mm, dd] = (a > 12 && b <= 12) ? [b, a] : [a, b];
+            const d = new Date(+m[3], mm - 1, dd);
+            return isNaN(d) ? null : d;
+        }
+        const d = new Date(str.split(/[ T]/)[0]);
+        return isNaN(d) ? null : d;
     }
 
     /* =====================================================================
@@ -3954,7 +4025,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Vendors — each pole attributed to one vendor so the bars sum to the total
         const vendorCounts = uniquePolesByGroupExclusive(data, d => d.Vendor_Name || 'Other');
         const sortedVendors = Object.entries(vendorCounts).sort((a, b) => b[1] - a[1]);
-        const vColors = { 'ETC Workforce': '#0EA5E9', 'Jesom Technology': '#f97316', 'Ikeja Electric': '#eab308' };
+        const vColors = Object.fromEntries(VENDOR_ORDER.map(v => [v, vendorColor(v)]));
 
         // Officers (unique poles per officer, all logins of an officer merged)
         const userCounts = uniquePolesByGroup(data, userFacetKey);
@@ -4428,6 +4499,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateDashboard() {
+        paintVendorKeys();   // HTML legend swatches follow the vendor palette + theme
         const fieldCharts = document.getElementById('charts');
         const varianceCharts = document.getElementById('variance-charts');
 
@@ -4637,422 +4709,230 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Chart Rendering Functions ---
 
-    // 1. User Performance (Bar Chart)
+    // ── Chart data helpers ─────────────────────────────────────────────────
+    // Every chart counts UNIQUE poles (by SLRN), the same basis as the KPI
+    // cards and the Home summary — raw records double-count re-captures.
+
+    // Each unique pole once, at its FIRST capture day, with that capture's vendor.
+    function firstCapturePerPole(data) {
+        const first = new Map();   // slrn -> { day: Date, vendor }
+        data.forEach(d => {
+            const slrn = poleSlrn(d); if (!slrn) return;
+            const day = parseCaptureDay(String(d["Date/timestamp"] || '').split(' ')[0]);
+            if (!day) return;
+            const cur = first.get(slrn);
+            if (!cur || day < cur.day) first.set(slrn, { day, vendor: d.Vendor_Name || 'Other' });
+        });
+        return first;
+    }
+    const isoDay = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const fmtInt = n => Math.round(n).toLocaleString();
+
+    // 1. Field officers — top 20 by unique poles, horizontal, coloured by vendor.
     function renderUserPerformanceChart() {
-        const userCounts = {};
-        const userVendors = {};
+        const TOP = 20;
+        const counts = uniquePolesByGroup(filteredData, userFacetKey);
+        const vendorOf = {};
+        filteredData.forEach(d => { const o = userFacetKey(d); if (o && !vendorOf[o]) vendorOf[o] = d.Vendor_Name || 'Other'; });
+        const ranked = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+        const top = ranked.slice(0, TOP).reverse();          // largest at the top
+        const names = top.map(([u]) => getDisplayName(u) || u);
 
-        filteredData.forEach(d => {
-            const officer = userFacetKey(d);
-            if (!officer) return;
-            userCounts[officer] = (userCounts[officer] || 0) + 1;
-            if (!userVendors[officer]) userVendors[officer] = d.Vendor_Name;
-        });
+        // One trace per vendor so the legend is real and colour follows the vendor.
+        const vendors = VENDOR_ORDER.concat(top.some(([u]) => !VENDOR_ORDER.includes(vendorOf[u])) ? ['Other'] : []);
+        const traces = vendors.map(v => ({
+            type: 'bar', orientation: 'h', name: v,
+            y: names,
+            x: top.map(([u, n]) => ((VENDOR_ORDER.includes(v) ? vendorOf[u] === v : !VENDOR_ORDER.includes(vendorOf[u])) ? n : null)),
+            marker: { color: vendorColor(v) },
+            text: top.map(([u, n]) => ((VENDOR_ORDER.includes(v) ? vendorOf[u] === v : !VENDOR_ORDER.includes(vendorOf[u])) ? fmtInt(n) : '')),
+            textposition: 'outside', cliponaxis: false,
+            textfont: { size: 11, color: chartTheme().muted },
+            hovertemplate: '<b>%{y}</b><br>' + v + '<br>%{x:,} poles<extra></extra>'
+        })).filter(t => t.x.some(x => x != null));
 
-        const sortedUsers = Object.entries(userCounts).sort((a, b) => b[1] - a[1]);
-        const xUsernames = sortedUsers.map(u => u[0]);
-        // Map usernames to full names, fallback to username if not found
-        const xLabels = xUsernames.map(u => getDisplayName(u));
-        const y = sortedUsers.map(u => u[1]);
+        const el = document.getElementById('userPerformanceChart');
+        const heading = el && el.parentElement.querySelector('h2');
+        if (heading) heading.textContent = ranked.length > TOP
+            ? `Top ${TOP} Field Officers by Poles Captured (of ${ranked.length})`
+            : 'Field Officers by Poles Captured';
 
-        // Assign colors based on vendor
-        const colors = xUsernames.map(user => {
-            const vendor = userVendors[user];
-            if (vendor === 'ETC Workforce') return '#0EA5E9'; // Blue
-            if (vendor === 'Jesom Technology') return '#f97316'; // Orange
-            return '#a0a0a0'; // Grey for others
-        });
-
-        const trace = {
-            x: xLabels, // Use full names here
-            y: y,
-            type: 'bar',
-            marker: {
-                color: colors
-            }
-        };
-
-        const layout = {
-            paper_bgcolor: 'rgba(0,0,0,0)',
-            plot_bgcolor: 'rgba(0,0,0,0)',
-            font: { color: '#fafafa' },
-            margin: { t: 50, b: 120, l: 50, r: 20 },
-            xaxis: { title: '', tickangle: -45 },
-            yaxis: { title: 'Records Captured' },
-            annotations: [
-                {
-                    xref: 'paper', yref: 'paper',
-                    x: 0.5, y: 1.12,
-                    xanchor: 'center', yanchor: 'bottom',
-                    text: '<span style="color:#0EA5E9">■</span> ETC Workforce  <span style="color:#f97316">■</span> Jesom Technology  <span style="color:#eab308">■</span> Ikeja Electric',
-                    showarrow: false,
-                    font: { size: 12, color: '#fafafa' }
-                }
-            ]
-        };
-
-        themedPlot('userPerformanceChart', [trace], layout, { responsive: true });
+        themedPlot('userPerformanceChart', traces, baseChartLayout({
+            height: Math.max(320, top.length * 24 + 70),
+            barmode: 'overlay', bargap: 0.3, showlegend: true,
+            margin: { t: 8, r: 48, b: 32, l: 8 },
+            xaxis: { showgrid: true, showline: false },
+            yaxis: { showgrid: false, tickfont: { size: 11, color: chartTheme().text } }
+        }), { displayModeBar: false });
     }
 
-    // 2. Project Velocity (Area Chart Comparison)
+    // 2. Daily poles captured — stacked by vendor on a real date axis (each pole
+    // counted once, on the day it was first captured).
     function renderProjectVelocityChart() {
-        const dateVendorCounts = {};
-
-        filteredData.forEach(d => {
-            const raw = d["Date/timestamp"] ? d["Date/timestamp"].split(' ')[0] : '';
-            if (!raw) return;
-            const vendor = d.Vendor_Name;
-            if (!dateVendorCounts[raw]) {
-                dateVendorCounts[raw] = { 'ETC Workforce': 0, 'Jesom Technology': 0, 'Ikeja Electric': 0 };
-            }
-            if (dateVendorCounts[raw][vendor] !== undefined) dateVendorCounts[raw][vendor]++;
+        const first = firstCapturePerPole(filteredData);
+        const byDay = {};                                   // iso -> { vendor: n }
+        first.forEach(({ day, vendor }) => {
+            const k = isoDay(day);
+            (byDay[k] = byDay[k] || {})[vendor] = (byDay[k][vendor] || 0) + 1;
         });
-
-        // Parse and sort dates properly
-        const parseDateStr = (s) => {
-            // Format is mm/dd/yyyy (e.g. 01/30/2026 = Jan 30)
-            const parts = s.split('/');
-            if (parts.length === 3) {
-                return new Date(parts[2], parts[0] - 1, parts[1]);
-            }
-            return new Date(s);
-        };
-
-        const sortedRaw = Object.keys(dateVendorCounts).sort((a, b) => parseDateStr(a) - parseDateStr(b));
-
-        // Format dates as readable labels
-        const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-        const dateLabels = sortedRaw.map(s => {
-            const d = parseDateStr(s);
-            return `${months[d.getMonth()]} ${d.getDate()}`;
-        });
-
-        const yETC = sortedRaw.map(d => dateVendorCounts[d]['ETC Workforce']);
-        const yJesom = sortedRaw.map(d => dateVendorCounts[d]['Jesom Technology']);
-        const yIkeja = sortedRaw.map(d => dateVendorCounts[d]['Ikeja Electric']);
-
-        // Stacked bar chart — each vendor's daily contribution is clearly visible
-        const traceETC = {
-            x: dateLabels, y: yETC, name: 'ETC Workforce', type: 'bar',
-            marker: { color: '#0EA5E9' },
-            hovertemplate: 'ETC: %{y} poles<extra></extra>'
-        };
-        const traceJesom = {
-            x: dateLabels, y: yJesom, name: 'Jesom Technology', type: 'bar',
-            marker: { color: '#f97316' },
-            hovertemplate: 'Jesom: %{y} poles<extra></extra>'
-        };
-        const traceIkeja = {
-            x: dateLabels, y: yIkeja, name: 'Ikeja Electric', type: 'bar',
-            marker: { color: '#eab308' },
-            hovertemplate: 'Ikeja: %{y} poles<extra></extra>'
-        };
-
-        // Cumulative total line overlay
-        let cumulative = 0;
-        const yCumulative = sortedRaw.map(d => {
-            cumulative += dateVendorCounts[d]['ETC Workforce'] + dateVendorCounts[d]['Jesom Technology'] + dateVendorCounts[d]['Ikeja Electric'];
-            return cumulative;
-        });
-        const traceCumulative = {
-            x: dateLabels, y: yCumulative, name: 'Cumulative Total', type: 'scatter',
-            mode: 'lines+markers',
-            line: { color: '#10b981', width: 2, dash: 'dot' },
-            marker: { size: 4, color: '#10b981' },
-            yaxis: 'y2',
-            hovertemplate: 'Total: %{y} poles<extra></extra>'
-        };
-
-        const layout = {
-            paper_bgcolor: 'rgba(0,0,0,0)',
-            plot_bgcolor: 'rgba(255,255,255,0.02)',
-            font: { color: '#e4e5e7', size: 11 },
-            barmode: 'stack',
-            xaxis: {
-                title: '',
-                tickangle: sortedRaw.length > 15 ? -45 : 0,
-                tickfont: { size: 10 },
-                gridcolor: 'rgba(255,255,255,0.05)'
-            },
-            yaxis: {
-                title: 'Daily Poles',
-                titlefont: { size: 11 },
-                gridcolor: 'rgba(255,255,255,0.06)'
-            },
-            yaxis2: {
-                title: 'Cumulative',
-                titlefont: { size: 11, color: '#10b981' },
-                tickfont: { color: '#10b981' },
-                overlaying: 'y',
-                side: 'right',
-                showgrid: false
-            },
-            margin: { t: 20, l: 50, r: 55, b: sortedRaw.length > 15 ? 90 : 50 },
-            showlegend: true,
-            legend: { orientation: 'h', y: -0.35, x: 0.5, xanchor: 'center', font: { size: 11 } },
-            bargap: 0.15
-        };
-
-        themedPlot('projectVelocityChart', [traceETC, traceJesom, traceIkeja, traceCumulative], layout, { responsive: true });
+        const days = Object.keys(byDay).sort();
+        const vendors = VENDOR_ORDER.concat(days.some(k => Object.keys(byDay[k]).some(v => !VENDOR_ORDER.includes(v))) ? ['Other'] : []);
+        const traces = vendors.map(v => ({
+            type: 'bar', name: v, x: days,
+            y: days.map(k => v === 'Other'
+                ? Object.entries(byDay[k]).filter(([n]) => !VENDOR_ORDER.includes(n)).reduce((a, [, c]) => a + c, 0)
+                : (byDay[k][v] || 0)),
+            marker: { color: vendorColor(v), line: { width: 0 } },
+            hovertemplate: '%{x|%a %d %b %Y}<br>' + v + ': %{y:,} poles<extra></extra>'
+        }));
+        const peak = Math.max(0, ...days.map(k => Object.values(byDay[k]).reduce((a, b) => a + b, 0)));
+        themedPlot('projectVelocityChart', traces, baseChartLayout({
+            height: 380, barmode: 'stack', bargap: 0.15, showlegend: true,
+            margin: { t: 8, r: 16, b: 40, l: 48 },
+            xaxis: { type: 'date', tickformat: '%d %b', showgrid: false, showline: true },
+            yaxis: { title: { text: 'Poles / day' }, range: [0, peak * 1.08 || 1] },
+            hovermode: 'x unified'
+        }));
     }
 
-    // 3. Pole Type Distribution (highcharts 3D Pie Chart)
+    // 3. Pole material — a single 100% bar with direct labels (a 2-slice pie
+    // or 3-D pie distorts the share; one proportion bar reads exactly).
     function renderPoleTypeChart() {
-        const counts = {};
-        filteredData.forEach(d => {
-            const type = d["Type of Pole"] || "Unknown";
-            counts[type] = (counts[type] || 0) + 1;
+        const counts = uniquePolesByGroupExclusive(filteredData, d => {
+            const t = String(d["Type of Pole"] || 'Unknown').trim().toUpperCase();
+            return t ? t.charAt(0) + t.slice(1).toLowerCase() : 'Unknown';
         });
-
-        const data = Object.keys(counts).map(key => {
-            let color = '#a0a0a0';
-            const upper = key.toUpperCase();
-            if (upper.includes('CONCRETE')) color = '#10b981';
-            if (upper.includes('WOOD')) color = '#ef4444';
-
+        const total = Object.values(counts).reduce((a, b) => a + b, 0) || 1;
+        const t = chartTheme();
+        // Material is not a vendor, so it uses palette slots 7 & 5 (violet,
+        // magenta) — never a vendor colour — and grey for anything else.
+        const MAT = t.light ? { Concrete: '#6250d6', Wooden: '#e87ba4' } : { Concrete: '#9085e9', Wooden: '#d55181' };
+        const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+        const traces = entries.map(([name, n]) => {
+            const pct = n / total * 100;
             return {
-                name: key,
-                y: counts[key],
-                color: color
+                type: 'bar', orientation: 'h', name, y: [''], x: [pct],
+                marker: { color: MAT[name] || '#898781', line: { color: t.light ? '#ffffff' : '#131313', width: 2 } },
+                text: [pct >= 12 ? `${name} ${pct.toFixed(1)}%` : ''], textposition: 'inside', insidetextanchor: 'middle',
+                textfont: { color: '#ffffff', size: 13 },
+                hovertemplate: `<b>${name}</b><br>${fmtInt(n)} poles · ${pct.toFixed(1)}%<extra></extra>`
             };
         });
-
-        if (typeof Highcharts === 'undefined') { console.warn('Highcharts not loaded, skipping pole type chart'); return; }
-        const ct = chartTheme();
-        Highcharts.chart('poleTypeChart', {
-            chart: {
-                type: 'pie',
-                backgroundColor: 'rgba(0,0,0,0)',
-                options3d: {
-                    enabled: true,
-                    alpha: 45
-                }
-            },
-            title: {
-                text: null
-            },
-            tooltip: {
-                pointFormat: '{series.name}: <b>{point.percentage:.1f}%</b>'
-            },
-            legend: {
-                itemStyle: { color: ct.text },
-                itemHoverStyle: { color: ct.text }
-            },
-            plotOptions: {
-                pie: {
-                    innerSize: 0,
-                    depth: 45,
-                    allowPointSelect: true,
-                    cursor: 'pointer',
-                    dataLabels: {
-                        enabled: true,
-                        format: '<b>{point.name}</b>: {point.percentage:.1f} %',
-                        style: {
-                            color: ct.text,
-                            textOutline: 'none'
-                        }
-                    },
-                    showInLegend: true
-                }
-            },
-            series: [{
-                name: 'Distribution',
-                data: data
-            }],
-            credits: {
-                enabled: false
-            }
-        });
+        const main = entries[0] || ['—', 0];
+        themedPlot('poleTypeChart', traces, baseChartLayout({
+            height: 260, barmode: 'stack', bargap: 0.1, showlegend: true,
+            legend: { orientation: 'h', x: 0, y: -0.25, yanchor: 'top', font: { size: 12, color: t.text } },
+            margin: { t: 92, r: 8, b: 40, l: 8 },
+            xaxis: { range: [0, 100], showgrid: false, showline: false, showticklabels: false },
+            yaxis: { showgrid: false, showticklabels: false },
+            annotations: [
+                { xref: 'paper', yref: 'paper', x: 0, y: 1.62, xanchor: 'left', yanchor: 'bottom', showarrow: false,
+                  text: `<b style="font-size:30px">${(main[1] / total * 100).toFixed(1)}%</b>`, font: { color: t.text } },
+                { xref: 'paper', yref: 'paper', x: 0, y: 1.3, xanchor: 'left', yanchor: 'bottom', showarrow: false,
+                  text: `of ${fmtInt(total)} poles are ${String(main[0]).toLowerCase()}`, font: { size: 12, color: t.muted } }
+            ]
+        }), { displayModeBar: false });
     }
 
-    // 3.5 Issues by Staff (Stacked Bar)
-    function renderStaffIssuesChart() {
-        // Group by User -> Issue Type -> Count
-        const userIssues = {};
-        const issuesSet = new Set();
-
-        filteredData.forEach(d => {
-            const user = userFacetKey(d);
-            const issue = d.Issue_Type;
-            if (issue === 'Good Condition') return; // Filter out 'Good' to focus on issues? Or keep all? Prompt implies distinct issues. Let's filter 'Good' to make it look like the example "Reported Issues".
-
-            issuesSet.add(issue);
-            if (!userIssues[user]) userIssues[user] = {};
-            userIssues[user][issue] = (userIssues[user][issue] || 0) + 1;
+    // 4. Cumulative poles captured — one line per vendor plus the total, on ONE
+    // axis (replaces the old dual-axis overlay and the simulated "issues" chart).
+    function renderStaffIssuesChart() { renderCumulativeChart(); }   // legacy name
+    function renderCumulativeChart() {
+        const first = firstCapturePerPole(filteredData);
+        const byDay = {};
+        first.forEach(({ day, vendor }) => {
+            const k = isoDay(day);
+            (byDay[k] = byDay[k] || {})[vendor] = (byDay[k][vendor] || 0) + 1;
         });
-
-        const issueTypes = Array.from(issuesSet); // e.g. Broken, Crooked...
-
-        // Sort users by total issues
-        const sortedUsers = Object.keys(userIssues).sort((a, b) => {
-            const totalA = Object.values(userIssues[a]).reduce((s, c) => s + c, 0);
-            const totalB = Object.values(userIssues[b]).reduce((s, c) => s + c, 0);
-            return totalB - totalA;
+        const days = Object.keys(byDay).sort();
+        const t = chartTheme();
+        const run = {}; let total = 0;
+        const series = { Total: [] }; VENDOR_ORDER.forEach(v => { series[v] = []; run[v] = 0; });
+        days.forEach(k => {
+            Object.entries(byDay[k]).forEach(([v, n]) => { total += n; if (v in run) run[v] += n; });
+            series.Total.push(total);
+            VENDOR_ORDER.forEach(v => series[v].push(run[v]));
         });
-
-        // Prepare Traces (one per issue type)
-        const traces = issueTypes.map(issue => {
-            return {
-                x: sortedUsers.map(u => getDisplayName(u)),
-                y: sortedUsers.map(u => userIssues[u][issue] || 0),
-                name: issue,
-                type: 'bar'
-            };
+        const traces = VENDOR_ORDER.map(v => ({
+            type: 'scatter', mode: 'lines', name: v, x: days, y: series[v],
+            line: { color: vendorColor(v), width: 2, shape: 'hv' },
+            hovertemplate: v + ': %{y:,}<extra></extra>'
+        }));
+        traces.unshift({
+            type: 'scatter', mode: 'lines', name: 'All vendors', x: days, y: series.Total,
+            line: { color: t.light ? '#0b0b0b' : '#f0efec', width: 2.5, shape: 'hv' },
+            hovertemplate: 'All vendors: %{y:,}<extra></extra>'
         });
-
-        const layout = {
-            barmode: 'stack',
-            paper_bgcolor: 'rgba(0,0,0,0)',
-            plot_bgcolor: 'rgba(0,0,0,0)',
-            font: { color: '#e4e5e7' },
-            xaxis: { title: '', tickangle: -45 },
-            yaxis: { title: 'Number of Issues' },
-            margin: { t: 30, b: 100, l: 50, r: 20 },
-            legend: { orientation: 'h', y: 1.1 }
-        };
-
-        themedPlot('staffIssuesChart', traces, layout, { responsive: true });
+        const last = days.length - 1;
+        themedPlot('staffIssuesChart', traces, baseChartLayout({
+            height: 360, showlegend: true, hovermode: 'x unified',
+            margin: { t: 8, r: 72, b: 40, l: 56 },
+            xaxis: { type: 'date', tickformat: '%d %b', showgrid: false, showline: true },
+            yaxis: { title: { text: 'Poles (cumulative)' }, rangemode: 'tozero' },
+            annotations: last >= 0 ? [{ x: days[last], y: series.Total[last], xanchor: 'left', yanchor: 'middle', showarrow: false,
+                text: ` <b>${fmtInt(series.Total[last])}</b>`, font: { size: 12, color: t.text } }] : []
+        }));
     }
 
-    // 4. Undertaking Breakdown (Bar Chart - Horizontal)
+    // 5. Undertakings — unique poles, single series → one colour, value at bar end.
     function renderUndertakingChart() {
-        const counts = {};
-        filteredData.forEach(d => {
-            counts[d["Undertaking"]] = (counts[d["Undertaking"]] || 0) + 1;
-        });
-
-        const sorted = Object.entries(counts).sort((a, b) => a[1] - b[1]); // Ascending for horizontal bar
-        const y = sorted.map(i => i[0]);
-        const x = sorted.map(i => i[1]);
-
-        const trace = {
-            x: x,
-            y: y,
-            type: 'bar',
-            orientation: 'h',
-            marker: {
-                color: '#f59e0b'
-            }
-        };
-
-        const layout = {
-            paper_bgcolor: 'rgba(0,0,0,0)',
-            plot_bgcolor: 'rgba(0,0,0,0)',
-            font: { color: '#e4e5e7' },
-            margin: { t: 20, l: 100, r: 20, b: 40 },
-            xaxis: { title: 'Count' }
-        };
-
-        themedPlot('undertakingChart', [trace], layout, { responsive: true });
+        const counts = uniquePolesByGroupExclusive(filteredData, d => d["Undertaking"] || 'Unknown');
+        const sorted = Object.entries(counts).sort((a, b) => a[1] - b[1]);
+        const t = chartTheme();
+        themedPlot('undertakingChart', [{
+            type: 'bar', orientation: 'h', y: sorted.map(i => i[0]), x: sorted.map(i => i[1]),
+            marker: { color: t.light ? '#2a78d6' : '#3987e5' },
+            text: sorted.map(i => fmtInt(i[1])), textposition: 'outside', cliponaxis: false,
+            textfont: { size: 11, color: t.muted },
+            hovertemplate: '<b>%{y}</b><br>%{x:,} poles<extra></extra>'
+        }], baseChartLayout({
+            height: Math.max(300, sorted.length * 34 + 60), bargap: 0.35,
+            margin: { t: 8, r: 56, b: 32, l: 8 },
+            xaxis: { showgrid: true, showline: false },
+            yaxis: { showgrid: false, tickfont: { size: 11, color: t.text } }
+        }), { displayModeBar: false });
     }
 
-    // 5. Vendor Performance Comparison (Total Records & Run Rate)
+    // 6. Vendor comparison — unique poles per vendor (each pole attributed to
+    // one vendor, so the bars sum to the Total Poles card) and run rate.
     function renderVendorPerformanceCharts() {
-        // Track records and unique (User + Date) combinations for Man-Days
-        const vendorData = {
-            'ETC Workforce': { records: 0, manDays: new Set() },
-            'Jesom Technology': { records: 0, manDays: new Set() },
-            'Ikeja Electric': { records: 0, manDays: new Set() }
-        };
-
+        const poles = uniquePolesByGroupExclusive(filteredData, d => d.Vendor_Name || 'Other');
+        const manDays = {};
         filteredData.forEach(d => {
-            const vendor = d.Vendor_Name;
-            const date = d["Date/timestamp"] ? d["Date/timestamp"].split(' ')[0] : 'Unknown';
-            const user = userFacetKey(d);
-
-            if (vendorData[vendor]) {
-                vendorData[vendor].records++;
-                vendorData[vendor].manDays.add(`${user}|${date}`); // Unique Man-Day
-            }
+            const v = d.Vendor_Name; if (!VENDOR_ORDER.includes(v)) return;
+            const day = String(d["Date/timestamp"] || '').split(' ')[0];
+            (manDays[v] = manDays[v] || new Set()).add(`${userFacetKey(d)}|${day}`);
         });
+        const vendors = VENDOR_ORDER;
+        const totals = vendors.map(v => poles[v] || 0);
+        const rates = vendors.map(v => (poles[v] || 0) / ((manDays[v] && manDays[v].size) || 1));
+        const t = chartTheme();
+        const colors = vendors.map(v => vendorColor(v));
 
-        const vendors = ['ETC Workforce', 'Jesom Technology', 'Ikeja Electric'];
+        themedPlot('vendorTotalChart', [{
+            type: 'bar', x: vendors, y: totals, marker: { color: colors },
+            text: totals.map(fmtInt), textposition: 'outside', cliponaxis: false,
+            textfont: { size: 13, color: t.text },
+            hovertemplate: '<b>%{x}</b><br>%{y:,} unique poles<extra></extra>'
+        }], baseChartLayout({
+            height: 340, bargap: 0.45,
+            yaxis: { range: [0, Math.max(...totals, 1) * 1.15] }
+        }), { displayModeBar: false });
 
-        // Data for Chart 1: Total Records
-        const totalRecords = vendors.map(v => vendorData[v].records);
-
-        // Data for Chart 2: Avg Run Rate per Field Officer (Records / Man-Days)
-        const runRates = vendors.map(v => {
-            const days = vendorData[v].manDays.size || 1;
-            return (vendorData[v].records / days);
-        });
-
-        const blueColor = '#0EA5E9'; // e.g. bright blue
-        const redColor = '#f97316'; // Jesom Orange (formerly red)
-        const greenColor = '#10b981'; // Ikeja Green
-
-        // --- Chart 1: Total Records ---
-        const traceTotal = {
-            x: vendors,
-            y: totalRecords,
-            type: 'bar',
-            text: totalRecords.map(String),
-            textposition: 'auto',
-            marker: {
-                color: [blueColor, redColor, greenColor]
-            }
-        };
-
-        const layoutTotal = {
-            title: { text: 'Total Records by Vendor', font: { color: '#e4e5e7', size: 16 } },
-            paper_bgcolor: 'rgba(0,0,0,0)',
-            plot_bgcolor: 'rgba(0,0,0,0)',
-            font: { color: '#fafafa' },
-            xaxis: { title: '' },
-            yaxis: { title: '', showgrid: true, gridcolor: '#334155' },
-            margin: { t: 40, b: 40, l: 40, r: 40 }
-        };
-
-        themedPlot('vendorTotalChart', [traceTotal], layoutTotal, { responsive: true });
-
-        // --- Chart 2: Run Rate ---
-        const traceRunRate = {
-            x: vendors,
-            y: runRates,
-            type: 'bar',
-            text: runRates.map(v => v.toFixed(1)),
-            textposition: 'auto',
-            marker: {
-                color: [blueColor, redColor, greenColor]
-            },
-            name: 'Run Rate'
-        };
-
-        // Target Line (50/day)
-        const targetLine = {
-            type: 'line',
-            x0: -0.5,
-            x1: 2.5,
-            y0: 50,
-            y1: 50,
-            line: {
-                color: '#10b981', // green
-                width: 2,
-                dash: 'dash'
-            }
-        };
-
-        const layoutRunRate = {
-            title: { text: 'Avg Daily Run Rate (Per Officer)', font: { color: '#e4e5e7', size: 16 } },
-            paper_bgcolor: 'rgba(0,0,0,0)',
-            plot_bgcolor: 'rgba(0,0,0,0)',
-            font: { color: '#fafafa' },
-            xaxis: { title: '' },
-            yaxis: { title: '', showgrid: true, gridcolor: '#334155', range: [0, Math.max(60, Math.max(...runRates) * 1.1)] }, // Ensure grid scale fits target line
-            margin: { t: 40, b: 40, l: 40, r: 40 },
-            shapes: [targetLine],
-            annotations: [{
-                x: 1,
-                y: 52,
-                xref: 'x',
-                yref: 'y',
-                text: 'Target: 50/day',
-                showarrow: false,
-                font: { color: '#10b981' }
-            }]
-        };
-
-        themedPlot('vendorRunRateChart', [traceRunRate], layoutRunRate, { responsive: true });
+        const TARGET = 50;
+        themedPlot('vendorRunRateChart', [{
+            type: 'bar', x: vendors, y: rates, marker: { color: colors },
+            text: rates.map(r => r.toFixed(1)), textposition: 'outside', cliponaxis: false,
+            textfont: { size: 13, color: t.text },
+            hovertemplate: '<b>%{x}</b><br>%{y:.1f} poles per officer-day<extra></extra>'
+        }], baseChartLayout({
+            height: 340, bargap: 0.45,
+            yaxis: { range: [0, Math.max(TARGET * 1.2, Math.max(...rates) * 1.15)] },
+            shapes: [{ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: TARGET, y1: TARGET,
+                line: { color: t.muted, width: 1.5, dash: 'dash' } }],
+            annotations: [{ xref: 'paper', x: 1, y: TARGET, xanchor: 'right', yanchor: 'bottom', showarrow: false,
+                text: `Target ${TARGET} / officer / day`, font: { size: 11, color: t.muted } }]
+        }), { displayModeBar: false });
     }
 
     function resetFilters() {
@@ -5689,37 +5569,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 
+    // Top 10 feeders by unique poles — single series, one colour, values at bar end.
     function renderFeederChart() {
-        const counts = {};
-        filteredData.forEach(d => {
-            const val = d.Feeder || "Unknown";
-            counts[val] = (counts[val] || 0) + 1;
-        });
-
-        // Top 10 Feeders
+        const counts = uniquePolesByGroupExclusive(filteredData, d => d.Feeder || 'Unknown');
         const sorted = Object.entries(counts).sort((a, b) => a[1] - b[1]).slice(-10);
-        const y = sorted.map(d => d[0]);
-        const x = sorted.map(d => d[1]);
-
-        const trace = {
-            x: x,
-            y: y,
-            type: 'bar',
-            orientation: 'h',
-            marker: { color: '#8b5cf6' } // Purple
-        };
-
-        const layout = {
-            paper_bgcolor: 'rgba(0,0,0,0)',
-            plot_bgcolor: 'rgba(0,0,0,0)',
-            font: { color: '#e4e5e7' },
-            margin: { l: 200, t: 30, b: 50, r: 20 },
-            xaxis: { title: 'Count' },
-            yaxis: { automargin: true }
-        };
-
-        const config = { responsive: true, displayModeBar: false };
-        themedPlot('feederChart', [trace], layout, config);
+        const t = chartTheme();
+        themedPlot('feederChart', [{
+            type: 'bar', orientation: 'h', y: sorted.map(d => d[0]), x: sorted.map(d => d[1]),
+            marker: { color: t.light ? '#2a78d6' : '#3987e5' },
+            text: sorted.map(d => Math.round(d[1]).toLocaleString()), textposition: 'outside', cliponaxis: false,
+            textfont: { size: 11, color: t.muted },
+            hovertemplate: '<b>%{y}</b><br>%{x:,} poles<extra></extra>'
+        }], baseChartLayout({
+            height: Math.max(300, sorted.length * 34 + 60), bargap: 0.35,
+            margin: { t: 8, r: 56, b: 32, l: 8 },
+            xaxis: { showgrid: true, showline: false },
+            yaxis: { showgrid: false, tickfont: { size: 11, color: t.text } }
+        }), { displayModeBar: false });
     }
 
     // Map control: search bar with datalist intellisense over Pole IDs / DT names / Feeders
@@ -6479,10 +6345,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!isNaN(lat) && !isNaN(lon)) {
                 dataLatLngs.push([lat, lon]); // collect every point for bounds (uncapped)
                 if (count > limit) return;    // cap only the number of drawn markers
-                let color = '#a0a0a0';
-                if (d.Vendor_Name === 'ETC Workforce') color = '#0EA5E9';
-                if (d.Vendor_Name === 'Jesom Technology') color = '#EF4444';
-                if (d.Vendor_Name === 'Ikeja Electric') color = '#eab308';
+                const color = vendorColor(d.Vendor_Name);
 
                 const marker = L.circleMarker([lat, lon], {
                     radius: 6,
@@ -7105,7 +6968,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // --- Vendor race — each pole attributed to one vendor (sums to total) ---
         const vendorCounts = uniquePolesByGroupExclusive(data, d => d.Vendor_Name || 'Other');
         const sortedVendors = Object.entries(vendorCounts).sort((a, b) => b[1] - a[1]);
-        const vendorColors = { 'ETC Workforce': '#0EA5E9', 'Jesom Technology': '#f97316', 'Ikeja Electric': '#eab308' };
+        const vendorColors = Object.fromEntries(VENDOR_ORDER.map(v => [v, vendorColor(v)]));
 
         // --- Officers (unique poles, all logins of an officer merged) ---
         const userCounts = uniquePolesByGroup(data, userFacetKey);
@@ -7204,7 +7067,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <!-- Per-Vendor Officer Performance -->
             ${(() => {
                 const vendorNames = ['ETC Workforce', 'Jesom Technology', 'Ikeja Electric'];
-                const vColors = { 'ETC Workforce': '#0EA5E9', 'Jesom Technology': '#f97316', 'Ikeja Electric': '#eab308' };
+                const vColors = Object.fromEntries(VENDOR_ORDER.map(v => [v, vendorColor(v)]));
                 const vShort = { 'ETC Workforce': 'ETC', 'Jesom Technology': 'Jesom', 'Ikeja Electric': 'Ikeja' };
                 const rows = vendorNames.map(v => {
                     const vUsers = {};
@@ -8235,7 +8098,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // ── palette ──────────────────────────────────────────────────
                 const setColor = (hex) => [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
                 const BLUE = setColor('#1e40af'), INK = setColor('#1f2937'), SLATE = setColor('#475569'), MUTE = setColor('#94a3b8');
-                const vendorColor = (name) => name === 'ETC Workforce' ? setColor('#0ea5e9') : name === 'Jesom Technology' ? setColor('#ef4444') : name === 'Ikeja Electric' ? setColor('#eab308') : setColor('#64748b');
+                const pdfVendorColor = (name) => setColor(vendorColor(name, 'light'));
                 const PALETTE = ['#0ea5e9', '#b45309', '#10b981', '#8b5cf6', '#64748b', '#ec4899', '#f59e0b'].map(setColor);
                 const STATUS_COLORS = { 'Completed': setColor('#059669'), 'Near Complete': setColor('#f59e0b'), 'In Progress': setColor('#3b82f6'), 'Not Started': setColor('#94a3b8') };
 
@@ -8491,9 +8354,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const dcx1 = ml + 26, dcx2 = ml + cw / 2 + 26;
                 doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(...INK);
                 doc.text('Vendor Share', ml, y); doc.text('Pole Type Mix', ml + cw / 2, y);
-                const vendSegs = stats.vendors.map(v => ({ value: v.count, rgb: vendorColor(v.name) }));
+                const vendSegs = stats.vendors.map(v => ({ value: v.count, rgb: pdfVendorColor(v.name) }));
                 drawDonut(dcx1, donutTop + 20, 18, 10.5, vendSegs, stats.totalUnique.toLocaleString(), 'poles');
-                drawLegend(dcx1 + 24, donutTop + 12, stats.vendors.map(v => ({ label: v.name, rgb: vendorColor(v.name), right: `${v.pct.toFixed(1)}%` })), cw / 2 - 52);
+                drawLegend(dcx1 + 24, donutTop + 12, stats.vendors.map(v => ({ label: v.name, rgb: pdfVendorColor(v.name), right: `${v.pct.toFixed(1)}%` })), cw / 2 - 52);
                 const typeSegs = stats.poleTypes.slice(0, 6).map((t, i) => ({ value: t.count, rgb: PALETTE[i % PALETTE.length] }));
                 drawDonut(dcx2, donutTop + 20, 18, 10.5, typeSegs, stats.dominantPole ? stats.dominantPole.pct.toFixed(0) + '%' : '', stats.dominantPole ? stats.dominantPole.type : '');
                 drawLegend(dcx2 + 24, donutTop + 12, stats.poleTypes.slice(0, 6).map((t, i) => ({ label: t.type, rgb: PALETTE[i % PALETTE.length], right: `${t.pct.toFixed(1)}%` })), cw / 2 - 52);
