@@ -32,50 +32,43 @@ current dashboard scope, then a QUESTION. Rules:
   lists, **bold** for key numbers and names. No tables, no code blocks, no links, no HTML.
 - Keep it under ~200 words unless the user explicitly asks for a detailed report.`;
 
-// TEMPORARY diagnostics (2026-11-27): GET /api/gemini?diag=1 reports whether
-// the key is set, which models the key can see, and how the configured model
-// responds to a tiny prompt. Never returns the key itself. Remove after use.
-async function diagnose(key, model) {
-    const timed = async (url, opts, ms) => {
-        const c = new AbortController(); const t = setTimeout(() => c.abort(), ms); const t0 = Date.now();
-        try {
-            const r = await fetch(url, Object.assign({ signal: c.signal }, opts));
-            const text = await r.text();
-            return { status: r.status, ms: Date.now() - t0, text };
-        } catch (e) {
-            return { status: e && e.name === 'AbortError' ? 'timeout' : 'error', ms: Date.now() - t0, text: String(e && e.message || '') };
-        } finally { clearTimeout(t); }
-    };
-    const out = {
-        keyPresent: !!key,
-        keyShape: key ? ((key.startsWith('AIza') ? 'AIza… ' : 'non-standard prefix, ') + key.length + ' chars') : null,
-        model, modelFromEnv: !!process.env.GEMINI_MODEL, region: process.env.VERCEL_REGION || null
-    };
-    if (!key) return out;
-    const base = 'https://generativelanguage.googleapis.com/v1beta/models';
-    const list = await timed(base + '?pageSize=1000', { headers: { 'x-goog-api-key': key } }, 10000);
-    out.listModels = { status: list.status, ms: list.ms };
+// Models tried in order. Measured 2026-11-27 from Vercel with this key:
+// the lite models answer in under a second, while gemini-3.6-flash,
+// 3.5-flash, 3.8-flash and flash-latest hung past 15s or returned 503
+// "high demand", and gemini-2.5-flash is retired (404). GEMINI_MODEL, when
+// set in Vercel, is tried first.
+const DEFAULT_MODELS = ['gemini-flash-lite-latest', 'gemini-3.5-flash-lite', 'gemini-3-flash-preview'];
+// Whole request must finish inside the dashboard's 25s client timeout.
+const TOTAL_BUDGET_MS = 21000;
+const PER_MODEL_MS = 12000;
+
+async function callModel(model, key, payload, ms) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
     try {
-        const names = (JSON.parse(list.text).models || []).map(m => m.name.replace(/^models\//, ''));
-        out.listModels.count = names.length;
-        out.listModels.configuredModelListed = names.includes(model);
-        out.listModels.flashModels = names.filter(n => /flash/.test(n)).slice(0, 40);
-    } catch (e) { out.listModels.error = list.text.slice(0, 200); }
-    const gen = await timed(base + '/' + encodeURIComponent(model) + ':generateContent', {
-        method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
-        body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'Reply with the single word OK.' }] }], generationConfig: { maxOutputTokens: 64 } })
-    }, 15000);
-    out.generate = { status: gen.status, ms: gen.ms, body: gen.text.slice(0, 300) };
-    return out;
+        const upstream = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' +
+            encodeURIComponent(model) + ':generateContent', {
+            method: 'POST',
+            signal: controller.signal,
+            headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
+            body: payload,
+        });
+        if (!upstream.ok) {
+            return { error: 'upstream_' + upstream.status, detail: (await upstream.text()).slice(0, 300) };
+        }
+        const data = await upstream.json();
+        const parts = (((data.candidates || [])[0] || {}).content || {}).parts || [];
+        const answer = parts.filter(p => !p.thought).map(p => p.text || '').join('').trim();
+        return answer ? { answer } : { error: 'empty_answer' };
+    } catch (e) {
+        return { error: e && e.name === 'AbortError' ? 'upstream_timeout' : 'fetch_failed', detail: String(e && e.message || '') };
+    } finally {
+        clearTimeout(timer);
+    }
 }
 
 module.exports = async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
-    if (req.method === 'GET' && req.query && req.query.diag) {
-        const probe = typeof req.query.model === 'string' && /^[a-z0-9.\-]{3,60}$/.test(req.query.model) ? req.query.model : null;
-        res.status(200).json(await diagnose(process.env.GEMINI_API_KEY, probe || process.env.GEMINI_MODEL || 'gemini-3.6-flash'));
-        return;
-    }
     if (req.method !== 'POST') {
         res.status(405).json({ error: 'method_not_allowed' });
         return;
@@ -99,52 +92,33 @@ module.exports = async (req, res) => {
         return;
     }
 
-    // gemini-2.5-flash is retired for new API keys (upstream 404s pointing at
-    // the newer model), so default to the current flash generation.
-    const model = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
-    const url = 'https://generativelanguage.googleapis.com/v1beta/models/' +
-        encodeURIComponent(model) + ':generateContent';
+    const payload = JSON.stringify({
+        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        contents: [{
+            role: 'user',
+            parts: [{ text: 'DASHBOARD CONTEXT (JSON):\n' + contextStr + '\n\nQUESTION: ' + question }],
+        }],
+        // Roomy cap: newer models spend output tokens on internal reasoning
+        // before the visible answer, so 1024 could come back empty.
+        generationConfig: { temperature: 0.3, maxOutputTokens: 4096 },
+    });
 
-    // Give up on Google after 20s: without this an unresponsive upstream kept
-    // the function hanging until Vercel killed it at 300s (seen 2026-11-27),
-    // while the browser had long since given up. The dashboard then falls back
-    // to its built-in analytics answer.
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 20000);
-    try {
-        const upstream = await fetch(url, {
-            method: 'POST',
-            signal: controller.signal,
-            headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
-            body: JSON.stringify({
-                systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-                contents: [{
-                    role: 'user',
-                    parts: [{ text: 'DASHBOARD CONTEXT (JSON):\n' + contextStr + '\n\nQUESTION: ' + question }],
-                }],
-                // Roomy cap: newer flash models spend output tokens on internal
-                // reasoning before the visible answer, so 1024 could come back empty.
-                generationConfig: { temperature: 0.3, maxOutputTokens: 4096 },
-            }),
-        });
-        if (!upstream.ok) {
-            const detail = (await upstream.text()).slice(0, 300);
-            res.status(502).json({ error: 'upstream_' + upstream.status, detail });
+    const models = [process.env.GEMINI_MODEL, ...DEFAULT_MODELS].filter((m, i, a) => m && a.indexOf(m) === i);
+    const started = Date.now();
+    let last = { error: 'no_model' };
+    let lastModel = null;
+    for (const model of models) {
+        const left = TOTAL_BUDGET_MS - (Date.now() - started);
+        if (left < 3000) break;
+        const r = await callModel(model, key, payload, Math.min(PER_MODEL_MS, left));
+        if (r.answer) {
+            res.status(200).json({ answer: r.answer, model });
             return;
         }
-        const data = await upstream.json();
-        const parts = (((data.candidates || [])[0] || {}).content || {}).parts || [];
-        const answer = parts.map(p => p.text || '').join('').trim();
-        if (!answer) {
-            res.status(502).json({ error: 'empty_answer' });
-            return;
-        }
-        res.status(200).json({ answer, model });
-    } catch (e) {
-        const timedOut = e && e.name === 'AbortError';
-        console.error('[gemini] upstream ' + (timedOut ? 'timed out after 20s' : 'fetch failed'), model, e && e.message);
-        res.status(timedOut ? 504 : 502).json({ error: timedOut ? 'upstream_timeout' : 'fetch_failed', model });
-    } finally {
-        clearTimeout(timer);
+        console.error('[gemini] ' + model + ' failed: ' + r.error, r.detail || '');
+        last = r; lastModel = model;
+        // A bad request will fail the same way on every model.
+        if (r.error === 'upstream_400' || r.error === 'upstream_401' || r.error === 'upstream_403') break;
     }
+    res.status(last.error === 'upstream_timeout' ? 504 : 502).json({ error: last.error, detail: last.detail, model: lastModel });
 };
