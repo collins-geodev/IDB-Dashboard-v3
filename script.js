@@ -4079,18 +4079,19 @@ document.addEventListener('DOMContentLoaded', () => {
         const vendorBars = sortedVendors.map(([name, count]) => {
             const pct = ((count / total) * 100).toFixed(0);
             const color = vColors[name] || '#6b7280';
-            return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-                <span style="font-size:0.8rem;min-width:110px;color:${color};font-weight:600;">${name}</span>
+            return `<div class="ds-vbar">
+                <span style="color:${color};">${name}</span>
                 <div style="flex:1;height:6px;background:hsl(var(--muted) / 0.45);border-radius:3px;overflow:hidden;">
                     <div style="height:100%;width:${pct}%;background:${color};border-radius:3px;"></div>
                 </div>
-                <span style="font-size:0.78rem;color:var(--text-secondary);min-width:65px;text-align:right;">${fmt(count)} (${pct}%)</span>
+                <em>${fmt(count)} (${pct}%)</em>
             </div>`;
         }).join('');
 
+        const boqColor = completionPct !== null && parseFloat(completionPct) >= 50 ? '#10b981' : '#eab308';
         container.innerHTML = `
             <!-- Narrative -->
-            <p style="line-height:1.7;margin-bottom:12px;">
+            <p class="ds-narrative">
                 Across <strong>${buCount} Business Unit${buCount > 1 ? 's' : ''}</strong>,
                 <strong style="color:hsl(var(--primary));">${fmt(total)} assets</strong> have been captured
                 by <strong>${totalUsers} field officers</strong> over ${activeDays} active days
@@ -4101,51 +4102,48 @@ document.addEventListener('DOMContentLoaded', () => {
                 ${Math.abs(trendPct) > 0 ? `(${trendPct > 0 ? '+' : ''}${trendPct}%)` : ''} over recent days.
             </p>
 
-            ${completionPct !== null ? `
-            <!-- BOQ Progress -->
-            <div style="margin-bottom:14px;">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-                    <span style="font-size:0.85rem;font-weight:600;color:var(--text-secondary);">BOQ Progress</span>
-                    <span style="font-size:0.95rem;font-weight:700;color:${parseFloat(completionPct) >= 50 ? '#10b981' : '#eab308'};">${completionPct}%</span>
+            <!-- BOQ progress + key facts | vendor contribution, side by side -->
+            <div class="ds-row">
+                <div class="ds-block">
+                    ${completionPct !== null ? `
+                    <div class="ds-head"><span>BOQ Progress</span><strong style="color:${boqColor};">${completionPct}%</strong></div>
+                    <div class="ds-track"><div style="width:${completionPct}%;background:${boqColor};"></div></div>
+                    <div class="ds-caption">${fmt(total)} of ${fmt(boqTotal)} target poles</div>
+                    ` : ''}
+                    <div class="ds-chips">
+                        <span style="background:rgba(14,165,233,0.1);color:#0EA5E9;">⚡ ${fmt(total)} Poles</span>
+                        <span style="background:rgba(249,115,22,0.1);color:#f97316;">🏙️ ${dtCount} DTs</span>
+                        <span style="background:rgba(16,185,129,0.1);color:#10b981;">🔌 ${feederCount} Feeders</span>
+                        <span style="background:rgba(234,179,8,0.1);color:#eab308;">📍 ${utCount} Undertakings</span>
+                    </div>
                 </div>
-                <div style="height:8px;background:hsl(var(--muted) / 0.45);border-radius:4px;overflow:hidden;">
-                    <div style="height:100%;width:${completionPct}%;background:${parseFloat(completionPct) >= 50 ? '#10b981' : '#eab308'};border-radius:4px;transition:width 0.5s;"></div>
+                <div class="ds-block">
+                    <div class="ds-head"><span>Vendor Contribution</span></div>
+                    ${vendorBars}
                 </div>
-                <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:3px;">${fmt(total)} of ${fmt(boqTotal)} target poles</div>
-            </div>
-            ` : ''}
-
-            <!-- Vendor Race -->
-            <div style="margin-bottom:14px;">
-                <span style="font-size:0.85rem;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:6px;">Vendor Contribution</span>
-                ${vendorBars}
-            </div>
-
-            <!-- Key Facts Row -->
-            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
-                <span style="background:rgba(14,165,233,0.1);padding:5px 12px;border-radius:6px;color:#0EA5E9;font-size:0.85rem;font-weight:600;">⚡ ${fmt(total)} Poles</span>
-                <span style="background:rgba(249,115,22,0.1);padding:5px 12px;border-radius:6px;color:#f97316;font-size:0.85rem;font-weight:600;">🏙️ ${dtCount} DTs</span>
-                <span style="background:rgba(16,185,129,0.1);padding:5px 12px;border-radius:6px;color:#10b981;font-size:0.85rem;font-weight:600;">🔌 ${feederCount} Feeders</span>
-                <span style="background:rgba(234,179,8,0.1);padding:5px 12px;border-radius:6px;color:#eab308;font-size:0.85rem;font-weight:600;">📍 ${utCount} Undertakings</span>
             </div>
 
-            <!-- Insights Row -->
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:0.82rem;">
-                <div style="background:hsl(var(--secondary) / 0.5);padding:8px 10px;border-radius:6px;border-left:3px solid ${linkColor};">
-                    <div style="color:var(--text-secondary);font-size:0.75rem;">Building Linkage</div>
-                    <div style="font-weight:700;color:${linkColor};">${link.pct.toFixed(1)}% linked <span style="font-weight:400;color:var(--text-secondary);">/ ${fmt(link.unlinked)} to tag</span></div>
+            <!-- Insights: one row of four -->
+            <div class="ds-facts">
+                <div style="border-left-color:${linkColor};">
+                    <span>Building Linkage</span>
+                    <b style="color:${linkColor};">${link.pct.toFixed(1)}% linked</b>
+                    <em>${fmt(link.unlinked)} to tag</em>
                 </div>
-                <div style="background:hsl(var(--secondary) / 0.5);padding:8px 10px;border-radius:6px;border-left:3px solid hsl(var(--primary));">
-                    <div style="color:var(--text-secondary);font-size:0.75rem;">Top Officer</div>
-                    <div style="font-weight:700;color:hsl(var(--foreground));">${topOfficer ? getDisplayName(topOfficer[0]) : 'N/A'} <span style="font-weight:400;color:var(--text-secondary);">(${topOfficer ? fmt(topOfficer[1]) : 0} poles)</span></div>
+                <div style="border-left-color:hsl(var(--primary));">
+                    <span>Top Officer</span>
+                    <b>${topOfficer ? getDisplayName(topOfficer[0]) : 'N/A'}</b>
+                    <em>${topOfficer ? fmt(topOfficer[1]) : 0} poles</em>
                 </div>
-                <div style="background:hsl(var(--secondary) / 0.5);padding:8px 10px;border-radius:6px;border-left:3px solid #eab308;">
-                    <div style="color:var(--text-secondary);font-size:0.75rem;">Dominant Material</div>
-                    <div style="font-weight:700;color:hsl(var(--foreground));">${dominantPole ? dominantPole[0].charAt(0) + dominantPole[0].slice(1).toLowerCase() : 'N/A'} <span style="font-weight:400;color:var(--text-secondary);">(${dominantPolePct}%)</span></div>
+                <div style="border-left-color:#eab308;">
+                    <span>Dominant Material</span>
+                    <b>${dominantPole ? dominantPole[0].charAt(0) + dominantPole[0].slice(1).toLowerCase() : 'N/A'}</b>
+                    <em>${dominantPolePct}% of poles</em>
                 </div>
-                <div style="background:hsl(var(--secondary) / 0.5);padding:8px 10px;border-radius:6px;border-left:3px solid #f97316;">
-                    <div style="color:var(--text-secondary);font-size:0.75rem;">Avg per Officer</div>
-                    <div style="font-weight:700;color:hsl(var(--foreground));">${totalUsers > 0 ? Math.round(total / totalUsers) : 0} poles <span style="font-weight:400;color:var(--text-secondary);">/ ${totalUsers} officers</span></div>
+                <div style="border-left-color:#f97316;">
+                    <span>Avg per Officer</span>
+                    <b>${totalUsers > 0 ? Math.round(total / totalUsers) : 0} poles</b>
+                    <em>${totalUsers} officers</em>
                 </div>
             </div>
         `;

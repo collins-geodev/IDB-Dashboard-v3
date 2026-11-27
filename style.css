@@ -4329,3 +4329,31 @@ main.main-content .exec-summary { max-width: none; padding: 14px 18px; }
 #view-home .rec-item h4 { grid-column: 1; grid-row: 1; }
 #view-home .rec-item .rec-more { grid-column: 2; grid-row: 1; margin-top: 0; white-space: nowrap; }
 #view-home .rec-item .rec-text { grid-column: 1 / -1; grid-row: 2; -webkit-line-clamp: 2; }
+
+/* ── Home: compact "The Data Speaking" card ────────────────────────────────
+   Narrative, then BOQ progress + key facts beside the vendor bars, then the
+   four insight boxes in one row. */
+#exec-dynamic-content .ds-narrative { font-size: 0.86rem; line-height: 1.5; margin-bottom: 0.65rem; color: var(--text-secondary); }
+#exec-dynamic-content .ds-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 0.65rem; }
+#exec-dynamic-content .ds-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 0.76rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.3rem; }
+#exec-dynamic-content .ds-head strong { font-size: 0.9rem; }
+#exec-dynamic-content .ds-track { height: 6px; background: hsl(var(--muted) / 0.45); border-radius: 3px; overflow: hidden; }
+#exec-dynamic-content .ds-track > div { height: 100%; border-radius: 3px; transition: width 0.5s; }
+#exec-dynamic-content .ds-caption { font-size: 0.68rem; color: var(--text-secondary); margin-top: 2px; }
+#exec-dynamic-content .ds-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 0.5rem; }
+#exec-dynamic-content .ds-chips span { padding: 2px 8px; border-radius: 5px; font-size: 0.72rem; font-weight: 600; white-space: nowrap; }
+#exec-dynamic-content .ds-vbar { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+#exec-dynamic-content .ds-vbar > span { font-size: 0.72rem; font-weight: 600; min-width: 92px; white-space: nowrap; }
+#exec-dynamic-content .ds-vbar > em { font-style: normal; font-size: 0.68rem; color: var(--text-secondary); min-width: 64px; text-align: right; white-space: nowrap; }
+#exec-dynamic-content .ds-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+#exec-dynamic-content .ds-facts > div {
+    background: hsl(var(--secondary) / 0.5); border-left: 3px solid; border-radius: 6px;
+    padding: 5px 8px; display: flex; flex-direction: column; min-width: 0;
+}
+#exec-dynamic-content .ds-facts span { font-size: 0.64rem; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#exec-dynamic-content .ds-facts b { font-size: 0.8rem; color: hsl(var(--foreground)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#exec-dynamic-content .ds-facts em { font-style: normal; font-size: 0.66rem; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 1100px) {
+    #exec-dynamic-content .ds-row { grid-template-columns: 1fr; gap: 0.6rem; }
+    #exec-dynamic-content .ds-facts { grid-template-columns: 1fr 1fr; }
+}
