@@ -4232,3 +4232,48 @@ main.main-content .exec-summary { max-width: none; padding: 14px 18px; }
 /* When space is tight the title wraps to two lines instead of being cut off. */
 .dashboard-header-brand { min-width: 240px; }
 .dashboard-header-titles h1 { white-space: normal; overflow: visible; text-overflow: clip; }
+
+/* ── Compact sidebar (desktop) ─────────────────────────────────────────────
+   Same width; tighter padding, smaller type, and every label on one line
+   (the title and "Overview & Map" were wrapping at the larger text size). */
+@media (min-width: 769px) {
+    .sidebar { padding: 1.1rem 0.7rem; }
+    .sidebar-top h2 {
+        font-size: 1rem !important;
+        letter-spacing: 0.8px;
+        white-space: nowrap;
+        margin-bottom: 1.1rem !important;
+        padding-left: 0.6rem !important;
+    }
+    .sidebar-nav { gap: 0.2rem; }
+    .sidebar-nav a {
+        padding: 0.5rem 0.7rem;
+        font-size: 0.88rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .dash-page-links { margin-left: 0.6rem; padding-left: 0.4rem; gap: 0.1rem; }
+    .dash-page-links .sub-link { font-size: 0.8rem; padding: 0.38rem 0.55rem; }
+    .sidebar-nav .nav-link:hover { transform: translateX(2px); }
+    /* Account card */
+    .sidebar-auth { padding-top: 0.6rem; }
+    .sidebar-auth .sa-card { padding: 0.6rem; gap: 0.45rem; border-radius: 10px; }
+    .sidebar-auth .sa-avatar { width: 30px; height: 30px; font-size: 0.72rem; }
+    .sidebar-auth .sa-name { font-size: 0.78rem; }
+    .sidebar-auth .sa-email { font-size: 0.66rem; }
+    .sidebar-auth .sa-role-badge { font-size: 0.58rem; padding: 0.15rem 0.5rem; }
+    .sidebar-auth .sa-logout,
+    .sidebar-auth .sa-changepw {
+        padding: 0.38rem 0.6rem !important;
+        font-size: 0.74rem !important;
+        white-space: nowrap;
+    }
+    .sidebar-auth .sa-changepw { margin-bottom: 0.35rem !important; }
+}
+/* Change-password button: theme surface instead of a fixed blue-grey. */
+:root:not([data-theme="light"]) .sidebar-auth .sa-changepw {
+    background-color: hsl(var(--secondary)) !important;
+    border-color: hsl(var(--border)) !important;
+    color: hsl(var(--foreground)) !important;
+}
