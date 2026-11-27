@@ -47,7 +47,7 @@
     <!-- ApexCharts -->
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <!-- Custom CSS -->
-    <link rel="stylesheet" href="style.css?v=20261127a">
+    <link rel="stylesheet" href="style.css?v=20261127b">
     <link rel="stylesheet" href="sidebar.css?v=20260531a">
     <link rel="stylesheet" href="insights.css?v=20260405w">
     <link rel="stylesheet" href="ai-styles.css?v=20260901b">
@@ -74,24 +74,16 @@
                 <button class="sidebar-close-btn" id="sidebarCloseBtn" aria-label="Close menu">&times;</button>
             </div>
             <div class="sidebar-nav">
-                <a href="#" id="nav-home" class="nav-link active">🏠 Home</a>
-                <a href="#" id="nav-dashboard" class="nav-link">📊 Dashboard</a>
+                <a href="#home" id="nav-home" class="nav-link active" data-nav-page="home">🏠 Home</a>
+                <a href="#overview" id="nav-dashboard" class="nav-link" data-nav-page="overview">📊 Dashboard</a>
 
-                <div id="dashboard-sub-links" class="hidden"
-                    style="margin-left: 1.5rem; border-left: 2px solid hsl(var(--border)); padding-left: 0.5rem; display: flex; flex-direction: column; gap: 0.3rem;">
-                    <a href="#filters" class="nav-link sub-link" style="font-size: 0.9rem; padding: 0.5rem;">🔍
-                        Filters</a>
-                    <a href="#kpis" class="nav-link sub-link" style="font-size: 0.9rem; padding: 0.5rem;">📈 KPIs</a>
-                    <a href="#map-section" class="nav-link sub-link" style="font-size: 0.9rem; padding: 0.5rem;">🗺️
-                        Map</a>
-                    <a href="#vendor" class="nav-link sub-link" style="font-size: 0.9rem; padding: 0.5rem;">🏢
-                        Vendors</a>
-                    <a href="#charts" class="nav-link sub-link" style="font-size: 0.9rem; padding: 0.5rem;">📊
-                        Charts</a>
-                    <a href="#dt-analysis" class="nav-link sub-link" style="font-size: 0.9rem; padding: 0.5rem;">📝
-                        Table</a>
-                    <a href="admin.html" class="nav-link sub-link" id="nav-admin"
-                        style="font-size: 0.9rem; padding: 0.5rem;">🛡️ Admin</a>
+                <!-- Dashboard pages: one shows at a time; filters + KPIs stay on every page. -->
+                <div id="dashboard-sub-links" class="dash-page-links">
+                    <a href="#overview" class="nav-link sub-link" data-nav-page="overview">🗺️ Overview &amp; Map</a>
+                    <a href="#vendors" class="nav-link sub-link" data-nav-page="vendors">🏢 Vendors</a>
+                    <a href="#charts" class="nav-link sub-link" data-nav-page="charts">📈 Charts</a>
+                    <a href="#dt-analysis" class="nav-link sub-link" data-nav-page="dt-analysis">📝 DT Analysis</a>
+                    <a href="admin.html" class="nav-link sub-link" id="nav-admin">🛡️ Admin</a>
                 </div>
             </div>
             <div id="auth-status" class="sidebar-auth"></div>
@@ -814,7 +806,7 @@
                 </section>
 
                 <!-- Map Section & Key Insights -->
-                <section class="map-section" id="map-section" style="margin-bottom: 2rem;">
+                <section class="map-section" id="map-section" data-page="overview" style="margin-bottom: 2rem;">
                     <div class="map-insights-grid">
 
                         <!-- Map -->
@@ -851,7 +843,7 @@
                 </section>
 
                 <!-- Vendor Performance Comparison -->
-                <section class="vendor-section" id="vendor" style="margin-bottom: 2rem;">
+                <section class="vendor-section" id="vendor" data-page="vendors" style="margin-bottom: 2rem;">
                     <div class="charts-grid">
                         <div class="chart-container" style="display: flex; flex-direction: column;">
                             <h2>Unique Poles Captured by Vendor</h2>
@@ -865,7 +857,7 @@
                 </section>
 
                 <!-- Charts Grid -->
-                <section class="charts-grid" id="charts">
+                <section class="charts-grid" id="charts" data-page="charts">
                     <!-- User Performance Bar Chart -->
                     <div class="chart-container wide">
                         <h2>Top Field Officers by Poles Captured</h2>
@@ -912,7 +904,7 @@
                 <!-- Detailed DT Analysis Table -->
                 <!-- Detailed DT Analysis Table -->
                 <!-- Variance Charts Section (Hidden by default) -->
-                <section class="charts-grid hidden" id="variance-charts">
+                <section class="charts-grid hidden" id="variance-charts" data-page="charts">
                     <!-- Target vs Actual (Bullet/Bar) -->
                     <div class="chart-container wide">
                         <h2>Target vs. Actual Progress (Feeders & DTs)</h2>
@@ -926,7 +918,7 @@
                     </div>
                 </section>
 
-                <section class="table-section" id="dt-analysis" style="margin-top: 2rem;">
+                <section class="table-section" id="dt-analysis" data-page="dt-analysis" style="margin-top: 2rem;">
                     <div class="table-controls"
                         style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 10px;">
                         <div id="tableInfo" style="color: #a0a0a0; font-size: 0.9rem;">Showing 0 of 0 DTs</div>
@@ -1009,7 +1001,7 @@
     <script src="convex-client.js?v=20260710a"></script>
     <script src="auth-footprint.js?v=20260705a"></script>
     <script src="dashboard-auth.js?v=20260707b"></script>
-    <script src="script.js?v=20261127k"></script>
+    <script src="script.js?v=20261127l"></script>
 </body>
 
 </html>

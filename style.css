@@ -4007,3 +4007,30 @@ html.map-expanded-lock body {
 #dtTable td.col-dtName { min-width: 230px; }
 #dtTable td.col-feeder { min-width: 170px; white-space: nowrap; }
 #dtTable td.col-users { min-width: 140px; }
+
+/* ── Page navigation ───────────────────────────────────────────────────────
+   One dashboard page shows at a time (see navigateToPage in script.js). */
+.page-hidden { display: none !important; }
+.dash-page-links {
+    margin-left: 1.5rem;
+    border-left: 2px solid hsl(var(--border));
+    padding-left: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+.dash-page-links .sub-link { font-size: 0.9rem; padding: 0.5rem; }
+.dash-page-links .sub-link.active {
+    background: hsl(var(--primary) / 0.14);
+    color: hsl(var(--primary));
+    font-weight: 600;
+}
+/* Filters stay in reach on every page: pinned to the top while scrolling.
+   z 950 sits above the (isolated) map, below the 1000 filter drop-downs. */
+#view-dashboard .filters-section {
+    position: sticky;
+    top: 0;
+    z-index: 950;
+    box-shadow: 0 6px 18px -10px rgba(0, 0, 0, 0.45);
+}
+#map { isolation: isolate; }

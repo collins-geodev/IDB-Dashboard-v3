@@ -4498,37 +4498,115 @@ document.addEventListener('DOMContentLoaded', () => {
         updateDashboard();
     }
 
-    function updateDashboard() {
-        paintVendorKeys();   // HTML legend swatches follow the vendor palette + theme
-        const fieldCharts = document.getElementById('charts');
-        const varianceCharts = document.getElementById('variance-charts');
-
-        if (viewMode === 'boq') {
-            // Show Variance View
-            if (fieldCharts) fieldCharts.classList.add('hidden');
-            if (varianceCharts) varianceCharts.classList.remove('hidden');
-            updateKPIs(); // Will handle variance logic
-            renderVarianceCharts();
-            renderDTTable(); // Will handle variance columns
-        } else {
-            // Show Field View
-            if (fieldCharts) fieldCharts.classList.remove('hidden');
-            if (varianceCharts) varianceCharts.classList.add('hidden');
-            updateKPIs();
+    // What each dashboard page draws. Pages are rendered lazily: a data or
+    // theme change marks every page out of date, the visible page redraws at
+    // once, and the others redraw when they are next opened — so charts never
+    // lay out inside a hidden (zero-width) container, and filtering is faster.
+    const PAGE_RENDERERS = {
+        overview: () => { renderMap(); updateKeyInsights(); },
+        vendors: () => { renderVendorPerformanceCharts(); },
+        charts: () => {
+            if (viewMode === 'boq') { renderVarianceCharts(); return; }
             renderUserPerformanceChart();
             renderProjectVelocityChart();
             renderPoleTypeChart();
             renderStaffIssuesChart();
             renderUndertakingChart();
             renderFeederChart();
-            renderVendorPerformanceCharts();
-            renderDTTable();
+        },
+        'dt-analysis': () => { renderDTTable(); }
+    };
+    const DASH_PAGES = Object.keys(PAGE_RENDERERS);
+    const PAGE_ALIASES = {
+        home: 'home', overview: 'overview', map: 'overview', 'map-section': 'overview',
+        kpis: 'overview', filters: 'overview', dashboard: 'overview',
+        vendors: 'vendors', vendor: 'vendors', charts: 'charts', 'variance-charts': 'charts',
+        'dt-analysis': 'dt-analysis', table: 'dt-analysis', dt: 'dt-analysis'
+    };
+    let activePage = null;
+    const stalePages = new Set(DASH_PAGES);
+
+    function pageFromHash(hash) {
+        const k = String(hash || '').replace(/^#\/?/, '').trim().toLowerCase();
+        return PAGE_ALIASES[k] || null;
+    }
+    function savedPage() {
+        try { return PAGE_ALIASES[localStorage.getItem('idb-page')] || null; } catch (e) { return null; }
+    }
+    function renderPageIfStale(page) {
+        if (!stalePages.has(page) || !PAGE_RENDERERS[page]) return;
+        // Nothing to draw until the data has loaded.
+        if (!Array.isArray(globalData) || !globalData.length) return;
+        stalePages.delete(page);
+        try { PAGE_RENDERERS[page](); } catch (e) { console.error(`[Page] ${page} render failed:`, e); }
+    }
+
+    function navigateToPage(page, opts) {
+        opts = opts || {};
+        page = PAGE_ALIASES[page] || 'overview';
+        const viewHome = document.getElementById('view-home');
+        const viewDashboard = document.getElementById('view-dashboard');
+        const isHome = page === 'home';
+        if (viewHome) viewHome.classList.toggle('hidden', !isHome);
+        if (viewDashboard) viewDashboard.classList.toggle('hidden', isHome);
+
+        // One page section visible; the shared header/filters/KPIs have no data-page.
+        document.querySelectorAll('#view-dashboard [data-page]').forEach(el => {
+            el.classList.toggle('page-hidden', el.getAttribute('data-page') !== page);
+        });
+        // Sidebar: the page link is active; "Dashboard" stays highlighted on any dashboard page.
+        document.querySelectorAll('[data-nav-page]').forEach(a => {
+            const p = a.getAttribute('data-nav-page');
+            const on = a.id === 'nav-dashboard' ? !isHome : p === page;
+            a.classList.toggle('active', on);
+            if (on && a.classList.contains('sub-link')) a.setAttribute('aria-current', 'page');
+            else a.removeAttribute('aria-current');
+        });
+
+        const changed = page !== activePage;
+        activePage = page;
+        try { localStorage.setItem('idb-page', page); } catch (e) {}
+        const hash = '#' + page;
+        if (location.hash !== hash && !opts.fromHash) {
+            if (opts.replace) history.replaceState(null, '', hash);
+            else history.pushState(null, '', hash);
         }
-        // Map is shared or hidden? User didn't specify. Left as is (always showing map based on field data).
-        // Maybe hide map in variance mode? User said "View Mode: Field Captures Only | BOQ vs. Actual".
-        // Usually map is useful. Detailed request didn't say hide map.
-        renderMap();
-        updateKeyInsights();
+
+        if (!isHome) {
+            renderPageIfStale(page);
+            // Leaflet / Plotly measure their container: re-measure once visible.
+            requestAnimationFrame(() => {
+                if (page === 'overview' && map) map.invalidateSize({ pan: false });
+                window.dispatchEvent(new Event('resize'));
+            });
+        }
+        if (changed && !opts.replace && !opts.keepScroll) {
+            if (isHome) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+            // Every page starts at the same spot (right under the KPI strip). If
+            // the reader was scrolled deep into the previous page, bring the new
+            // page's top into view just below the sticky filter bar; otherwise
+            // leave the scroll alone so the KPIs stay in sight.
+            const section = document.querySelector(`#view-dashboard [data-page="${page}"]:not(.hidden)`);
+            if (section) {
+                const bar = document.getElementById('filters');
+                const offset = (bar ? bar.getBoundingClientRect().height : 0) + 16;
+                const top = section.getBoundingClientRect().top + window.scrollY - offset;
+                if (window.scrollY > top) window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+            }
+        }
+    }
+
+    function updateDashboard() {
+        paintVendorKeys();   // HTML legend swatches follow the vendor palette + theme
+        const fieldCharts = document.getElementById('charts');
+        const varianceCharts = document.getElementById('variance-charts');
+        // Field view vs BOQ-variance view (both live on the Charts page).
+        if (fieldCharts) fieldCharts.classList.toggle('hidden', viewMode === 'boq');
+        if (varianceCharts) varianceCharts.classList.toggle('hidden', viewMode !== 'boq');
+
+        updateKPIs();
+        DASH_PAGES.forEach(p => stalePages.add(p));
+        if (activePage && activePage !== 'home') renderPageIfStale(activePage);
         renderStrategicRecommendations();
         updateExecutiveSummary();
     }
@@ -7152,35 +7230,24 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
     }
 
-    // Navigation Logic
-    const navHome = document.getElementById('nav-home');
-    const navDashboard = document.getElementById('nav-dashboard');
-    const viewHome = document.getElementById('view-home');
-    const viewDashboard = document.getElementById('view-dashboard');
-    const dashboardSubLinks = document.getElementById('dashboard-sub-links');
-
-    if (navHome && navDashboard) {
-        navHome.addEventListener('click', (e) => {
+    // ── Page navigation ─────────────────────────────────────────────────────
+    // The dashboard shows ONE page at a time (Overview & Map, Vendors, Charts,
+    // DT Analysis); the header, completion cards, filters, data-quality banner
+    // and KPI strip stay on every page. Each page has its own URL hash
+    // (#overview, #vendors, #charts, #dt-analysis; #home = executive summary),
+    // so Back/Forward and shared links work, and the last page is remembered.
+    // Old section anchors (#map-section, #vendor, #kpis, #filters) still land.
+    navigateToPage(pageFromHash(location.hash) || savedPage() || 'home', { replace: true });
+    window.addEventListener('hashchange', () => {
+        const p = pageFromHash(location.hash);
+        if (p && p !== activePage) navigateToPage(p, { fromHash: true });
+    });
+    document.querySelectorAll('[data-nav-page]').forEach(a => {
+        a.addEventListener('click', (e) => {
             e.preventDefault();
-            viewHome.classList.remove('hidden');
-            viewDashboard.classList.add('hidden');
-            navHome.classList.add('active');
-            navDashboard.classList.remove('active');
-            if (dashboardSubLinks) dashboardSubLinks.classList.add('hidden');
+            navigateToPage(a.getAttribute('data-nav-page'));
         });
-
-        navDashboard.addEventListener('click', (e) => {
-            e.preventDefault();
-            viewHome.classList.add('hidden');
-            viewDashboard.classList.remove('hidden');
-            navHome.classList.remove('active');
-            navDashboard.classList.add('active');
-            if (dashboardSubLinks) dashboardSubLinks.classList.remove('hidden');
-
-            // Trigger chart resize in case they were hidden
-            window.dispatchEvent(new Event('resize'));
-        });
-    }
+    });
 
 
     // --- VARIANCE LOGIC & HELPERS ---
@@ -7946,6 +8013,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Register still auto-expands below — the user scrolls down to it — but the
     // map is what a SLRN search is really asking to see.
     function revealSearchResult() {
+        // The map lives on the Overview page — switch to it first.
+        if (activePage !== 'overview') navigateToPage('overview', { keepScroll: true });
         const TARGET_ID = 'map-section';
         const jump = (behavior) => {
             const target = document.getElementById(TARGET_ID);
