@@ -4760,7 +4760,7 @@ document.addEventListener('DOMContentLoaded', () => {
         themedPlot('userPerformanceChart', traces, baseChartLayout({
             height: Math.max(320, top.length * 24 + 70),
             barmode: 'overlay', bargap: 0.3, showlegend: true,
-            margin: { t: 8, r: 48, b: 32, l: 8 },
+            margin: { t: 8, r: 48, b: 32, l: 150 },
             xaxis: { showgrid: true, showline: false },
             yaxis: { showgrid: false, tickfont: { size: 11, color: chartTheme().text } }
         }), { displayModeBar: false });
@@ -4788,6 +4788,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const peak = Math.max(0, ...days.map(k => Object.values(byDay[k]).reduce((a, b) => a + b, 0)));
         themedPlot('projectVelocityChart', traces, baseChartLayout({
             height: 380, barmode: 'stack', bargap: 0.15, showlegend: true,
+            legend: { orientation: 'h', x: 0, xanchor: 'left', y: 1.02, yanchor: 'bottom', traceorder: 'normal', font: { size: 11, color: chartTheme().text } },
             margin: { t: 8, r: 16, b: 40, l: 48 },
             xaxis: { type: 'date', tickformat: '%d %b', showgrid: false, showline: true },
             yaxis: { title: { text: 'Poles / day' }, range: [0, peak * 1.08 || 1] },
@@ -4820,15 +4821,15 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         const main = entries[0] || ['—', 0];
         themedPlot('poleTypeChart', traces, baseChartLayout({
-            height: 260, barmode: 'stack', bargap: 0.1, showlegend: true,
-            legend: { orientation: 'h', x: 0, y: -0.25, yanchor: 'top', font: { size: 12, color: t.text } },
-            margin: { t: 92, r: 8, b: 40, l: 8 },
+            height: 280, barmode: 'stack', bargap: 0.1, showlegend: true,
+            legend: { orientation: 'h', x: 0, y: -0.2, yanchor: 'top', traceorder: 'normal', font: { size: 12, color: t.text } },
+            margin: { t: 110, r: 8, b: 40, l: 8 },
             xaxis: { range: [0, 100], showgrid: false, showline: false, showticklabels: false },
             yaxis: { showgrid: false, showticklabels: false },
             annotations: [
-                { xref: 'paper', yref: 'paper', x: 0, y: 1.62, xanchor: 'left', yanchor: 'bottom', showarrow: false,
+                { xref: 'paper', yref: 'paper', x: 0, y: 1.55, xanchor: 'left', yanchor: 'bottom', showarrow: false,
                   text: `<b style="font-size:30px">${(main[1] / total * 100).toFixed(1)}%</b>`, font: { color: t.text } },
-                { xref: 'paper', yref: 'paper', x: 0, y: 1.3, xanchor: 'left', yanchor: 'bottom', showarrow: false,
+                { xref: 'paper', yref: 'paper', x: 0, y: 1.22, xanchor: 'left', yanchor: 'bottom', showarrow: false,
                   text: `of ${fmtInt(total)} poles are ${String(main[0]).toLowerCase()}`, font: { size: 12, color: t.muted } }
             ]
         }), { displayModeBar: false });
