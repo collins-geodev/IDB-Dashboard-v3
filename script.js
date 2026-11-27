@@ -632,14 +632,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const banner = document.getElementById('duplicate-warning-banner');
         if (!banner) return;
 
-        const movedPoles = new Set(poleLocationConflicts.map(c => c.slrn)).size;
+        const movedPoles = new Set(poleLocationConflicts.filter(c => c.moved).map(c => c.slrn)).size;
+        const reusedPoles = new Set(poleLocationConflicts.filter(c => !c.moved).map(c => c.slrn)).size;
         const dlBtn = document.getElementById('dt-conflict-download');
         if (dlBtn) {
-            dlBtn.hidden = movedPoles === 0;
+            dlBtn.hidden = poleLocationConflicts.length === 0;
             if (!dlBtn.dataset.wired) { dlBtn.addEventListener('click', downloadPoleLocationConflicts); dlBtn.dataset.wired = '1'; }
         }
 
-        if (duplicateInfo.poles === 0 && duplicateInfo.buildings === 0 && movedPoles === 0) {
+        if (duplicateInfo.poles === 0 && duplicateInfo.buildings === 0 && poleLocationConflicts.length === 0) {
             banner.style.display = 'none';
             return;
         }
@@ -653,6 +654,9 @@ document.addEventListener('DOMContentLoaded', () => {
             : 'Data Quality Notice:';
         if (movedPoles) {
             msg += ` ${movedPoles} pole${movedPoles > 1 ? 's were' : ' was'} recorded under two DTs and ${movedPoles > 1 ? 'are' : 'is'} counted under the DT of the latest capture.`;
+        }
+        if (reusedPoles) {
+            msg += ` ${reusedPoles} SLRN${reusedPoles > 1 ? 's appear' : ' appears'} on poles more than ${SAME_POLE_MAX_M} m apart (possible SLRN reuse) and ${reusedPoles > 1 ? 'were' : 'was'} not moved.`;
         }
         const msgEl = document.getElementById('duplicate-warning-msg');
         if (msgEl) msgEl.textContent = msg;
@@ -721,6 +725,61 @@ document.addEventListener('DOMContentLoaded', () => {
         return isNaN(t) ? -Infinity : t;
     }
 
+    // ── Geometry ────────────────────────────────────────────────────────────
+    // Captured coordinates of a record, or null when missing / (0,0).
+    function coordsOf(d) {
+        const lat = parseFloat(d && d.Latitude), lon = parseFloat(d && d.Longitude);
+        if (!isFinite(lat) || !isFinite(lon) || (lat === 0 && lon === 0)) return null;
+        return { lat, lon };
+    }
+    // Great-circle distance in metres (haversine) between two {lat, lon}.
+    function haversineM(p, q) {
+        const R = 6371008.8, rad = Math.PI / 180;
+        const dLat = (q.lat - p.lat) * rad, dLon = (q.lon - p.lon) * rad;
+        const a = Math.sin(dLat / 2) ** 2 + Math.cos(p.lat * rad) * Math.cos(q.lat * rad) * Math.sin(dLon / 2) ** 2;
+        return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+    }
+    // Metres between two records' captured coordinates, or null if either is missing.
+    function distanceM(a, b) {
+        const p = coordsOf(a), q = coordsOf(b);
+        return p && q ? haversineM(p, q) : null;
+    }
+
+    // Two captures of one SLRN further apart than this are treated as two
+    // different physical poles sharing an SLRN, not a re-survey of one pole.
+    const SAME_POLE_MAX_M = 50;
+    // A span longer than this is flagged in the pole register — usually a
+    // missing pole capture, a numbering gap, or a bad GPS fix.
+    const LONG_SPAN_M = 80;
+
+    // Span from the previous pole on the same line: walks `items` in their
+    // given order and sets item.span (metres, or null) on each, measured to the
+    // previous item with the same lineKeyFn() value. The first pole on a line
+    // (or one without coordinates on either side) gets null.
+    function assignSpans(items, lineKeyFn, coordFn) {
+        const prevByLine = new Map();
+        items.forEach(it => {
+            const line = lineKeyFn(it);
+            const here = coordFn(it);
+            const prev = prevByLine.get(line);
+            it.span = (prev && here) ? haversineM(prev, here) : null;
+            if (here) prevByLine.set(line, here);
+            else if (!prevByLine.has(line)) prevByLine.set(line, null);
+        });
+        return items;
+    }
+    function spanStats(items) {
+        const spans = items.map(i => i.span).filter(s => s != null);
+        const total = spans.reduce((a, b) => a + b, 0);
+        return {
+            count: spans.length,
+            total,
+            avg: spans.length ? total / spans.length : 0,
+            max: spans.length ? Math.max(...spans) : 0,
+            long: spans.filter(s => s > LONG_SPAN_M).length
+        };
+    }
+
     // ── Load-time rule: one pole, one DT ─────────────────────────────────────
     // Some pole SLRNs are captured under two DT names, sometimes on two feeders
     // (re-surveys, or a crew keying the wrong DT). Before anything renders, every
@@ -731,50 +790,73 @@ document.addEventListener('DOMContentLoaded', () => {
     // the data-quality banner offers as a download for correcting the source.
     // Idempotent: re-running it (after an upload) re-decides from the recorded
     // values, so a newer upload on a different DT takes the pole over cleanly.
+    //
+    // Distance check: a capture is only moved when it lies within
+    // SAME_POLE_MAX_M of the latest capture (a re-survey of the same pole).
+    // Further apart, it is most likely a DIFFERENT pole that was given the same
+    // SLRN, so it stays on its own DT, is marked __slrnReuse, and is listed in
+    // the download as "Not moved". (The SLRN is still counted once, under the
+    // latest capture's DT, until the field team issues a correct SLRN.)
+    // Captures without usable coordinates are moved (re-survey assumed).
     const DT_LOCATION_FIELDS = ["Feeder", "DT Name", "Bussines Unit", "Undertaking", "UpriserNo"];
     function reconcilePoleLocations(data) {
-        const recorded = r => r.__origLocation || r;
         const groups = new Map();
         data.forEach(d => {
+            if (!d) return;
             // Start from the recorded values every run, so clearing an upload
             // that caused a move puts the older captures back.
-            if (d && d.__origLocation) { Object.assign(d, d.__origLocation); delete d.__origLocation; }
+            if (d.__origLocation) { Object.assign(d, d.__origLocation); delete d.__origLocation; }
+            delete d.__slrnReuse;
             const s = poleSlrn(d); if (!s) return;
             if (!groups.has(s)) groups.set(s, []);
             groups.get(s).push(d);
         });
 
         const conflicts = [];
+        const fmtCoord = v => { const n = parseFloat(v); return isFinite(n) ? n.toFixed(6) : ''; };
         groups.forEach((rows, slrn) => {
             if (rows.length < 2) return;
-            if (new Set(rows.map(r => dtKeyOf(recorded(r)))).size < 2) return;
+            if (new Set(rows.map(dtKeyOf)).size < 2) return;
 
             let owner = rows[0], ownerT = captureTime(owner);
             rows.forEach(r => { const t = captureTime(r); if (t > ownerT) { owner = r; ownerT = t; } });
             const target = {};
-            DT_LOCATION_FIELDS.forEach(f => { target[f] = recorded(owner)[f]; });
+            DT_LOCATION_FIELDS.forEach(f => { target[f] = owner[f]; });
             const targetKey = dtKeyOf(target);
 
             rows.forEach(r => {
-                const from = recorded(r);
-                if (dtKeyOf(from) === targetKey) return;   // already on the owning DT
-                r.__origLocation = {};
-                DT_LOCATION_FIELDS.forEach(f => { r.__origLocation[f] = r[f]; });
+                if (dtKeyOf(r) === targetKey) return;   // already on the owning DT
+                const dist = distanceM(r, owner);
+                const reuse = dist != null && dist > SAME_POLE_MAX_M;
                 conflicts.push({
                     slrn, poleNo: r["LT Pole No"] || '', captured: r["Date/timestamp"] || '',
                     user: getDisplayName(r["User"]) || r["User"] || '',
-                    fromFeeder: from["Feeder"] || '', fromDT: from["DT Name"] || '', fromUpriser: from["UpriserNo"] ?? '',
+                    fromFeeder: r["Feeder"] || '', fromDT: r["DT Name"] || '', fromUpriser: r["UpriserNo"] ?? '',
                     toFeeder: target["Feeder"] || '', toDT: target["DT Name"] || '',
-                    latest: owner["Date/timestamp"] || ''
+                    latest: owner["Date/timestamp"] || '',
+                    lat: fmtCoord(r.Latitude), lon: fmtCoord(r.Longitude),
+                    latestLat: fmtCoord(owner.Latitude), latestLon: fmtCoord(owner.Longitude),
+                    distance: dist == null ? '' : Math.round(dist),
+                    moved: !reuse,
+                    action: reuse
+                        ? `Not moved — ${Math.round(dist)} m from the latest capture: possible SLRN reused on another pole`
+                        : (dist == null ? 'Moved to latest DT (no coordinates to compare)' : 'Moved to latest DT (same pole re-surveyed)')
                 });
+                if (reuse) {
+                    r.__slrnReuse = { feeder: target["Feeder"], dt: target["DT Name"], distance: Math.round(dist) };
+                    return;
+                }
+                r.__origLocation = {};
+                DT_LOCATION_FIELDS.forEach(f => { r.__origLocation[f] = r[f]; });
                 DT_LOCATION_FIELDS.forEach(f => { r[f] = target[f]; });
             });
         });
 
         poleLocationConflicts = conflicts;
         if (conflicts.length) {
-            const poles = new Set(conflicts.map(c => c.slrn)).size;
-            console.warn(`[Data Quality] ${poles} pole SLRN(s) were recorded under two DTs — ${conflicts.length} capture(s) moved to the DT of the latest capture.`);
+            const moved = new Set(conflicts.filter(c => c.moved).map(c => c.slrn)).size;
+            const reused = new Set(conflicts.filter(c => !c.moved).map(c => c.slrn)).size;
+            console.warn(`[Data Quality] Pole SLRNs under two DTs — ${moved} moved to the latest capture's DT; ${reused} left in place (> ${SAME_POLE_MAX_M} m apart: possible SLRN reuse).`);
         }
         return conflicts;
     }
@@ -1311,6 +1393,9 @@ document.addEventListener('DOMContentLoaded', () => {
         { header: 'DT Name', key: 'DT Name', type: 's', width: 34 },
         { header: 'DT Number', key: 'DT Number', type: 's', width: 13 },
         { header: 'Upriser No', key: 'UpriserNo', type: 'n', width: 10, fmt: '0' },
+        // Straight-line metres from the previous pole on the same Feeder/DT/upriser
+        // (captured coordinates, export sequence). Blank for the first pole on a line.
+        { header: 'Span from Previous Pole (m)', key: '__span', type: 'n', width: 14, fmt: '0' },
         { header: 'Pole Type', key: 'Type of Pole', type: 's', width: 12 },
         { header: 'Buildings Connected', key: 'No of Buildings Connected to the Pole', type: 'n', width: 13, fmt: '0' },
         { header: 'Building Linked', key: '__linked', type: 's', width: 12 },
@@ -1327,6 +1412,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function registerCellValue(col, d) {
         if (col.key === '__linked') return String(d['Associated Buildings SLRN'] || '').trim() ? 'Yes' : 'No';
         if (col.key === '__officer') return getDisplayName(d['User']) || d['User'] || '';
+        if (col.key === '__span') return d.span == null ? '' : Math.round(d.span);
         const v = d[col.key];
         return v == null ? '' : v;
     }
@@ -1334,6 +1420,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Cleaned (de-duplicated, sequence-sorted) register as {headers, rows[][]}.
     function buildRegisterMatrix() {
         const rows = getCleanExportData();
+        // Rows arrive sorted Feeder → DT → Upriser → Pole No, so a span is the
+        // distance to the previous row on the same Feeder|DT|Upriser line.
+        assignSpans(rows, d => `${dtKeyOf(d)}|${String(d.UpriserNo ?? '').trim()}`, coordsOf);
         const headers = REGISTER_COLUMNS.map(c => c.header);
         const matrix = rows.map(d => REGISTER_COLUMNS.map(c => registerCellValue(c, d)));
         return { headers, rows: matrix, columns: REGISTER_COLUMNS };
@@ -1830,9 +1919,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!poleLocationConflicts.length) { alert('No poles are recorded under two DTs.'); return; }
         const headers = ['Pole SLRN', 'LT Pole No', 'Capture Date', 'Captured By',
             'Recorded Feeder', 'Recorded DT', 'Recorded Upriser',
-            'Assigned Feeder (latest capture)', 'Assigned DT (latest capture)', 'Latest Capture Date'];
+            'Latest-Capture Feeder', 'Latest-Capture DT', 'Latest Capture Date',
+            'Capture Latitude', 'Capture Longitude', 'Latest Latitude', 'Latest Longitude',
+            'Distance Apart (m)', 'Action'];
         const rows = poleLocationConflicts.map(c => [c.slrn, c.poleNo, c.captured, c.user,
-            c.fromFeeder, c.fromDT, c.fromUpriser, c.toFeeder, c.toDT, c.latest]);
+            c.fromFeeder, c.fromDT, c.fromUpriser, c.toFeeder, c.toDT, c.latest,
+            c.lat, c.lon, c.latestLat, c.latestLon, c.distance, c.action]);
         saveCsv(`IDB_Poles_Under_Two_DTs_${new Date().toISOString().split('T')[0]}.csv`, headers, rows);
     }
 
@@ -4984,9 +5076,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const owners = poleDtOwners(filteredData);
         filteredData.forEach(d => {
             if (dtKeyOf(d) !== dtKey) return;
-            // A pole keyed to two DT names is listed only under the DT that owns it.
+            // A pole keyed to two DT names is listed only under the DT that owns it —
+            // except a capture left in place by the distance check (a different
+            // physical pole sharing the SLRN): it is listed here, flagged, uncounted.
             const ownSlrn = poleSlrn(d);
-            if (ownSlrn && owners.get(ownSlrn) !== dtKey) return;
+            const reuse = !!(ownSlrn && owners.get(ownSlrn) !== dtKey && d.__slrnReuse);
+            if (ownSlrn && owners.get(ownSlrn) !== dtKey && !reuse) return;
 
             const slrn = String(d["Lt PoleSLRN"] || d["LT Pole No"] || '').trim().toUpperCase();
             const id = slrn || `__unkeyed_${unkeyed++}`;
@@ -5005,12 +5100,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     date: d["Date/timestamp"] || '—',
                     declared: 0,
                     buildings: new Set(),
-                    captures: 0
+                    captures: 0,
+                    coords: null,
+                    coordT: -Infinity,
+                    reuse: reuse ? d.__slrnReuse : null
                 };
                 byPole.set(id, rec);
             }
 
             rec.captures++;
+            // Position = the latest capture that has usable coordinates.
+            const c = coordsOf(d), t = captureTime(d);
+            if (c && (!rec.coords || t > rec.coordT)) { rec.coords = c; rec.coordT = t; }
             const up = (d["UpriserNo"] ?? '').toString().trim();
             if (up) rec.uprisers.add(up);
             rec.declared = Math.max(rec.declared, parseInt(d["No of Buildings Connected to the Pole"]) || 0);
@@ -5019,13 +5120,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Ordered by upriser then pole sequence — the order crews walk the line.
         const num = (a, b) => String(a).localeCompare(String(b), undefined, { numeric: true });
-        return [...byPole.values()]
+        const list = [...byPole.values()]
             .map(r => {
                 const ups = [...r.uprisers].sort((a, b) => num(a, b));
                 return { ...r, buildings: [...r.buildings], uprisers: ups, upriser: ups.join(', ') || '—' };
             })
             .sort((a, b) => num(a.uprisers[0] ?? '', b.uprisers[0] ?? '')
                 || num(a.poleNo, b.poleNo) || num(a.slrn, b.slrn));
+        // Span (m) from the previous pole on the same upriser, in that sequence.
+        return assignSpans(list, p => p.uprisers[0] ?? '', p => p.coords);
     }
 
     // Building SLRNs render as chips, collapsed past the third. The widest cell
@@ -5046,23 +5149,39 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function buildPoleRegisterRow(dtRow) {
-        const poles = getPoleRegister(dtRow.key);
+        const all = getPoleRegister(dtRow.key);
+        const poles = all.filter(p => !p.reuse);           // counted on this DT
+        const reused = all.length - poles.length;          // listed, counted elsewhere
         const colCount = document.querySelectorAll('#dtTable thead th').length || 15;
         const totalBuildings = poles.reduce((n, p) => n + p.buildings.length, 0);
         // Stored count vs distinct SLRNs — they disagree wherever a cell repeats
         // the same building, which silently inflates "No of Buildings Connected".
         const mismatched = poles.filter(p => p.declared !== p.buildings.length).length;
+        const ss = spanStats(all);
+        const m = v => Math.round(v).toLocaleString();
+        const spanSummary = ss.count
+            ? ` · ${ss.count} span${ss.count === 1 ? '' : 's'}, avg ${m(ss.avg)} m, longest ${m(ss.max)} m, line ${(ss.total / 1000).toFixed(2)} km`
+              + (ss.long ? ` · <span class="pr-count-warn">${ss.long} span${ss.long === 1 ? '' : 's'} &gt; ${LONG_SPAN_M} m</span>` : '')
+            : ' · no spans (coordinates missing)';
 
-        const body = poles.length ? poles.map(p => {
+        const body = all.length ? all.map(p => {
             const mismatch = p.declared !== p.buildings.length;
             const warnTitle = mismatch
                 ? ` title="Captured count says ${p.declared}, but ${p.buildings.length} distinct SLRN(s) were recorded — the cell repeats a building."`
                 : '';
+            const longSpan = p.span != null && p.span > LONG_SPAN_M;
+            const spanCell = p.span == null
+                ? `<span class="pole-drill-none" title="${p.coords ? 'First pole on this upriser' : 'No captured coordinates'}">—</span>`
+                : `<span${longSpan ? ` class="pr-count-warn" title="Longer than ${LONG_SPAN_M} m — check for a missing pole, a numbering gap or a bad GPS fix"` : ''}>${m(p.span)}</span>`;
+            const reuseTag = p.reuse
+                ? `<span class="pr-count-warn" style="display:block;font-size:0.8em;" title="Same SLRN captured ${p.reuse.distance} m away on ${p.reuse.dt}. Counted there; this pole needs its own SLRN.">SLRN reuse — counted on ${p.reuse.dt.split('-').pop()}</span>`
+                : '';
             return `
-                <tr>
-                    <td><button type="button" class="bldg-chip pole-chip" data-slrn="${p.slrn}" title="Filter the dashboard to ${p.slrn}">${p.slrn}</button>${p.captures > 1 ? `<span class="pr-captures" title="${p.captures} captures of this pole were merged">×${p.captures}</span>` : ''}</td>
+                <tr${p.reuse ? ' style="opacity:0.75;"' : ''}>
+                    <td><button type="button" class="bldg-chip pole-chip" data-slrn="${p.slrn}" title="Filter the dashboard to ${p.slrn}">${p.slrn}</button>${p.captures > 1 ? `<span class="pr-captures" title="${p.captures} captures of this pole were merged">×${p.captures}</span>` : ''}${reuseTag}</td>
                     <td>${p.poleNo}</td>
                     <td style="text-align:center;"${p.uprisers.length > 1 ? ` title="This pole carries ${p.uprisers.length} uprisers"` : ''}>${p.upriser}</td>
+                    <td style="text-align:right;">${spanCell}</td>
                     <td>${p.material}</td>
                     <td style="text-align:center;"><span class="pr-count${mismatch ? ' pr-count-warn' : ''}"${warnTitle}>${p.buildings.length}</span></td>
                     <td class="pr-buildings">${buildingChipsHTML(p.buildings)}</td>
@@ -5070,7 +5189,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td>${p.user}</td>
                     <td class="pr-date">${p.date}</td>
                 </tr>`;
-        }).join('') : '<tr><td colspan="9" class="pole-drill-none">No pole captures match the current filters.</td></tr>';
+        }).join('') : '<tr><td colspan="10" class="pole-drill-none">No pole captures match the current filters.</td></tr>';
 
         const tr = document.createElement('tr');
         tr.className = 'pole-drill-row';
@@ -5080,13 +5199,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="pole-drill-panel">
                     <div class="pole-drill-head">
                         <span class="pole-drill-title">Pole Register — ${dtRow.dtName}</span>
-                        <span class="pole-drill-stats">${poles.length} pole${poles.length === 1 ? '' : 's'} · ${totalBuildings} building${totalBuildings === 1 ? '' : 's'}${mismatched ? ` · <span class="pr-count-warn">${mismatched} count mismatch${mismatched === 1 ? '' : 'es'}</span>` : ''}</span>
+                        <span class="pole-drill-stats">${poles.length} pole${poles.length === 1 ? '' : 's'}${reused ? ` (+${reused} SLRN reuse)` : ''} · ${totalBuildings} building${totalBuildings === 1 ? '' : 's'}${mismatched ? ` · <span class="pr-count-warn">${mismatched} count mismatch${mismatched === 1 ? '' : 'es'}</span>` : ''}${spanSummary}</span>
                     </div>
                     <div class="pole-drill-scroll">
                         <table class="pole-drill-table">
                             <thead>
                                 <tr>
-                                    <th>Pole SLRN</th><th>Pole No</th><th>Upriser</th><th>Material</th>
+                                    <th>Pole SLRN</th><th>Pole No</th><th>Upriser</th>
+                                    <th title="Straight-line distance from the previous pole on the same upriser (captured coordinates)">Span (m)</th><th>Material</th>
                                     <th>Bldgs</th><th>Associated Buildings SLRN</th>
                                     <th>Status</th><th>Field Officer</th><th>Captured</th>
                                 </tr>
