@@ -1078,13 +1078,14 @@ document.addEventListener('DOMContentLoaded', () => {
         ? [CONVEX_SITE + "/assets/BOQ-IDB.json"]
         : [];
 
-    const fetchWithFallback = async (primaryUrls, localPath, githubRawUrl) => {
+    // Always-fresh network read (the ?t= stamp skips every HTTP cache), as text.
+    const fetchNetworkText = async (primaryUrls, localPath, githubRawUrl) => {
         const urls = Array.isArray(primaryUrls) ? primaryUrls : [primaryUrls];
         for (const url of urls) {
             try {
                 const res = await fetch(url + '?t=' + new Date().getTime());
                 if (!res.ok) throw new Error(`Supabase response not ok (${url})`);
-                return await res.json();
+                return await res.text();
             } catch (error) {
                 console.warn(`Fetch from ${url} failed, trying next source...`, error);
             }
@@ -1092,13 +1093,67 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const resFallback = await fetch(localPath + '?t=' + new Date().getTime());
             if (!resFallback.ok) throw new Error('Fallback network response was not ok');
-            return await resFallback.json();
+            return await resFallback.text();
         } catch (fallbackError) {
             console.warn(`Local fallback also failed, trying GitHub Raw Content...`, fallbackError);
             const resGithub = await fetch(githubRawUrl + '?t=' + new Date().getTime());
             if (!resGithub.ok) throw new Error('GitHub Raw network response was not ok');
-            return await resGithub.json();
+            return await resGithub.text();
         }
+    };
+
+    // Fast start (Nov 2026): the field file is ~7 MB and Convex takes ~2-3 s to
+    // stream it, on every visit. So the last copy is kept in the browser's Cache
+    // Storage and the dashboard renders from it at once; the network copy is
+    // fetched in the background and, only if it differs, the dashboard re-renders
+    // with it. First visits (and admin uploads, mode 'network') wait for the
+    // network as before.
+    const DATA_CACHE = 'idb-data-v1';
+    let pendingDataRefresh = [];
+    const dataCacheKey = (localPath) => location.origin + '/__idb-data/' + localPath.replace(/^\.\//, '');
+    const readCachedText = async (key) => {
+        try {
+            if (!window.caches) return null;
+            const hit = await (await caches.open(DATA_CACHE)).match(key);
+            return hit ? await hit.text() : null;
+        } catch (e) { return null; }
+    };
+    const writeCachedText = async (key, text) => {
+        try {
+            if (!window.caches) return;
+            await (await caches.open(DATA_CACHE)).put(key, new Response(text, { headers: { 'content-type': 'application/json' } }));
+        } catch (e) { /* storage full or blocked: the dashboard still works uncached */ }
+    };
+
+    // mode: 'cache-first' (default; also starts a background refresh),
+    //       'cache-only-no-refresh' (re-render after a refresh), 'network'.
+    const fetchWithFallback = async (primaryUrls, localPath, githubRawUrl, mode) => {
+        const key = dataCacheKey(localPath);
+        if (mode !== 'network') {
+            const cached = await readCachedText(key);
+            if (cached) {
+                let parsed = null;
+                try { parsed = JSON.parse(cached); } catch (e) { parsed = null; }
+                if (parsed) {
+                    if (mode !== 'cache-only-no-refresh') {
+                        pendingDataRefresh.push(
+                            fetchNetworkText(primaryUrls, localPath, githubRawUrl)
+                                .then(text => {
+                                    if (text === cached) return false;
+                                    JSON.parse(text); // never cache a broken file
+                                    return writeCachedText(key, text).then(() => true);
+                                })
+                                .catch(err => { console.warn('[Dashboard] Background data refresh failed:', err); return false; })
+                        );
+                    }
+                    return parsed;
+                }
+            }
+        }
+        const text = await fetchNetworkText(primaryUrls, localPath, githubRawUrl);
+        const parsed = JSON.parse(text);
+        writeCachedText(key, text);
+        return parsed;
     };
 
     // Load (or reload) every dataset the dashboard renders from, then rebuild
@@ -1111,16 +1166,20 @@ document.addEventListener('DOMContentLoaded', () => {
     // load leaves it undefined and renders the full dataset directly.
     function loadDashboardData(opts) {
       opts = opts || {};
+      const dataMode = opts.fresh ? 'network' : (opts.fromRefresh ? 'cache-only-no-refresh' : 'cache-first');
+      pendingDataRefresh = [];
       return Promise.all([
         fetchWithFallback(
             fieldDataUrls,
             './converted_data_latest.json',
-            'https://raw.githubusercontent.com/collins-geodev/IDB-Dashboard-v3/main/converted_data_latest.json'
+            'https://raw.githubusercontent.com/collins-geodev/IDB-Dashboard-v3/main/converted_data_latest.json',
+            dataMode
         ),
         fetchWithFallback(
             boqDataUrls,
             './BOQ-IDB.json',
-            'https://raw.githubusercontent.com/collins-geodev/IDB-Dashboard-v3/main/BOQ-IDB.json'
+            'https://raw.githubusercontent.com/collins-geodev/IDB-Dashboard-v3/main/BOQ-IDB.json',
+            dataMode
         ),
         // Shared uploaded poles (visible to all users). Empty if the backend
         // has no uploads or the query isn't available — never blocks the load.
@@ -1240,6 +1299,19 @@ document.addEventListener('DOMContentLoaded', () => {
             // Log loudly but do NOT show the misleading "network connection" alert.
             console.error('Dashboard processing error after successful data load:', processingError);
         }
+    })
+    .then(() => {
+        // Rendered from the browser's saved copy: once the background network
+        // fetch lands, re-render only if the data actually changed.
+        const refreshes = pendingDataRefresh;
+        pendingDataRefresh = [];
+        if (!refreshes.length) return;
+        Promise.all(refreshes).then(changed => {
+            if (changed.some(Boolean)) {
+                console.log('[Dashboard] Newer data found — refreshing the dashboard.');
+                loadDashboardData({ reapplyFilters: true, fromRefresh: true });
+            }
+        });
     });
     }
     loadDashboardData();
@@ -2877,7 +2949,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             confirmJsonUpload({ asset: asset, fileName: file.name, total: records.length, inScope: inScope, scoped: scoped }, () => {
                 publishJsonAsset(token, asset.name, text)
-                    .then(res => loadDashboardData({ reapplyFilters: true }).then(() => showJsonResult({
+                    .then(res => loadDashboardData({ reapplyFilters: true, fresh: true }).then(() => showJsonResult({
                         ok: true, asset: asset, fileName: file.name,
                         total: (res && res.records != null) ? res.records : records.length,
                         inScope: inScope, scoped: scoped
