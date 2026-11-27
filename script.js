@@ -819,9 +819,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const GPS_TYPICAL_ERROR_FALLBACK_M = 10;
     let gpsCalibration = { typicalErrorM: GPS_TYPICAL_ERROR_FALLBACK_M, poles: 0, medianScatterM: null };
 
+    // Tolerates how people type it: 4, "4", "4 m", "±4", "+/- 4.5m".
     function reportedAccuracyM(d) {
         for (const k of GPS_ACCURACY_FIELDS) {
-            const v = parseFloat(d && d[k]);
+            const m = String(d && d[k] != null ? d[k] : '').match(/\d+(?:\.\d+)?/);
+            const v = m ? parseFloat(m[0]) : NaN;
             if (isFinite(v) && v > 0) return v;
         }
         return null;
@@ -1540,6 +1542,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { header: 'Capture Date', key: 'Date/timestamp', type: 's', width: 16 },
         { header: 'Latitude', key: 'Latitude', type: 'n', width: 13, fmt: '0.000000' },
         { header: 'Longitude', key: 'Longitude', type: 'n', width: 13, fmt: '0.000000' },
+        { header: 'GPS Accuracy (m)', key: 'GPS Accuracy (m)', type: 'n', width: 12, fmt: '0.0' },
     ];
 
     function registerCellValue(col, d) {
@@ -2173,6 +2176,10 @@ document.addEventListener('DOMContentLoaded', () => {
         'location address': 'Location address',
         'latitude': 'Latitude',
         'longitude': 'Longitude',
+        // GPS fix accuracy (± metres) — feeds the span GPS-confidence rating.
+        'gps accuracy (m)': 'GPS Accuracy (m)',
+        'gps accuracy': 'GPS Accuracy (m)',
+        'accuracy (m)': 'GPS Accuracy (m)',
         'date installed': 'Date Installed',
         'installed by (contractor)': 'Installed By',
         'installed by': 'Installed By',
