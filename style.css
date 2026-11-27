@@ -4043,3 +4043,38 @@ main.main-content { overflow-x: clip; overflow-y: visible; min-width: 0; }
 @media (max-width: 768px) {
     #view-dashboard .filters-section { position: static; box-shadow: none; }
 }
+
+/* ── Compact KPI strip (shown on every dashboard page) ────────────────────
+   Same eight cards and figures, ~40% less height: smaller icon, two-line
+   title, the progress % inline beside a thinner bar, tighter spacing. */
+#kpis.kpi-section { gap: 0.4rem; margin-bottom: 1rem; }
+#kpis .kpi-card-modern {
+    min-height: 0;
+    padding: 0.5rem 0.6rem 0.45rem;
+    gap: 0.3rem;
+    justify-content: flex-start;
+    box-shadow: none;
+}
+#kpis .kpi-border-top { height: 3px; }
+#kpis .kpi-header { margin-bottom: 0; align-items: center; gap: 0.4rem; }
+#kpis .kpi-title {
+    font-size: 0.6rem;
+    line-height: 1.2;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+#kpis .kpi-icon-bg { width: 22px; height: 22px; min-width: 22px; border-radius: 5px; }
+#kpis .kpi-icon-bg svg { width: 13px; height: 13px; }
+#kpis .kpi-body { margin-bottom: 0; align-items: baseline; }
+#kpis .stat-label { font-size: 0.56rem; margin-bottom: 0; line-height: 1.2; }
+#kpis .stat-value { font-size: 1rem; line-height: 1.15; }
+#kpis .kpi-progress { margin-bottom: 0; display: flex; align-items: center; gap: 0.4rem; }
+#kpis .kpi-progress .progress-track { flex: 1; height: 3px; order: 1; }
+#kpis .kpi-progress .progress-label { order: 2; margin-bottom: 0; font-size: 0.6rem; flex: 0 0 auto; }
+#kpis .kpi-progress .progress-label span:first-child { display: none; }  /* "Progress" word */
+#kpis .kpi-footer { font-size: 0.58rem; line-height: 1.2; }
+@media (max-width: 480px) {
+    #kpis.kpi-section { grid-template-columns: repeat(2, 1fr) !important; }
+}

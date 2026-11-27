@@ -11,6 +11,12 @@
     <script>
       (function () {
         try {
+          // Dark is the default theme (Nov 2026): clear any older saved choice
+          // once, so everyone starts dark; later toggles are remembered again.
+          if (localStorage.getItem('idb-theme-reset') !== 'dark-default-2026-11') {
+            localStorage.removeItem('idb-theme');
+            localStorage.setItem('idb-theme-reset', 'dark-default-2026-11');
+          }
           var t = localStorage.getItem('idb-theme');
           document.documentElement.setAttribute('data-theme', t === 'light' ? 'light' : 'dark');
         } catch (e) {

@@ -11,6 +11,12 @@
     <script>
       (function () {
         try {
+          // Dark is the default theme (Nov 2026): clear any older saved choice
+          // once, so everyone starts dark; later toggles are remembered again.
+          if (localStorage.getItem('idb-theme-reset') !== 'dark-default-2026-11') {
+            localStorage.removeItem('idb-theme');
+            localStorage.setItem('idb-theme-reset', 'dark-default-2026-11');
+          }
           var t = localStorage.getItem('idb-theme');
           document.documentElement.setAttribute('data-theme', t === 'light' ? 'light' : 'dark');
         } catch (e) {
@@ -47,7 +53,7 @@
     <!-- ApexCharts -->
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <!-- Custom CSS -->
-    <link rel="stylesheet" href="style.css?v=20261127e">
+    <link rel="stylesheet" href="style.css?v=20261127f">
     <link rel="stylesheet" href="sidebar.css?v=20260531a">
     <link rel="stylesheet" href="insights.css?v=20260405w">
     <link rel="stylesheet" href="ai-styles.css?v=20260901b">
