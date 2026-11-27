@@ -688,24 +688,39 @@ document.addEventListener('DOMContentLoaded', () => {
     // the wrong DT) must count once, not once per DT. Each SLRN is owned by the
     // DT of its MOST RECENT capture — the same "latest capture wins" rule the
     // merged export uses; ties keep the first capture seen.
-    // Returns Map(slrn -> dtKeyOf). Cached per data array.
-    let _poleOwnerCache = { src: null, len: -1, map: null };
-    function poleDtOwners(arr) {
-        if (_poleOwnerCache.src === arr && _poleOwnerCache.len === arr.length) return _poleOwnerCache.map;
-        const best = new Map();
-        arr.forEach(d => {
-            const slrn = poleSlrn(d); if (!slrn) return;
-            const raw = d["Date/timestamp"];
-            let t = parseFieldTimestamp(raw);
-            if (isNaN(t)) t = Date.parse(raw || '');
-            if (isNaN(t)) t = -Infinity;
-            const cur = best.get(slrn);
-            if (!cur || t > cur.t) best.set(slrn, { t, key: dtKeyOf(d) });
-        });
-        const map = new Map();
-        best.forEach((v, slrn) => map.set(slrn, v.key));
-        _poleOwnerCache = { src: arr, len: arr.length, map };
+    // poleOwnerRows: Map(slrn -> owning capture row). poleDtOwners: Map(slrn -> dtKeyOf).
+    // Both cached per data array (keyed on the array and its length).
+    const _ownerCache = new Map(); // 'rows' | 'dt' -> { src, len, map }
+    function _cached(kind, arr, build) {
+        const c = _ownerCache.get(kind);
+        if (c && c.src === arr && c.len === arr.length) return c.map;
+        const map = build();
+        _ownerCache.set(kind, { src: arr, len: arr.length, map });
         return map;
+    }
+    function poleOwnerRows(arr) {
+        return _cached('rows', arr, () => {
+            const best = new Map();
+            arr.forEach(d => {
+                const slrn = poleSlrn(d); if (!slrn) return;
+                const raw = d["Date/timestamp"];
+                let t = parseFieldTimestamp(raw);
+                if (isNaN(t)) t = Date.parse(raw || '');
+                if (isNaN(t)) t = -Infinity;
+                const cur = best.get(slrn);
+                if (!cur || t > cur.t) best.set(slrn, { t, row: d });
+            });
+            const map = new Map();
+            best.forEach((v, slrn) => map.set(slrn, v.row));
+            return map;
+        });
+    }
+    function poleDtOwners(arr) {
+        return _cached('dt', arr, () => {
+            const map = new Map();
+            poleOwnerRows(arr).forEach((row, slrn) => map.set(slrn, dtKeyOf(row)));
+            return map;
+        });
     }
     function countUniquePoles(arr) {
         var s = new Set();
@@ -4013,10 +4028,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const assetQ = assetLookupQuery;
 
+        // A pole captured under DTs on two feeders (or two DT names) belongs to the
+        // feeder/DT of its latest capture over the WHOLE dataset, so filtering by
+        // feeder or DT counts it in one place only — the same owner the DT table uses.
+        const owners = (feederVals || dtVals) ? poleOwnerRows(globalData) : null;
+
         filteredData = globalData.filter(item => {
             const poleType = (item["Type of Pole"] || '').trim().toUpperCase();
 
             if (!matchesAssetLookup(item, assetQ)) return false;
+
+            if (owners) {
+                const slrn = poleSlrn(item);
+                const own = slrn ? owners.get(slrn) : null;
+                if (own) {
+                    if (feederVals && !feederVals.includes(own["Feeder"])) return false;
+                    if (dtVals && !dtVals.includes(own["DT Name"])) return false;
+                }
+            }
 
             return (!vendorVals || vendorVals.includes(item["Vendor_Name"])) &&
                 (!buVals || buVals.includes(item["Bussines Unit"])) &&
