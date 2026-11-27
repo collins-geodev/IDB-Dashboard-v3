@@ -4034,3 +4034,7 @@ html.map-expanded-lock body {
     box-shadow: 0 6px 18px -10px rgba(0, 0, 0, 0.45);
 }
 #map { isolation: isolate; }
+/* sidebar.css gives .main-content overflow-x:hidden, which silently makes it a
+   (never-scrolling) scroll container and breaks the sticky filter bar.
+   overflow-x:clip still stops sideways spill without creating one. */
+main.main-content { overflow-x: clip; overflow-y: visible; }
