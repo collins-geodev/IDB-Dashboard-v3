@@ -3,17 +3,21 @@
  * dark design tokens so the look stays consistent.
  * ===================================================================== */
 :root {
-  --background: 220 25% 8%;
-  --foreground: 0 0% 98%;
-  --card: 220 20% 12%;
-  --primary: 199 89% 48%;
+  /* Dark ("black") theme — the dashboard's PipWise palette (see style.css):
+     pure-black page, #131313 cards, #303030 hairlines, white / #b8b8b8 text,
+     #5297ff accent, #22ab94 good, #f7525f bad, #f5a524 warn. */
+  --background: 0 0% 0%;
+  --foreground: 0 0% 100%;
+  --card: 0 0% 7.5%;
+  --primary: 216 100% 66%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 220 15% 18%;
-  --muted: 220 15% 18%;
-  --muted-foreground: 220 10% 60%;
-  --accent: 162 85% 45%;
-  --destructive: 0 84.2% 60.2%;
-  --border: 220 15% 20%;
+  --secondary: 0 0% 11.5%;
+  --muted: 0 0% 11.5%;
+  --muted-foreground: 0 0% 72%;
+  --accent: 170 67% 40%;
+  --destructive: 355 91% 65%;
+  --warning: 36 91% 55%;
+  --border: 0 0% 19%;
   --radius: 0.625rem;
 
   --bg: hsl(var(--background));
@@ -47,7 +51,33 @@
   --muted-foreground: 215 20% 35%;
   --accent: 162 72% 36%;
   --destructive: 0 78% 52%;
+  --warning: 38 92% 50%;
   --border: 214 30% 84%;
+}
+
+/* ── PipWise black theme: soft blue / violet edge glows on the black page,
+   flat cards with #303030 hairlines (matches the dashboard). ── */
+:root:not([data-theme="light"]) body {
+  background-color: #000;
+  background-image:
+    radial-gradient(55% 45% at 0% 80%, rgba(82, 151, 255, 0.16), transparent 70%),
+    radial-gradient(55% 45% at 100% 80%, rgba(167, 71, 227, 0.14), transparent 70%);
+  background-attachment: fixed;
+}
+:root:not([data-theme="light"]) .auth-wrap {
+  background: radial-gradient(1200px 600px at 50% -10%, hsl(var(--primary) / 0.12), transparent 60%);
+}
+:root:not([data-theme="light"]) .auth-card,
+:root:not([data-theme="light"]) .toast {
+  box-shadow: 0 25px 60px -20px rgba(0, 0, 0, 0.9);
+}
+:root:not([data-theme="light"]) .field input,
+:root:not([data-theme="light"]) .create-user select,
+:root:not([data-theme="light"]) .search {
+  background: #0a0a0a;
+}
+:root:not([data-theme="light"]) tbody tr:hover {
+  background: hsl(0 0% 100% / 0.04);
 }
 
 /* Dark-island remaps: buttons, badges and messages that hardcode a pale
@@ -257,23 +287,23 @@ a:hover {
 }
 .btn-danger {
   background: hsl(var(--destructive) / 0.15);
-  color: #ff8a8a;
+  color: #f7525f;
   border-color: hsl(var(--destructive) / 0.4);
 }
 .btn-danger:hover {
   background: hsl(var(--destructive) / 0.25);
 }
 .btn-warn {
-  background: hsl(38 92% 50% / 0.15);
-  color: #ffc977;
-  border-color: hsl(38 92% 50% / 0.4);
+  background: hsl(var(--warning) / 0.15);
+  color: #f5a524;
+  border-color: hsl(var(--warning) / 0.4);
 }
 .btn-warn:hover {
-  background: hsl(38 92% 50% / 0.25);
+  background: hsl(var(--warning) / 0.25);
 }
 .btn-success {
   background: hsl(var(--accent) / 0.15);
-  color: #7ef0cf;
+  color: #2ec4a9;
   border-color: hsl(var(--accent) / 0.45);
 }
 .btn-success:hover {
@@ -296,17 +326,17 @@ a:hover {
 }
 .msg.error {
   background: hsl(var(--destructive) / 0.15);
-  color: #ff9b9b;
+  color: #f7525f;
   border: 1px solid hsl(var(--destructive) / 0.35);
 }
 .msg.ok {
   background: hsl(var(--accent) / 0.15);
-  color: #7ef0cf;
+  color: #2ec4a9;
   border: 1px solid hsl(var(--accent) / 0.35);
 }
 .msg.info {
   background: hsl(var(--primary) / 0.12);
-  color: #9bd6ff;
+  color: #7aaeff;
   border: 1px solid hsl(var(--primary) / 0.3);
 }
 
@@ -490,7 +520,7 @@ tbody tr:last-child td {
 }
 .badge.admin {
   background: hsl(var(--primary) / 0.18);
-  color: #8fd3ff;
+  color: #5297ff;
 }
 .badge.viewer {
   background: hsl(var(--muted) / 0.8);
@@ -498,7 +528,7 @@ tbody tr:last-child td {
 }
 .badge.evt {
   background: hsl(var(--accent) / 0.15);
-  color: #7ef0cf;
+  color: #2ec4a9;
 }
 .badge.evt.resume {
   background: hsl(var(--muted) / 0.8);
@@ -506,11 +536,11 @@ tbody tr:last-child td {
 }
 .badge.status-active {
   background: hsl(var(--accent) / 0.15);
-  color: #7ef0cf;
+  color: #2ec4a9;
 }
 .badge.status-inactive {
-  background: hsl(0 84% 60% / 0.15);
-  color: #ff9b9b;
+  background: hsl(var(--destructive) / 0.15);
+  color: #f7525f;
 }
 .badge .status-dot {
   display: inline-block;
