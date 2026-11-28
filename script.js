@@ -5351,7 +5351,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const s = dtSpanSummary(dtKey);
         const c = 'style="text-align: center;"';
         if (!s.count) {
-            const dash = `<span style="color:#a0a0a0;">—</span>`;
+            const dash = `<span style="color:hsl(var(--muted-foreground));">—</span>`;
             return `<td class="col-spanCount" ${c}>${dash}</td><td class="col-spanAvg" ${c}>${dash}</td>` +
                 `<td class="col-spanMax" ${c}>${dash}</td><td class="col-lineKm" ${c}>${dash}</td><td class="col-longSpans" ${c}>${dash}</td>` +
                 `<td class="col-spanConf" ${c}>${dash}</td>`;
@@ -5660,7 +5660,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td class="col-boqTotal" style="text-align: center; font-weight: bold; color: #0EA5E9;">${row.boqTotal}</td>
                 <td class="col-newPoles" style="text-align: center; color: #a855f7; font-weight: 600;">${row.newPoles || 0}</td>
                 <td class="col-actualTotal" style="text-align: center;">${row.actualTotal}</td>
-                <td class="col-remaining" style="text-align: center; color: #a0a0a0;">${Math.max(0, row.boqTotal - row.actualTotal)}</td>
+                <td class="col-remaining" style="text-align: center; color: hsl(var(--muted-foreground));">${Math.max(0, row.boqTotal - row.actualTotal)}</td>
                 <td class="col-concrete" style="text-align: center;">${row.concrete}</td>
                 <td class="col-wooden" style="text-align: center;">${row.wooden}</td>
                 ${dtSpanCellsHTML(row.key)}
@@ -7189,7 +7189,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const lastDate = dates[dates.length - 1] || 'N/A';
 
         // Mini bar helper
-        const miniBar = (pct, color) => `<div style="height:4px;background:rgba(255,255,255,0.08);border-radius:2px;margin-top:4px;overflow:hidden;"><div style="height:100%;width:${pct}%;background:${color};border-radius:2px;transition:width 0.5s;"></div></div>`;
+        const miniBar = (pct, color) => `<div style="height:4px;background:hsl(var(--foreground) / 0.08);border-radius:2px;margin-top:4px;overflow:hidden;"><div style="height:100%;width:${pct}%;background:${color};border-radius:2px;transition:width 0.5s;"></div></div>`;
 
         // Vendor race bars
         const vendorBarsHTML = sortedVendors.map(([name, count]) => {
@@ -7262,7 +7262,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const best = sorted[0];
                     const worst = sorted[sorted.length - 1];
                     const color = vColors[v];
-                    return `<div class="ki-officer" style="padding:8px;background:rgba(255,255,255,0.02);border-radius:6px;border-left:3px solid ${color};">
+                    return `<div class="ki-officer" style="padding:8px;background:hsl(var(--foreground) / 0.03);border-radius:6px;border-left:3px solid ${color};">
                         <div style="font-size:0.75rem;font-weight:700;color:${color};margin-bottom:5px;">${vShort[v]} (${sorted.length} officers)</div>
                         <div style="display:flex;justify-content:space-between;align-items:center;">
                             <div>
@@ -7307,15 +7307,15 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="insight-item ki-coverage" style="flex-direction:column;align-items:stretch;">
                 <span class="insight-label" style="margin-bottom:6px;">Network Coverage</span>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;text-align:center;">
-                    <div style="background:rgba(255,255,255,0.03);border-radius:6px;padding:8px 4px;">
+                    <div style="background:hsl(var(--foreground) / 0.04);border-radius:6px;padding:8px 4px;">
                         <div style="font-size:1.2rem;font-weight:800;color:hsl(var(--foreground));">${feederCount}</div>
                         <div style="font-size:0.7rem;color:var(--text-secondary);">Feeders</div>
                     </div>
-                    <div style="background:rgba(255,255,255,0.03);border-radius:6px;padding:8px 4px;">
+                    <div style="background:hsl(var(--foreground) / 0.04);border-radius:6px;padding:8px 4px;">
                         <div style="font-size:1.2rem;font-weight:800;color:hsl(var(--foreground));">${dtCount}</div>
                         <div style="font-size:0.7rem;color:var(--text-secondary);">DTs</div>
                     </div>
-                    <div style="background:rgba(255,255,255,0.03);border-radius:6px;padding:8px 4px;">
+                    <div style="background:hsl(var(--foreground) / 0.04);border-radius:6px;padding:8px 4px;">
                         <div style="font-size:1.2rem;font-weight:800;color:hsl(var(--foreground));">${utCount}</div>
                         <div style="font-size:0.7rem;color:var(--text-secondary);">Undertakings</div>
                     </div>
