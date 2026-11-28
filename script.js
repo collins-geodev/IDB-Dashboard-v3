@@ -1,4 +1,25 @@
 document.addEventListener('DOMContentLoaded', () => {
+    // ── Theme-aware text ink ──
+    // Status/vendor hues (#10b981, #eab308, #0ea5e9 …) are bright enough to read
+    // on the black theme but drop to ~2:1 contrast as text on white. In light
+    // mode, ink(c) darkens a colour (same hue) until it reaches 4.5:1 on white;
+    // in dark mode it returns c unchanged. Use it for TEXT colours only — bars,
+    // swatches and borders keep the original hue. Re-evaluated on every render,
+    // and the theme toggle re-renders, so switching themes stays correct.
+    const inkCache = {};
+    function ink(c) {
+        if (document.documentElement.getAttribute('data-theme') !== 'light') return c;
+        const m = /^#?([0-9a-f]{6})$/i.exec(String(c || '').trim());
+        if (!m) return c;
+        if (inkCache[m[1]]) return inkCache[m[1]];
+        let [r, g, b] = [0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16));
+        const lin = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+        const contrast = () => 1.05 / (0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b) + 0.05);
+        for (let i = 0; i < 40 && contrast() < 4.5; i++) { r *= 0.94; g *= 0.94; b *= 0.94; }
+        const out = '#' + [r, g, b].map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
+        return (inkCache[m[1]] = out);
+    }
+
     // ── Mobile Sidebar Toggle ──
     const hamburgerBtn = document.getElementById('hamburgerBtn');
     const sidebarOverlay = document.getElementById('sidebarOverlay');
@@ -4152,7 +4173,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const pct = ((count / total) * 100).toFixed(0);
             const color = vColors[name] || '#6b7280';
             return `<div class="ds-vbar">
-                <span style="color:${color};">${name}</span>
+                <span style="color:${ink(color)};">${name}</span>
                 <div style="flex:1;height:6px;background:hsl(var(--muted) / 0.45);border-radius:3px;overflow:hidden;">
                     <div style="height:100%;width:${pct}%;background:${color};border-radius:3px;"></div>
                 </div>
@@ -4162,7 +4183,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Key Metrics card: the "Current" run rate was a placeholder stuck at 0.
         const rateEl = document.getElementById('exec-avg-rate');
-        if (rateEl) { rateEl.textContent = runRate; rateEl.style.color = velocityColor; }
+        if (rateEl) { rateEl.textContent = runRate; rateEl.style.color = ink(velocityColor); }
         const boqColor = completionPct !== null && parseFloat(completionPct) >= 50 ? '#10b981' : '#eab308';
         container.innerHTML = `
             <!-- Narrative -->
@@ -4171,9 +4192,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 <strong style="color:hsl(var(--primary));">${fmt(total)} assets</strong> have been captured
                 by <strong>${totalUsers} field officers</strong> over ${activeDays} active days
                 (${firstDate} — ${lastDate}).
-                The project is running at <strong style="color:${velocityColor};">${runRate} poles/day</strong>
-                — <strong style="color:${velocityColor};">${velocityVerdict}</strong> (target: ${TARGET}/day)
-                and <strong style="color:${trendColor};">${trending}</strong>
+                The project is running at <strong style="color:${ink(velocityColor)};">${runRate} poles/day</strong>
+                — <strong style="color:${ink(velocityColor)};">${velocityVerdict}</strong> (target: ${TARGET}/day)
+                and <strong style="color:${ink(trendColor)};">${trending}</strong>
                 ${Math.abs(trendPct) > 0 ? `(${trendPct > 0 ? '+' : ''}${trendPct}%)` : ''} over recent days.
             </p>
 
@@ -4181,15 +4202,15 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="ds-row">
                 <div class="ds-block">
                     ${completionPct !== null ? `
-                    <div class="ds-head"><span>BOQ Progress</span><strong style="color:${boqColor};">${completionPct}%</strong></div>
+                    <div class="ds-head"><span>BOQ Progress</span><strong style="color:${ink(boqColor)};">${completionPct}%</strong></div>
                     <div class="ds-track"><div style="width:${completionPct}%;background:${boqColor};"></div></div>
                     <div class="ds-caption">${fmt(total)} of ${fmt(boqTotal)} target poles</div>
                     ` : ''}
                     <div class="ds-chips">
-                        <span style="background:rgba(14,165,233,0.1);color:#0EA5E9;">⚡ ${fmt(total)} Poles</span>
-                        <span style="background:rgba(249,115,22,0.1);color:#f97316;">🏙️ ${dtCount} DTs</span>
-                        <span style="background:rgba(16,185,129,0.1);color:#10b981;">🔌 ${feederCount} Feeders</span>
-                        <span style="background:rgba(234,179,8,0.1);color:#eab308;">📍 ${utCount} Undertakings</span>
+                        <span style="background:rgba(14,165,233,0.1);color:${ink('#0EA5E9')};">⚡ ${fmt(total)} Poles</span>
+                        <span style="background:rgba(249,115,22,0.1);color:${ink('#f97316')};">🏙️ ${dtCount} DTs</span>
+                        <span style="background:rgba(16,185,129,0.1);color:${ink('#10b981')};">🔌 ${feederCount} Feeders</span>
+                        <span style="background:rgba(234,179,8,0.1);color:${ink('#eab308')};">📍 ${utCount} Undertakings</span>
                     </div>
                 </div>
                 <div class="ds-block">
@@ -4202,7 +4223,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="ds-facts">
                 <div style="border-left-color:${linkColor};">
                     <span>Building Linkage</span>
-                    <b style="color:${linkColor};">${link.pct.toFixed(1)}% linked</b>
+                    <b style="color:${ink(linkColor)};">${link.pct.toFixed(1)}% linked</b>
                     <em>${fmt(link.unlinked)} to tag</em>
                 </div>
                 <div style="border-left-color:hsl(var(--primary));">
@@ -5343,7 +5364,7 @@ document.addEventListener('DOMContentLoaded', () => {
             medium: `Span uncertainty ${SPAN_CONF_HIGH * 100}–${SPAN_CONF_MEDIUM * 100}% of the span`,
             low: `Span uncertainty > ${SPAN_CONF_MEDIUM * 100}% of the span, or the two fixes look captured from the same spot` })[level];
         const esc = s => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-        return `<span title="${esc(t)}" style="display:inline-block;font-size:0.78em;line-height:1.3;padding:0 5px;border-radius:8px;white-space:nowrap;color:${c};background:${c}1a;border:1px solid ${c}55;">${label}</span>`;
+        return `<span title="${esc(t)}" style="display:inline-block;font-size:0.78em;line-height:1.3;padding:0 5px;border-radius:8px;white-space:nowrap;color:${ink(c)};background:${c}1a;border:1px solid ${c}55;">${label}</span>`;
     }
 
     // The five span cells of a DT table row ("—" when the DT has no measurable span).
@@ -5657,7 +5678,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td class="col-undertaking">${row.undertaking}</td>
                 <td class="col-vendor"><span class="vendor-tag ${vendorClass}">${row.vendor}</span></td>
                 <td class="col-users" style="max-width: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${userNames}">${userNames}</td>
-                <td class="col-boqTotal" style="text-align: center; font-weight: bold; color: #0EA5E9;">${row.boqTotal}</td>
+                <td class="col-boqTotal" style="text-align: center; font-weight: bold; color: ${ink('#0EA5E9')};">${row.boqTotal}</td>
                 <td class="col-newPoles" style="text-align: center; color: #a855f7; font-weight: 600;">${row.newPoles || 0}</td>
                 <td class="col-actualTotal" style="text-align: center;">${row.actualTotal}</td>
                 <td class="col-remaining" style="text-align: center; color: hsl(var(--muted-foreground));">${Math.max(0, row.boqTotal - row.actualTotal)}</td>
@@ -5669,10 +5690,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div style="flex-grow: 1; height: 4px; background: #333; border-radius: 2px; overflow: hidden;">
                             <div style="width: ${Math.min(100, progress)}%; height: 100%; background: ${statusColor};"></div>
                         </div>
-                        <span style="font-size: 0.8em; color: ${statusColor};">${progress.toFixed(0)}%</span>
+                        <span style="font-size: 0.8em; color:${ink(statusColor)};">${progress.toFixed(0)}%</span>
                     </div>
                 </td>
-                <td class="col-status"><span style="font-size: 0.8em; padding: 1px 6px; border-radius: 8px; background: ${statusColor}20; color: ${statusColor}; border: 1px solid ${statusColor}40; white-space: nowrap;">${status}</span></td>
+                <td class="col-status"><span style="font-size: 0.8em; padding: 1px 6px; border-radius: 8px; background: ${statusColor}20; color:${ink(statusColor)}; border: 1px solid ${statusColor}40; white-space: nowrap;">${status}</span></td>
             `;
             tbody.appendChild(tr);
             if (isOpen) tbody.appendChild(buildPoleRegisterRow(row));
@@ -7197,7 +7218,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const color = vendorColors[name] || '#a0a0a0';
             return `<div style="margin-bottom:6px;">
                 <div style="display:flex;justify-content:space-between;font-size:0.8rem;">
-                    <span style="color:${color};font-weight:600;">${name}</span>
+                    <span style="color:${ink(color)};font-weight:600;">${name}</span>
                     <span style="color:var(--text-secondary);">${count.toLocaleString()} (${pct}%)</span>
                 </div>
                 ${miniBar(pct, color)}
@@ -7209,7 +7230,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const pct = ((count / total) * 100).toFixed(0);
             const color = type.includes('CONCRETE') ? '#10b981' : type.includes('WOOD') ? '#ef4444' : '#6b7280';
             return `<div style="display:flex;justify-content:space-between;font-size:0.8rem;margin-bottom:3px;">
-                <span style="color:${color};">${type}</span>
+                <span style="color:${ink(color)};">${type}</span>
                 <span style="color:var(--text-secondary);">${pct}%</span>
             </div>`;
         }).join('');
@@ -7219,7 +7240,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="insight-item ki-velocity" style="flex-direction:column;align-items:stretch;">
                 <div style="display:flex;justify-content:space-between;align-items:center;">
                     <span class="insight-label">Project Velocity</span>
-                    <span style="font-size:0.8rem;color:${trendColor};font-weight:600;">${trendIcon} ${trendPct > 0 ? '+' : ''}${trendPct}% vs prior</span>
+                    <span style="font-size:0.8rem;color:${ink(trendColor)};font-weight:600;">${trendIcon} ${trendPct > 0 ? '+' : ''}${trendPct}% vs prior</span>
                 </div>
                 <div style="display:flex;align-items:baseline;gap:8px;margin-top:4px;">
                     <span style="font-size:1.6rem;font-weight:800;color:hsl(var(--foreground));">${runRate}</span>
@@ -7237,7 +7258,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="insight-item ki-boq" style="flex-direction:column;align-items:stretch;">
                 <div style="display:flex;justify-content:space-between;align-items:center;">
                     <span class="insight-label">BOQ Completion</span>
-                    <span style="font-size:1.1rem;font-weight:700;color:${parseFloat(completionPct) >= 50 ? '#10b981' : '#eab308'};">${completionPct}%</span>
+                    <span style="font-size:1.1rem;font-weight:700;color:${ink(parseFloat(completionPct) >= 50 ? '#10b981' : '#eab308')};">${completionPct}%</span>
                 </div>
                 ${miniBar(completionPct, parseFloat(completionPct) >= 50 ? '#10b981' : '#eab308')}
                 <div style="font-size:0.78rem;color:var(--text-secondary);margin-top:4px;">${total.toLocaleString()} of ${boqTotal.toLocaleString()} target poles</div>
@@ -7263,19 +7284,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     const worst = sorted[sorted.length - 1];
                     const color = vColors[v];
                     return `<div class="ki-officer" style="padding:8px;background:hsl(var(--foreground) / 0.03);border-radius:6px;border-left:3px solid ${color};">
-                        <div style="font-size:0.75rem;font-weight:700;color:${color};margin-bottom:5px;">${vShort[v]} (${sorted.length} officers)</div>
+                        <div style="font-size:0.75rem;font-weight:700;color:${ink(color)};margin-bottom:5px;">${vShort[v]} (${sorted.length} officers)</div>
                         <div style="display:flex;justify-content:space-between;align-items:center;">
                             <div>
-                                <div style="font-size:0.65rem;color:#10b981;font-weight:600;">BEST</div>
+                                <div style="font-size:0.65rem;color:${ink('#10b981')};font-weight:600;">BEST</div>
                                 <div style="font-weight:700;font-size:0.85rem;color:hsl(var(--foreground));">${getDisplayName(best[0])}</div>
                                 <div style="font-size:0.75rem;color:var(--text-secondary);">${best[1]} poles</div>
                             </div>
                             <div style="text-align:center;padding:0 6px;">
-                                <div style="font-size:0.95rem;font-weight:800;color:${color};">${worst[1] > 0 ? (best[1] / worst[1]).toFixed(1) : '∞'}x</div>
+                                <div style="font-size:0.95rem;font-weight:800;color:${ink(color)};">${worst[1] > 0 ? (best[1] / worst[1]).toFixed(1) : '∞'}x</div>
                                 <div style="font-size:0.6rem;color:var(--text-secondary);">gap</div>
                             </div>
                             <div style="text-align:right;">
-                                <div style="font-size:0.65rem;color:#ef4444;font-weight:600;">LOWEST</div>
+                                <div style="font-size:0.65rem;color:${ink('#ef4444')};font-weight:600;">LOWEST</div>
                                 <div style="font-weight:700;font-size:0.85rem;color:hsl(var(--foreground));">${getDisplayName(worst[0])}</div>
                                 <div style="font-size:0.75rem;color:var(--text-secondary);">${worst[1]} poles</div>
                             </div>
@@ -7292,7 +7313,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="insight-item ki-linkage" style="flex-direction:column;align-items:stretch;">
                 <div style="display:flex;justify-content:space-between;align-items:center;">
                     <span class="insight-label">Building Linkage</span>
-                    <span style="font-size:0.85rem;font-weight:600;color:${linkColor};">${linkPct}% linked</span>
+                    <span style="font-size:0.85rem;font-weight:600;color:${ink(linkColor)};">${linkPct}% linked</span>
                 </div>
                 <div style="display:flex;height:6px;border-radius:3px;overflow:hidden;margin-top:6px;background:hsl(var(--muted) / 0.45);">
                     <div style="width:${linkPct}%;background:${linkColor};"></div>

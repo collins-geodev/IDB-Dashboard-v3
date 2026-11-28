@@ -106,7 +106,7 @@
     --foreground: 222 47% 12%;
     --card: 0 0% 100%;
     --card-foreground: 222 47% 12%;
-    --primary: 199 89% 45%;
+    --primary: 201 96% 34%;        /* deep sky (5.4:1 on white) */
     --primary-foreground: 0 0% 100%;
     --secondary: 210 40% 92%;
     --muted: 210 30% 92%;
@@ -115,7 +115,7 @@
     --destructive: 0 78% 52%;
     --border: 214 30% 84%;
     --input: 214 30% 84%;
-    --ring: 199 89% 45%;
+    --ring: 201 96% 34%;
 }
 
 :root[data-theme="light"] .kpi-card-modern {
@@ -4438,3 +4438,55 @@ main.main-content .exec-summary { max-width: none; padding: 14px 18px; }
    truncate, not widen its column. */
 #view-home .summary-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 #view-home .summary-card { min-width: 0; }
+
+/* =====================================================================
+ * LIGHT THEME — readable status colours + polish (Nov 2026)
+ * The bright status hues (#10b981, #f59e0b, #ef4444, #3b82f6 …) are tuned for
+ * the black theme; as text on white they fall to 2–3.8:1 contrast. Here the
+ * same hues are deepened to ≥4.5:1 for TEXT only — bars, swatches and chart
+ * marks keep the original colours. (Text colours set from script.js go through
+ * its ink() helper instead.)
+ * ===================================================================== */
+:root[data-theme="light"] .status-good,
+:root[data-theme="light"] .completion-rate-value,
+:root[data-theme="light"] .completion-rate-value.green,
+:root[data-theme="light"] .footer-status.color-green { color: #047857; }
+:root[data-theme="light"] .footer-status.color-orange,
+:root[data-theme="light"] .pr-count-warn,
+:root[data-theme="light"] .pr-captures { color: #b45309; }
+:root[data-theme="light"] .footer-status.color-blue,
+:root[data-theme="light"] .completion-rate-value.blue { color: #1d4ed8; }
+:root[data-theme="light"] .completion-rate-value.purple { color: #6d28d9; }
+:root[data-theme="light"] .completion-rate-value.red,
+:root[data-theme="light"] .status-attention,
+:root[data-theme="light"] .duplicate-warning-banner,
+:root[data-theme="light"] .duplicate-warning-close { color: #b91c1c; }
+:root[data-theme="light"] .vendor-jesom { color: #c2410c; }
+
+/* Reset All: white on #10b981 is 2.5:1 — use the deeper green. */
+:root[data-theme="light"] #resetFiltersBtn {
+    background-color: #047857 !important;
+    border-color: #047857 !important;
+}
+
+/* Marquee: a light band with deep-gold text instead of a black strip. */
+:root[data-theme="light"] .marquee-banner {
+    background: linear-gradient(180deg, #fffaf0 0%, #fdf3dc 100%);
+    border-top-color: #d97706;
+    box-shadow: inset 0 -1px 0 hsl(var(--border));
+}
+:root[data-theme="light"] .marquee-text {
+    color: #92400e;
+    text-shadow: none;
+    animation-name: gold-glow-light;
+}
+@keyframes gold-glow-light {
+    0%   { color: #92400e; text-shadow: 0 0 0 rgba(217, 119, 6, 0); }
+    100% { color: #b45309; text-shadow: 0 0 10px rgba(217, 119, 6, 0.35); }
+}
+
+/* Light theme polish: soft card elevation instead of flat white-on-white. */
+:root[data-theme="light"] .chart-container,
+:root[data-theme="light"] .insights-card {
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 14px -6px rgba(15, 23, 42, 0.10);
+}
