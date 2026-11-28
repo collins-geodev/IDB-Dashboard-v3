@@ -4379,14 +4379,47 @@ main.main-content .exec-summary { max-width: none; padding: 14px 18px; }
 #keyInsightsContent .ki-window      { grid-column: 4; grid-row: 3; }
 #keyInsightsContent .ki-officer-rows { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.6rem; }
 #keyInsightsContent .ki-officer { margin: 0 !important; min-width: 0; }
+
+/* Hairline dividers (PipWise style): a vertical rule between the four columns
+   and one horizontal rule between the KPI row and the detail rows. The column
+   gap is moved into each cell's padding so every rule sits centred in it. */
+#keyInsightsContent { column-gap: 0; row-gap: 0; }
+#keyInsightsContent > .insight-item { padding: 0.9rem 1.4rem !important; min-width: 0; }
+#keyInsightsContent .ki-velocity,
+#keyInsightsContent .ki-officers { padding-left: 0 !important; }
+#keyInsightsContent .ki-coverage,
+#keyInsightsContent .ki-material,
+#keyInsightsContent .ki-window { padding-right: 0 !important; }
+#keyInsightsContent .ki-velocity,
+#keyInsightsContent .ki-boq,
+#keyInsightsContent .ki-linkage,
+#keyInsightsContent .ki-coverage { padding-top: 0.2rem !important; }
+#keyInsightsContent .ki-boq,
+#keyInsightsContent .ki-linkage,
+#keyInsightsContent .ki-coverage,
+#keyInsightsContent .ki-leaderboard,
+#keyInsightsContent .ki-material,
+#keyInsightsContent .ki-window { border-left: 1px solid hsl(var(--border)) !important; }
+#keyInsightsContent .ki-officers,
+#keyInsightsContent .ki-leaderboard,
+#keyInsightsContent .ki-material { border-top: 1px solid hsl(var(--border)) !important; }
+#keyInsightsContent > .insight-item { align-self: stretch; }
+
 @media (max-width: 1200px) {
     #keyInsightsContent { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     #keyInsightsContent > .insight-item { grid-column: auto !important; grid-row: auto !important; }
     #keyInsightsContent .ki-officers { grid-column: 1 / -1 !important; }
+    /* Two-column flow: swap the column rules for a rule above every cell. */
+    #keyInsightsContent > .insight-item {
+        border-left: 0 !important;
+        border-top: 1px solid hsl(var(--border)) !important;
+        padding: 0.9rem 0.7rem !important;
+    }
 }
 @media (max-width: 768px) {
     #keyInsightsContent { grid-template-columns: 1fr; }
     #keyInsightsContent .ki-officer-rows { grid-template-columns: 1fr; }
+    #keyInsightsContent > .insight-item { padding: 0.9rem 0 !important; }
 }
 
 /* ── Home: compact AI Data Assistant ───────────────────────────────────── */
